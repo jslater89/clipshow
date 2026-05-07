@@ -1,6 +1,7 @@
 import "dart:async";
 import "dart:io";
 
+import "package:logging/logging.dart";
 import "package:path/path.dart" as p;
 import "package:watcher/watcher.dart";
 
@@ -22,6 +23,7 @@ class IngestionService {
   };
 
   final WorkspaceWatcher _workspaceWatcher;
+  final Logger _logger = Logger("IngestionService");
   final StreamController<List<MasterMediaFile>> _mediaController =
       StreamController<List<MasterMediaFile>>.broadcast();
 
@@ -35,17 +37,21 @@ class IngestionService {
     required String workspacePath,
     required MediaRepository repository,
   }) async {
+    _logger.info("Starting ingestion for workspace: $workspacePath");
     _repository = repository;
     _workspacePath = workspacePath;
-    await _scanAllExistingFiles();
+    final int scannedCount = await _scanAllExistingFiles();
     await _emitSnapshot();
+    _logger.info("Initial scan completed. Imported files: $scannedCount");
 
     await _watchSubscription?.cancel();
     _workspaceWatcher.start(workspacePath);
     _watchSubscription = _workspaceWatcher.events.listen(_handleWatchEvent);
+    _logger.info("Workspace watcher started.");
   }
 
   Future<void> stop() async {
+    _logger.info("Stopping ingestion service.");
     await _watchSubscription?.cancel();
     _watchSubscription = null;
     await _workspaceWatcher.stop();
@@ -57,35 +63,45 @@ class IngestionService {
     await _mediaController.close();
   }
 
-  Future<void> _scanAllExistingFiles() async {
+  Future<int> _scanAllExistingFiles() async {
     final MediaRepository repository = _requireRepository();
     final String workspacePath = _requireWorkspacePath();
+    int importedCount = 0;
 
     final Directory root = Directory(workspacePath);
     if (!await root.exists()) {
-      return;
+      _logger.warning("Workspace root does not exist: $workspacePath");
+      return importedCount;
     }
 
     await for (final FileSystemEntity entity
         in root.list(recursive: true, followLinks: false)) {
-      if (entity is! File || !isSupportedVideoPath(entity.path)) {
+      if (entity is! File) {
+        continue;
+      }
+      if (!isSupportedVideoPath(entity.path)) {
         continue;
       }
       await _upsertFromPath(
         repository: repository,
         filePath: entity.path,
       );
+      importedCount++;
     }
+    return importedCount;
   }
 
   Future<void> _handleWatchEvent(WatchEvent event) async {
     final MediaRepository repository = _requireRepository();
+    _logger.fine("Watch event ${event.type} for path: ${event.path}");
     if (!isSupportedVideoPath(event.path)) {
+      _logger.finer("Ignored non-video path: ${event.path}");
       return;
     }
 
     if (event.type == ChangeType.REMOVE) {
       await repository.deleteByPath(_normalizedPath(event.path));
+      _logger.info("Removed media record: ${_normalizedPath(event.path)}");
       await _emitSnapshot();
       return;
     }
@@ -95,6 +111,7 @@ class IngestionService {
         repository: repository,
         filePath: event.path,
       );
+      _logger.info("Upserted media record: ${_normalizedPath(event.path)}");
       await _emitSnapshot();
     }
   }
@@ -105,6 +122,7 @@ class IngestionService {
   }) async {
     final File file = File(filePath);
     if (!await file.exists()) {
+      _logger.warning("Video path no longer exists: $filePath");
       return;
     }
     final FileStat stat = await file.stat();
@@ -119,7 +137,9 @@ class IngestionService {
 
   Future<void> _emitSnapshot() async {
     final MediaRepository repository = _requireRepository();
-    _mediaController.add(await repository.listAll());
+    final List<MasterMediaFile> current = await repository.listAll();
+    _logger.fine("Emitting media snapshot with ${current.length} item(s).");
+    _mediaController.add(current);
   }
 
   MediaRepository _requireRepository() {

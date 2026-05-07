@@ -2,6 +2,7 @@ import "dart:async";
 
 import "package:file_picker/file_picker.dart";
 import "package:flutter/foundation.dart";
+import "package:logging/logging.dart";
 
 import "../../data/app_database.dart";
 import "../../ingestion/ingestion_service.dart";
@@ -33,6 +34,7 @@ class DashboardViewModel extends ChangeNotifier {
 
   final WorkspaceService _workspaceService;
   final IngestionService _ingestionService;
+  final Logger _logger = Logger("DashboardViewModel");
   StreamSubscription<List<MasterMediaFile>>? _mediaSubscription;
 
   bool _isLoading = false;
@@ -44,12 +46,16 @@ class DashboardViewModel extends ChangeNotifier {
   List<MasterMediaFile> get mediaFiles => _mediaFiles;
 
   Future<void> initialize() async {
+    _logger.info("Initializing dashboard state.");
     _isLoading = true;
     notifyListeners();
 
     final WorkspaceSession? session = await _workspaceService.restoreWorkspace();
     if (session != null) {
+      _logger.info("Restored workspace: ${session.workspace.rootPath}");
       await _startSession(session);
+    } else {
+      _logger.info("No workspace found to restore.");
     }
     _isLoading = false;
     notifyListeners();
@@ -60,6 +66,7 @@ class DashboardViewModel extends ChangeNotifier {
       dialogTitle: "Select Workspace Directory",
     );
     if (selectedDirectory == null || selectedDirectory.isEmpty) {
+      _logger.info("Workspace selection cancelled.");
       return;
     }
 
@@ -67,6 +74,7 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
     final WorkspaceSession session =
         await _workspaceService.setWorkspace(selectedDirectory);
+    _logger.info("Workspace set to: $selectedDirectory");
     await _startSession(session);
     _isLoading = false;
     notifyListeners();
@@ -75,14 +83,15 @@ class DashboardViewModel extends ChangeNotifier {
   Future<void> _startSession(WorkspaceSession session) async {
     _workspacePath = session.workspace.rootPath;
     await _mediaSubscription?.cancel();
+    _mediaSubscription = _ingestionService.mediaFiles.listen((List<MasterMediaFile> files) {
+      _mediaFiles = files;
+      _logger.info("Dashboard received ${files.length} media item(s).");
+      notifyListeners();
+    });
     await _ingestionService.start(
       workspacePath: session.workspace.rootPath,
       repository: session.mediaRepository,
     );
-    _mediaSubscription = _ingestionService.mediaFiles.listen((List<MasterMediaFile> files) {
-      _mediaFiles = files;
-      notifyListeners();
-    });
   }
 
   @visibleForTesting
