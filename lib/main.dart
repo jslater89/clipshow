@@ -1,10 +1,18 @@
 import "package:flutter/material.dart";
+import "package:fvp/fvp.dart" as fvp;
 import "package:logging/logging.dart";
+import "package:window_manager/window_manager.dart";
 
 import "src/app/app.dart";
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
+  fvp.registerWith(
+    options: <String, Object>{
+      "platforms": <String>["windows", "linux"],
+    },
+  );
   _configureLogging();
   runApp(const ObsClipshowApp());
 }

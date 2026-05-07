@@ -7,12 +7,15 @@ import "package:watcher/watcher.dart";
 
 import "../data/media_repository.dart";
 import "../media/master_media_file.dart";
+import "thumbnail_service.dart";
 import "workspace_watcher.dart";
 
 class IngestionService {
   IngestionService({
     required WorkspaceWatcher workspaceWatcher,
-  }) : _workspaceWatcher = workspaceWatcher;
+    ThumbnailService? thumbnailService,
+  })  : _workspaceWatcher = workspaceWatcher,
+        _thumbnailService = thumbnailService ?? ThumbnailService();
 
   static const Set<String> supportedVideoExtensions = <String>{
     ".mp4",
@@ -23,6 +26,7 @@ class IngestionService {
   };
 
   final WorkspaceWatcher _workspaceWatcher;
+  final ThumbnailService _thumbnailService;
   final Logger _logger = Logger("IngestionService");
   final StreamController<List<MasterMediaFile>> _mediaController =
       StreamController<List<MasterMediaFile>>.broadcast();
@@ -100,6 +104,9 @@ class IngestionService {
     }
 
     if (event.type == ChangeType.REMOVE) {
+      await _thumbnailService.deleteThumbnailForVideoPath(
+        _normalizedPath(event.path),
+      );
       await repository.deleteByPath(_normalizedPath(event.path));
       _logger.info("Removed media record: ${_normalizedPath(event.path)}");
       await _emitSnapshot();
@@ -133,6 +140,7 @@ class IngestionService {
       modifiedAtMs: stat.modified.millisecondsSinceEpoch,
       createdAtMs: stat.changed.millisecondsSinceEpoch,
     );
+    await _thumbnailService.generateThumbnail(_normalizedPath(file.path));
   }
 
   Future<void> _emitSnapshot() async {

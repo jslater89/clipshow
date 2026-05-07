@@ -29,7 +29,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DashboardScreen(viewModel: viewModel),
+        home: DashboardScreen(
+          viewModel: viewModel,
+          onPlayMedia: (_) {},
+        ),
       ),
     );
 
@@ -55,7 +58,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DashboardScreen(viewModel: viewModel),
+        home: DashboardScreen(
+          viewModel: viewModel,
+          onPlayMedia: (_) {},
+        ),
       ),
     );
 
