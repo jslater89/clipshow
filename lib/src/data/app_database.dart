@@ -1,6 +1,6 @@
 import "package:sqflite_common_ffi/sqflite_ffi.dart";
 
-import "../media/workspace.dart";
+import 'package:obs_clipshow/src/media/workspace.dart';
 
 class AppDatabase {
   AppDatabase();

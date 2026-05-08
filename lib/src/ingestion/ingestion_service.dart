@@ -5,10 +5,10 @@ import "package:logging/logging.dart";
 import "package:path/path.dart" as p;
 import "package:watcher/watcher.dart";
 
-import "../data/media_repository.dart";
-import "../media/master_media_file.dart";
-import "thumbnail_service.dart";
-import "workspace_watcher.dart";
+import 'package:obs_clipshow/src/data/media_repository.dart';
+import 'package:obs_clipshow/src/media/master_media_file.dart';
+import 'package:obs_clipshow/src/ingestion/thumbnail_service.dart';
+import 'package:obs_clipshow/src/ingestion/workspace_watcher.dart';
 
 class IngestionService {
   IngestionService({

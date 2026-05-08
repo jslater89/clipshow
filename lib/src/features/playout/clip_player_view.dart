@@ -1,4 +1,5 @@
 import "dart:io";
+import "dart:async";
 
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
@@ -63,7 +64,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   void initState() {
     super.initState();
     widget.controller?._attach(this);
-    _initializeController();
+    unawaited(_reinitializeController(reason: "initState"));
   }
 
   @override
@@ -78,9 +79,14 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         oldWidget.endTimeMs != widget.endTimeMs ||
         oldWidget.autoPlay != widget.autoPlay ||
         oldWidget.showControls != widget.showControls) {
-      _disposeController();
-      _initializeController();
+      _reinitializeController(reason: "didUpdateWidget");
     }
+  }
+
+  Future<void> _reinitializeController({required String reason}) async {
+    _logger.info("Reinitializing controller due to $reason");
+    await _disposeController();
+    await _initializeController();
   }
 
   Future<void> _initializeController() async {
@@ -94,7 +100,15 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       );
       _controller = controller;
       await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
       await controller.seekTo(Duration(milliseconds: widget.startTimeMs));
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
       controller.addListener(_handlePlaybackProgress);
       if (widget.autoPlay) {
         await controller.play();
@@ -123,8 +137,10 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     final int? endMs = widget.endTimeMs;
     if (endMs != null) {
       final int currentMs = controller.value.position.inMilliseconds;
-      if (currentMs >= endMs && controller.value.isPlaying) {
-        controller.pause();
+      if (currentMs > endMs) {
+        if (controller.value.isPlaying) {
+          controller.pause();
+        }
         controller.seekTo(Duration(milliseconds: endMs));
       }
     }
@@ -175,15 +191,19 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   @override
   void dispose() {
     widget.controller?._detach(this);
-    _disposeController();
+    unawaited(_disposeController());
     super.dispose();
   }
 
-  void _disposeController() {
-    _controller?.removeListener(_handlePlaybackProgress);
-    _controller?.dispose();
+  Future<void> _disposeController() async {
+    final VideoPlayerController? controller = _controller;
+    controller?.removeListener(_handlePlaybackProgress);
+    if (controller != null) {
+      await controller.dispose();
+    }
     _controller = null;
   }
+
 
   @override
   Widget build(BuildContext context) {

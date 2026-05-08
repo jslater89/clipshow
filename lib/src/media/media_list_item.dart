@@ -1,5 +1,5 @@
-import "master_media_file.dart";
-import "media_clip.dart";
+import 'package:obs_clipshow/src/media/master_media_file.dart';
+import 'package:obs_clipshow/src/media/media_clip.dart';
 
 enum MediaListItemType { master, clip }
 

@@ -3,10 +3,10 @@ import "dart:io";
 import "package:logging/logging.dart";
 import "package:sqflite/sqflite.dart";
 
-import "../data/app_database.dart";
-import "../data/media_repository.dart";
-import "../media/workspace.dart";
-import "workspace_preferences.dart";
+import 'package:obs_clipshow/src/data/app_database.dart';
+import 'package:obs_clipshow/src/data/media_repository.dart';
+import 'package:obs_clipshow/src/media/workspace.dart';
+import 'package:obs_clipshow/src/workspace/workspace_preferences.dart';
 
 class WorkspaceSession {
   const WorkspaceSession({

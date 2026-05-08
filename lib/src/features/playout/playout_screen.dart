@@ -3,9 +3,11 @@ import "dart:async";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 
-import "clip_player_view.dart";
-import "playout_clip.dart";
-import "playout_hotkeys_layer.dart";
+import 'package:obs_clipshow/src/features/playout/clip_player_view.dart';
+import 'package:obs_clipshow/src/features/playout/playout_clip.dart';
+import 'package:obs_clipshow/src/features/playout/playout_hotkeys_layer.dart';
+import 'package:obs_clipshow/src/features/playout/telestrator_canvas.dart';
+import 'package:obs_clipshow/src/features/playout/telestrator_model.dart';
 
 class PlayoutScreen extends StatefulWidget {
   const PlayoutScreen({
@@ -24,6 +26,10 @@ class PlayoutScreen extends StatefulWidget {
 class _PlayoutScreenState extends State<PlayoutScreen> {
   final Logger _logger = Logger("PlayoutScreen");
   final ClipPlayerController _playerController = ClipPlayerController();
+  final TelestratorController _telestratorController = TelestratorController();
+  static const Color _colorOne = Color(0xFFFF3B30);
+  static const Color _colorTwo = Color(0xFFFFCC00);
+  static const Color _colorThree = Color(0xFF34C759);
   bool _isExiting = false;
   bool _showEscapeHint = true;
   bool _showHelpOverlay = false;
@@ -60,6 +66,7 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
   @override
   void dispose() {
     _hintTimer?.cancel();
+    _telestratorController.dispose();
     super.dispose();
   }
 
@@ -71,24 +78,172 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
         controller: _playerController,
         onExitRequested: _requestExit,
         onHelpToggleRequested: _toggleHelpOverlay,
-        child: ClipPlayerView(
-          controller: _playerController,
-          filePath: widget.clip.filePath,
-          startTimeMs: widget.clip.startTimeMs,
-          endTimeMs: widget.clip.endTimeMs,
-          autoPlay: true,
-          overlay: Stack(
-            children: <Widget>[
-              if (_showEscapeHint && !_showHelpOverlay)
-                const Positioned(
-                  right: 16,
-                  bottom: 16,
-                  child: Text(
-                    "Press Escape to return",
-                    style: TextStyle(color: Colors.white70),
-                  ),
+        onTelestratorToggleRequested: _telestratorController.toggleEnabled,
+        onTelestratorClearRequested: _telestratorController.clear,
+        onTelestratorUndoRequested: _telestratorController.undo,
+        onSetTelestratorColor1Requested: () => _telestratorController.setColor(_colorOne),
+        onSetTelestratorColor2Requested: () => _telestratorController.setColor(_colorTwo),
+        onSetTelestratorColor3Requested: () => _telestratorController.setColor(_colorThree),
+        onDecreaseBrushRequested: _telestratorController.decreaseBrush,
+        onIncreaseBrushRequested: _telestratorController.increaseBrush,
+        child: Stack(
+          children: <Widget>[
+            ClipPlayerView(
+              controller: _playerController,
+              filePath: widget.clip.filePath,
+              startTimeMs: widget.clip.startTimeMs,
+              endTimeMs: widget.clip.endTimeMs,
+              autoPlay: true,
+            ),
+            Positioned.fill(
+              child: TelestratorCanvas(controller: _telestratorController),
+            ),
+            Positioned(
+              left: 16,
+              bottom: 16,
+              child: _TelestratorStatusHud(controller: _telestratorController),
+            ),
+            if (_showEscapeHint && !_showHelpOverlay)
+              const Positioned(
+                right: 16,
+                bottom: 16,
+                child: Text(
+                  "Press Escape to return",
+                  style: TextStyle(color: Colors.white70),
                 ),
-              if (_showHelpOverlay) const _PlayoutHelpOverlay(),
+              ),
+            if (_showHelpOverlay) const _PlayoutHelpOverlay(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TelestratorStatusHud extends StatefulWidget {
+  const _TelestratorStatusHud({required this.controller});
+
+  final TelestratorController controller;
+
+  @override
+  State<_TelestratorStatusHud> createState() => _TelestratorStatusHudState();
+}
+
+class _TelestratorStatusHudState extends State<_TelestratorStatusHud> {
+  static const Duration _autoHideDelay = Duration(seconds: 1);
+  static const Duration _fadeDuration = Duration(milliseconds: 220);
+
+  Timer? _hideTimer;
+  bool _isVisible = true;
+  bool _lastEnabled = true;
+  double _lastBrushSize = 0;
+  Color _lastColor = const Color(0x00000000);
+
+  @override
+  void initState() {
+    super.initState();
+    _snapshotCurrentValues();
+    widget.controller.addListener(_onControllerChanged);
+    _restartHideTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TelestratorStatusHud oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerChanged);
+      _snapshotCurrentValues();
+      widget.controller.addListener(_onControllerChanged);
+      _showAndScheduleHide();
+    }
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _snapshotCurrentValues() {
+    _lastEnabled = widget.controller.isEnabled;
+    _lastBrushSize = widget.controller.brushSize;
+    _lastColor = widget.controller.activeColor;
+  }
+
+  void _onControllerChanged() {
+    final bool enabled = widget.controller.isEnabled;
+    final double brushSize = widget.controller.brushSize;
+    final Color color = widget.controller.activeColor;
+    final bool statusChanged =
+        enabled != _lastEnabled ||
+        brushSize != _lastBrushSize ||
+        color != _lastColor;
+    _snapshotCurrentValues();
+    if (!statusChanged) {
+      return;
+    }
+    setState(() {
+      _isVisible = true;
+    });
+    _restartHideTimer();
+  }
+
+  void _showAndScheduleHide() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isVisible = true;
+    });
+    _restartHideTimer();
+  }
+
+  void _restartHideTimer() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(_autoHideDelay, () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isVisible = false;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      opacity: _isVisible ? 1 : 0,
+      duration: _fadeDuration,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                "Telestrator ${widget.controller.isEnabled ? "On" : "Off"}",
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: widget.controller.activeColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                "Brush ${widget.controller.brushSize.toStringAsFixed(0)}",
+                style: const TextStyle(color: Colors.white70),
+              ),
             ],
           ),
         ),
@@ -122,9 +277,10 @@ class _PlayoutHelpOverlay extends StatelessWidget {
                   _hotkeySection("Playback", <String, String>{"Space": "Play/Pause"}),
                   const SizedBox(height: 10),
                   _hotkeySection("Seek", <String, String>{
-                    "Left / Right": "Seek 5s",
-                    "Shift + Left / Right": "Seek 1s",
-                    "Ctrl + Left / Right": "Seek 15s",
+                    "Left / Right": "Seek 1s",
+                    "Ctrl + Left / Right": "Seek 5s",
+                    "Shift + Left / Right": "Seek 15s",
+                    "Alt + Left / Right": "Seek 0.1s",
                   }),
                   const SizedBox(height: 10),
                   _hotkeySection("Telestrator", <String, String>{

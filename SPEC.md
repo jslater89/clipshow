@@ -78,20 +78,24 @@ The local database will manage the metadata independently of the physical file s
 * **Phase 1 Core Delivered:** Workspace selection and restore, SQLite database creation at workspace root, recursive ingestion scan, and live watcher updates for add/remove/modify.
 * **Ingestion Logging:** Added structured logging around workspace restore, ingestion startup, file event handling, and dashboard media updates.
 * **Thumbnail Pipeline:** Video thumbnails are generated using `ffprobe` + `ffmpeg`, stored as `<video>.thumb.jpg`, removed on file delete, and displayed in the left file list.
-* **Dashboard Restructure (Phase 3 Foundation):** Dashboard now uses a three-panel layout: file list (left), preview panel (top right), and tag panel (bottom right), with file selection and play/pllayout actions.
-* **Preview Player:** Shared player component added for preview and playout with keyboard controls and optional visible controls in preview.
-* **Phase 2 Core Implemented (Untested):** OBS websocket service and playout scene-switch flow are written (start -> `"Video Scene"`, `Escape` exit -> `"Face Scene"`), but not yet validated with full end-to-end live OBS testing.
-* **Playout Window Behavior:** Playout defaults to windowed 16:9 with hidden title bar (fullscreen mode retained as a configurable code path), and window bounds restore on exit.
+* **Dashboard Restructure (Phase 3 Foundation):** Dashboard uses a three-panel layout: file list (left), preview panel (top right), and tag panel (bottom right), with file selection and playout actions.
+* **Tagging and Organization Delivered:** Clips persist to SQLite with title, start/end range, and tags; saved clips list from the current workspace is rendered and updated; saved tags can be re-applied through the clipping flow.
+* **Filters, Search, and Autocomplete:** Tag filters include `All` and `Untagged`; search and tag autocomplete support faster clip discovery and consistent tagging.
+* **Preview/Playout Player Refactor:** Shared clip player and hotkey handling were refactored for reuse across dashboard preview and playout with cleaner separation of concerns.
+* **Phase 2 Core Implemented:** OBS websocket service and playout scene-switch flow are integrated (start -> `"Video Scene"`, `Escape` exit -> `"Face Scene"`), with playout help/hotkeys surfaced in the UI.
+* **Playout Window Behavior:** Playout defaults to windowed 16:9 with hidden title bar (fullscreen retained as a configurable code path), and window bounds restore on exit.
+* **Telestrator Overlay Delivered:** Playout includes a draw layer with clear/visibility hotkeys, HUD visibility behavior, and lifecycle handling so overlay state resets correctly on exit.
+* **Seek and Clamp Behavior Updated:** Seek mappings now include Alt micro-seek in addition to short/standard/long jumps, and clip-range seeking clamps correctly at segment bounds.
 
 ### Implemented Interaction Details
-* **Keyboard Controls:** `Space` play/pause, `Left/Right` seek, `Shift+Left/Right` short seek, and `Ctrl+Left/Right` long seek.
+* **Keyboard Controls:** `Space` play/pause, `Left/Right` standard seek, `Shift+Left/Right` short seek, `Ctrl+Left/Right` long seek, and `Alt+Left/Right` micro-seek.
 * **Mouse Controls:** Clicking video toggles play/pause.
-* **Playout UX:** Temporary `Escape` hint appears at playout start and auto-hides after 1 second.
+* **Playout UX:** Temporary help/hotkey hint appears at playout start and auto-hides; HUD behavior aligns with telestrator interaction state.
 * **Dashboard UX:** Scroll position is preserved and restored after returning from playout.
 
 ### Partially Complete / Next
-* **Phase 3:** Current tagging and filtering UI is local/session-level and serves as a scaffold. Persisted clip/tag data model and full tagging workflow remain.
-* **Phase 4:** Telestration overlay and draw/clear hotkeys are not yet implemented.
+* **Deeper Validation:** Full end-to-end live OBS verification and stress testing are still required.
+* **Focused Test Coverage:** Additional automated tests are still needed for tag/save/search flows, seek/clamp boundaries, and telestrator hotkey/HUD behavior.
 * **Phase 2 Validation Checklist (Live OBS):**
   * Confirm OBS websocket authentication/connectivity using configured host/port/password.
   * Enter playout from dashboard and verify scene switches to configured Video Scene.

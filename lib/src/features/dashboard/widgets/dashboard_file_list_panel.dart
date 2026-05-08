@@ -1,0 +1,275 @@
+import "dart:io";
+
+import "package:flutter/material.dart";
+import "package:path/path.dart" as p;
+import "package:provider/provider.dart";
+
+import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
+import "package:obs_clipshow/src/features/playout/playout_clip.dart";
+import "package:obs_clipshow/src/media/master_media_file.dart";
+import "package:obs_clipshow/src/media/media_list_item.dart";
+
+class DashboardFileListPanel extends StatelessWidget {
+  const DashboardFileListPanel({
+    super.key,
+    required this.workspacePath,
+    required this.mediaItems,
+    required this.onPlayClip,
+    this.scrollController,
+  });
+
+  final String workspacePath;
+  final List<MediaListItem> mediaItems;
+  final void Function(PlayoutClip clip) onPlayClip;
+  final ScrollController? scrollController;
+
+  @override
+  Widget build(BuildContext context) {
+    final DashboardViewModel viewModel = context.watch<DashboardViewModel>();
+    bool handledSearchAutocompleteSelection = false;
+    TextEditingController? activeSearchInputController;
+    return Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    const Text("Files"),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Autocomplete<String>(
+                        optionsBuilder: (TextEditingValue textEditingValue) {
+                          return viewModel.tagSuggestionsFor(
+                            textEditingValue.text,
+                          );
+                        },
+                        onSelected: (String value) {
+                          handledSearchAutocompleteSelection = true;
+                          activeSearchInputController?.text = value;
+                          viewModel.setTagSearchQuery(value);
+                        },
+                        fieldViewBuilder:
+                            (
+                              BuildContext context,
+                              TextEditingController textEditingController,
+                              FocusNode focusNode,
+                              VoidCallback onFieldSubmitted,
+                            ) {
+                              activeSearchInputController =
+                                  textEditingController;
+                              if (textEditingController.text !=
+                                  viewModel.tagSearchQuery) {
+                                textEditingController.text =
+                                    viewModel.tagSearchQuery;
+                                textEditingController.selection =
+                                    TextSelection.collapsed(
+                                      offset: textEditingController.text.length,
+                                    );
+                              }
+                              return TextField(
+                                controller: textEditingController,
+                                focusNode: focusNode,
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  hintText: "Search tag to filter",
+                                  border: OutlineInputBorder(),
+                                ),
+                                onChanged: viewModel.setTagSearchQuery,
+                                onSubmitted: (_) {
+                                  onFieldSubmitted();
+                                  if (handledSearchAutocompleteSelection) {
+                                    handledSearchAutocompleteSelection = false;
+                                    return;
+                                  }
+                                  viewModel.setTagSearchQuery(
+                                    textEditingController.text,
+                                  );
+                                },
+                              );
+                            },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      label: const Text("Untagged"),
+                      selected: viewModel.showUntaggedOnly,
+                      onSelected: viewModel.setShowUntaggedOnly,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: viewModel.activeTagFilters.isEmpty
+                      ? <Widget>[const Text("No active tag filters")]
+                      : viewModel.activeTagFilters
+                            .map(
+                              (String tag) => InputChip(
+                                label: Text("Filter: $tag"),
+                                onDeleted: () => viewModel.toggleTagFilter(tag),
+                              ),
+                            )
+                            .toList(),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView.separated(
+              controller: scrollController,
+              itemCount: mediaItems.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (BuildContext context, int index) {
+                final MediaListItem item = mediaItems[index];
+                final String relativePath = p.relative(
+                  item.filePath,
+                  from: workspacePath,
+                );
+                final bool isSelected =
+                    viewModel.selectedItemKey == item.stableKey;
+                final MediaIssue mediaIssue = item.mediaIssue;
+                final List<String> tags = sortTags(
+                  viewModel.tagsForItem(item).toList(),
+                );
+
+                return ListTile(
+                  selected: isSelected,
+                  selectedTileColor: Theme.of(
+                    context,
+                  ).colorScheme.surfaceContainerHighest,
+                  leading: _ThumbnailPreview(
+                    videoPath: item.filePath,
+                    issue: mediaIssue,
+                  ),
+                  title: Text(
+                    item.type == MediaListItemType.master
+                        ? item.fileName
+                        : "${item.fileName} (${clipRangeLabel(item.clip!)})",
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        relativePath,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: tags.isEmpty
+                            ? <Widget>[const Text("No tags")]
+                            : tags
+                                  .map(
+                                    (String tag) => ActionChip(
+                                      label: Text(tag),
+                                      backgroundColor: tagChipColor(
+                                        context,
+                                        tag,
+                                      ),
+                                      onPressed: () =>
+                                          viewModel.toggleTagFilter(tag),
+                                    ),
+                                  )
+                                  .toList(),
+                      ),
+                    ],
+                  ),
+                  onTap: () => viewModel.selectItem(item),
+                  trailing: IconButton(
+                    tooltip: mediaIssue == MediaIssue.none
+                        ? "Play"
+                        : mediaIssue == MediaIssue.empty
+                        ? "Empty file"
+                        : "Unreadable or corrupt file",
+                    onPressed: mediaIssue == MediaIssue.none
+                        ? () => onPlayClip(toPlayoutClip(item))
+                        : null,
+                    icon: Icon(
+                      mediaIssue == MediaIssue.none
+                          ? Icons.play_arrow
+                          : mediaIssue == MediaIssue.empty
+                          ? Icons.remove_circle_outline
+                          : Icons.close,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThumbnailPreview extends StatelessWidget {
+  const _ThumbnailPreview({required this.videoPath, required this.issue});
+
+  final String videoPath;
+  final MediaIssue issue;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        width: 72,
+        height: 40,
+        child: issue != MediaIssue.none
+            ? _issueThumbPlaceholder(issue, scheme)
+            : _thumbnailOrFallback(videoPath),
+      ),
+    );
+  }
+
+  Widget _thumbnailOrFallback(String videoPath) {
+    final String thumbnailPath = "$videoPath.thumb.jpg";
+    final File thumbFile = File(thumbnailPath);
+
+    return thumbFile.existsSync()
+        ? Image.file(
+            thumbFile,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _neutralFallback(),
+          )
+        : _neutralFallback();
+  }
+
+  Widget _issueThumbPlaceholder(MediaIssue issue, ColorScheme scheme) {
+    final Color bg = issue == MediaIssue.empty
+        ? scheme.surfaceContainerHighest
+        : scheme.errorContainer;
+    final Color fg = issue == MediaIssue.empty
+        ? scheme.onSurfaceVariant
+        : scheme.onErrorContainer;
+    final IconData icon = issue == MediaIssue.empty
+        ? Icons.horizontal_rule
+        : Icons.close;
+
+    return Container(
+      color: bg,
+      alignment: Alignment.center,
+      child: Icon(icon, size: 22, color: fg),
+    );
+  }
+
+  Widget _neutralFallback() {
+    return Container(
+      color: Colors.black12,
+      alignment: Alignment.center,
+      child: const Icon(Icons.movie, size: 18),
+    );
+  }
+}

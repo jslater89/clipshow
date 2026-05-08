@@ -4,15 +4,15 @@ import "package:file_picker/file_picker.dart";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 
-import "../../data/app_database.dart";
-import "../../data/media_repository.dart";
-import "../../ingestion/ingestion_service.dart";
-import "../../ingestion/thumbnail_service.dart";
-import "../../ingestion/workspace_watcher.dart";
-import "../../media/master_media_file.dart";
-import "../../media/media_list_item.dart";
-import "../../workspace/workspace_preferences.dart";
-import "../../workspace/workspace_service.dart";
+import "package:obs_clipshow/src/data/app_database.dart";
+import "package:obs_clipshow/src/data/media_repository.dart";
+import "package:obs_clipshow/src/ingestion/ingestion_service.dart";
+import "package:obs_clipshow/src/ingestion/thumbnail_service.dart";
+import "package:obs_clipshow/src/ingestion/workspace_watcher.dart";
+import "package:obs_clipshow/src/media/master_media_file.dart";
+import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/workspace/workspace_preferences.dart";
+import "package:obs_clipshow/src/workspace/workspace_service.dart";
 
 class DashboardViewModel extends ChangeNotifier {
   DashboardViewModel({
@@ -333,7 +333,6 @@ class DashboardViewModel extends ChangeNotifier {
     }
   }
 
-
   Future<String?> saveClipFromSelectedMaster() async {
     final MediaRepository? repository = _mediaRepository;
     final MasterMediaFile? master = selectedMedia;
@@ -357,7 +356,9 @@ class DashboardViewModel extends ChangeNotifier {
   Future<String?> deleteSelectedClip() async {
     final MediaRepository? repository = _mediaRepository;
     final MediaListItem? item = selectedItem;
-    if (repository == null || item == null || item.type != MediaListItemType.clip) {
+    if (repository == null ||
+        item == null ||
+        item.type != MediaListItemType.clip) {
       return "Select a clip first.";
     }
     await repository.deleteClipById(item.id);

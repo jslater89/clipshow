@@ -1,8 +1,8 @@
 import "package:sqflite/sqflite.dart";
 
-import "../media/master_media_file.dart";
-import "../media/media_clip.dart";
-import "../media/media_list_item.dart";
+import 'package:obs_clipshow/src/media/master_media_file.dart';
+import 'package:obs_clipshow/src/media/media_clip.dart';
+import 'package:obs_clipshow/src/media/media_list_item.dart';
 
 class MediaRepository {
   MediaRepository(this._database);
