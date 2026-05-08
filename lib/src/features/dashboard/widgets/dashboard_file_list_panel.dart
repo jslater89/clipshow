@@ -7,6 +7,7 @@ import "package:provider/provider.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
+import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 
@@ -195,85 +196,133 @@ class DashboardFileListPanel extends StatelessWidget {
                 final List<String> tags = sortTags(
                   viewModel.tagsForItem(item).toList(),
                 );
+                final String? durationAboveThumb =
+                    _durationLabelAboveThumbnail(item);
 
-                return ListTile(
-                  selected: isSelected,
-                  selectedTileColor: Theme.of(
-                    context,
-                  ).colorScheme.surfaceContainerHighest,
-                  leading: _ThumbnailPreview(
-                    videoPath: item.filePath,
-                    issue: mediaIssue,
-                  ),
-                  title: Text.rich(
-                    TextSpan(
-                      children: <InlineSpan>[
-                        TextSpan(
-                          text: item.type == MediaListItemType.master
-                              ? item.displayName
-                              : "${item.displayName} (${clipRangeLabel(item.clip!)})",
-                        ),
-                        if (item.displayName != item.fileName)
-                          const WidgetSpan(
-                            alignment: PlaceholderAlignment.middle,
-                            child: Padding(
-                              padding: EdgeInsets.only(left: 6),
-                              child: Icon(Icons.edit, size: 14),
+                final ThemeData theme = Theme.of(context);
+                return Material(
+                  color: isSelected
+                      ? theme.colorScheme.surfaceContainerHighest
+                      : Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      onMediaItemSelected(item);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          SizedBox(
+                            width: 72,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: <Widget>[
+                                if (durationAboveThumb != null) ...<Widget>[
+                                  Text(
+                                    durationAboveThumb,
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      fontFeatures: const <FontFeature>[
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                ],
+                                _ThumbnailPreview(
+                                  videoPath: item.filePath,
+                                  issue: mediaIssue,
+                                ),
+                              ],
                             ),
                           ),
-                      ],
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        relativePath,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: tags.isEmpty
-                            ? <Widget>[const Text("No tags")]
-                            : tags
-                                  .map(
-                                    (String tag) => ActionChip(
-                                      label: Text(tag),
-                                      backgroundColor: tagChipColor(
-                                        context,
-                                        tag,
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text.rich(
+                                  TextSpan(
+                                    children: <InlineSpan>[
+                                      TextSpan(
+                                        text:
+                                            item.type == MediaListItemType.master
+                                            ? item.displayName
+                                            : "${item.displayName} (${clipRangeLabel(item.clip!)})",
                                       ),
-                                      onPressed: () =>
-                                          viewModel.toggleTagFilter(tag),
-                                    ),
-                                  )
-                                  .toList(),
+                                      if (item.displayName != item.fileName)
+                                        const WidgetSpan(
+                                          alignment:
+                                              PlaceholderAlignment.middle,
+                                          child: Padding(
+                                            padding: EdgeInsets.only(left: 6),
+                                            child: Icon(Icons.edit, size: 14),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  relativePath,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: tags.isEmpty
+                                      ? <Widget>[const Text("No tags")]
+                                      : tags
+                                            .map(
+                                              (String tag) => ActionChip(
+                                                label: Text(tag),
+                                                backgroundColor: tagChipColor(
+                                                  context,
+                                                  tag,
+                                                ),
+                                                onPressed: () =>
+                                                    viewModel.toggleTagFilter(
+                                                      tag,
+                                                    ),
+                                              ),
+                                            )
+                                            .toList(),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: mediaIssue == MediaIssue.none
+                                ? "Play"
+                                : mediaIssue == MediaIssue.empty
+                                ? "Empty file"
+                                : "Unreadable or corrupt file",
+                            onPressed: mediaIssue == MediaIssue.none
+                                ? () => onPlayClip(toPlayoutClip(item))
+                                : null,
+                            icon: Icon(
+                              mediaIssue == MediaIssue.none
+                                  ? Icons.play_arrow
+                                  : mediaIssue == MediaIssue.empty
+                                  ? Icons.remove_circle_outline
+                                  : Icons.close,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  onTap: () {
-                    onMediaItemSelected(item);
-                  },
-                  trailing: IconButton(
-                    tooltip: mediaIssue == MediaIssue.none
-                        ? "Play"
-                        : mediaIssue == MediaIssue.empty
-                        ? "Empty file"
-                        : "Unreadable or corrupt file",
-                    onPressed: mediaIssue == MediaIssue.none
-                        ? () => onPlayClip(toPlayoutClip(item))
-                        : null,
-                    icon: Icon(
-                      mediaIssue == MediaIssue.none
-                          ? Icons.play_arrow
-                          : mediaIssue == MediaIssue.empty
-                          ? Icons.remove_circle_outline
-                          : Icons.close,
                     ),
                   ),
                 );
@@ -284,6 +333,26 @@ class DashboardFileListPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Master: probed file duration when present. Clip: marked segment length when out point is set.
+String? _durationLabelAboveThumbnail(MediaListItem item) {
+  if (item.type == MediaListItemType.master) {
+    final int? ms = item.master!.durationMs;
+    if (ms == null) {
+      return null;
+    }
+    return formatMs(ms);
+  }
+  final MediaClip clip = item.clip!;
+  if (clip.outMs == null) {
+    return null;
+  }
+  final int lenMs = clip.outMs! - clip.inMs;
+  if (lenMs <= 0) {
+    return null;
+  }
+  return formatMs(lenMs);
 }
 
 class _ThumbnailPreview extends StatelessWidget {

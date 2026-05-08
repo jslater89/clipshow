@@ -21,21 +21,30 @@ class MediaRepository {
     required int fileSizeBytes,
     required int modifiedAtMs,
     required int createdAtMs,
+    int? durationMs,
   }) async {
     await _database.transaction((Transaction txn) async {
       await txn.rawInsert(
         """
         INSERT INTO master_media_files (
           file_path, file_name, file_size_bytes, modified_at_ms, created_at_ms,
-          media_issue, media_issue_detail
-        ) VALUES (?, ?, ?, ?, ?, 'none', NULL)
+          duration_ms, media_issue, media_issue_detail
+        ) VALUES (?, ?, ?, ?, ?, ?, 'none', NULL)
         ON CONFLICT(file_path) DO UPDATE SET
           file_name = excluded.file_name,
           file_size_bytes = excluded.file_size_bytes,
           modified_at_ms = excluded.modified_at_ms,
-          created_at_ms = excluded.created_at_ms
+          created_at_ms = excluded.created_at_ms,
+          duration_ms = excluded.duration_ms
         """,
-        <Object?>[filePath, fileName, fileSizeBytes, modifiedAtMs, createdAtMs],
+        <Object?>[
+          filePath,
+          fileName,
+          fileSizeBytes,
+          modifiedAtMs,
+          createdAtMs,
+          durationMs,
+        ],
       );
       final int? masterId = await _lookupMasterId(txn, filePath);
       if (masterId != null) {

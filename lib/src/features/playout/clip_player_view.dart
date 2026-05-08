@@ -68,6 +68,23 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   VideoPlayerController? _controller;
   String? _errorMessage;
 
+  /// Completes after all seeks issued through [ClipPlayerController] finish.
+  /// Hotkeys call [seekBy] without awaiting, so [_togglePlayPause] drains this
+  /// before starting playback.
+  Future<void> _seekTail = Future<void>.value();
+
+  /// The position the user most recently explicitly seeked to.
+  ///
+  /// `video_player` fires a `completed` event that asynchronously calls
+  /// `pause().then((_) => seekTo(duration))`. That chain can land *after* a
+  /// user-initiated backward seek, quietly resetting position back to the end.
+  /// By remembering the user's intended position here we can re-apply it just
+  /// before [play], regardless of what the completion handler did.
+  ///
+  /// Cleared to `null` after it is consumed in [_togglePlayPause], or when the
+  /// user explicitly seeks to the clip end (no need to override in that case).
+  Duration? _targetSeekPosition;
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +110,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
 
   Future<void> _reinitializeController({required String reason}) async {
     _logger.info("Reinitializing controller due to $reason");
+    _targetSeekPosition = null;
     await _disposeController();
     await _initializeController();
   }
@@ -166,11 +184,35 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     if (controller.value.isPlaying) {
       await controller.pause();
     } else {
+      // Drain any in-flight seek operations first.
+      await _enqueueSeek(() async {});
+
+      // Consume the tracked seek target if one exists. The video_player package
+      // fires `pause().then(seekTo(duration))` on completion, and that async
+      // chain can land *after* the user's backward seek, quietly resetting
+      // position back to the end. Seeking explicitly here—based on what the
+      // user asked for rather than the (possibly stale) controller position—
+      // corrects that. When there is no tracked target and we are at EOF we
+      // fall back to clip start so `VideoPlayerController.play` does not jump
+      // to file position 0.
+      final Duration? target = _targetSeekPosition;
+      _targetSeekPosition = null;
+      if (target != null) {
+        await controller.seekTo(target);
+      } else if (controller.value.position == controller.value.duration) {
+        await controller.seekTo(Duration(milliseconds: widget.startTimeMs));
+      }
       await controller.play();
     }
   }
 
-  Future<void> _seekBy(Duration offset) async {
+  Future<void> _enqueueSeek(Future<void> Function() work) {
+    final Future<void> done = _seekTail.then((_) => work());
+    _seekTail = done.catchError((Object _, StackTrace s) {});
+    return done;
+  }
+
+  Future<void> _seekBy(Duration offset) => _enqueueSeek(() async {
     final VideoPlayerController? controller = _controller;
     if (controller == null || !controller.value.isInitialized) {
       return;
@@ -194,17 +236,20 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     }
 
     await controller.seekTo(next);
-  }
+    _targetSeekPosition = next;
+  });
 
-  Future<void> _seekToStart() async {
+  Future<void> _seekToStart() => _enqueueSeek(() async {
     final VideoPlayerController? controller = _controller;
     if (controller == null || !controller.value.isInitialized) {
       return;
     }
-    await controller.seekTo(Duration(milliseconds: widget.startTimeMs));
-  }
+    final Duration target = Duration(milliseconds: widget.startTimeMs);
+    await controller.seekTo(target);
+    _targetSeekPosition = target;
+  });
 
-  Future<void> _seekToEnd() async {
+  Future<void> _seekToEnd() => _enqueueSeek(() async {
     final VideoPlayerController? controller = _controller;
     if (controller == null || !controller.value.isInitialized) {
       return;
@@ -212,10 +257,13 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     final int? clipEndMs = widget.endTimeMs;
     if (clipEndMs != null) {
       await controller.seekTo(Duration(milliseconds: clipEndMs));
-      return;
+    } else {
+      await controller.seekTo(controller.value.duration);
     }
-    await controller.seekTo(controller.value.duration);
-  }
+    // At the clip/file end — play() should restart from clip start, not replay
+    // from end, so clear the target rather than setting it to the end position.
+    _targetSeekPosition = null;
+  });
 
   @override
   void dispose() {

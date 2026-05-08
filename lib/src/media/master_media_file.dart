@@ -14,6 +14,7 @@ class MasterMediaFile {
     required this.fileSizeBytes,
     required this.modifiedAtMs,
     required this.createdAtMs,
+    this.durationMs,
     this.mediaIssue = MediaIssue.none,
     this.mediaIssueDetail,
   });
@@ -25,6 +26,7 @@ class MasterMediaFile {
   final int fileSizeBytes;
   final int modifiedAtMs;
   final int createdAtMs;
+  final int? durationMs;
   final MediaIssue mediaIssue;
   final String? mediaIssueDetail;
 
@@ -37,6 +39,7 @@ class MasterMediaFile {
       fileSizeBytes: map["file_size_bytes"]! as int,
       modifiedAtMs: map["modified_at_ms"]! as int,
       createdAtMs: map["created_at_ms"]! as int,
+      durationMs: map["duration_ms"] as int?,
       mediaIssue: _parseMediaIssue(map["media_issue"] as String?),
       mediaIssueDetail: map["media_issue_detail"] as String?,
     );

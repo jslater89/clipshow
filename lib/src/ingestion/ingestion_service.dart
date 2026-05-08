@@ -7,6 +7,7 @@ import "package:watcher/watcher.dart";
 
 import 'package:obs_clipshow/src/data/media_repository.dart';
 import 'package:obs_clipshow/src/media/master_media_file.dart';
+import 'package:obs_clipshow/src/ingestion/media_duration_probe.dart';
 import 'package:obs_clipshow/src/ingestion/thumbnail_service.dart';
 import 'package:obs_clipshow/src/ingestion/workspace_watcher.dart';
 
@@ -202,12 +203,21 @@ class IngestionService {
     }
     final FileStat stat = await file.stat();
     final String normalizedPath = _normalizedPath(file.path);
+    int? durationMs;
+    if (stat.size > 0) {
+      final MediaDurationProbeResult probe =
+          await MediaDurationProbe.probeSeconds(normalizedPath);
+      if (probe.ok) {
+        durationMs = probe.durationMs;
+      }
+    }
     await repository.upsertMasterMedia(
       filePath: normalizedPath,
       fileName: p.basename(file.path),
       fileSizeBytes: stat.size,
       modifiedAtMs: stat.modified.millisecondsSinceEpoch,
       createdAtMs: stat.changed.millisecondsSinceEpoch,
+      durationMs: durationMs,
     );
     if (stat.size == 0) {
       await repository.setMediaIssue(normalizedPath, MediaIssue.empty);
@@ -328,6 +338,7 @@ class IngestionService {
         a.fileSizeBytes == b.fileSizeBytes &&
         a.modifiedAtMs == b.modifiedAtMs &&
         a.createdAtMs == b.createdAtMs &&
+        a.durationMs == b.durationMs &&
         a.mediaIssue == b.mediaIssue &&
         a.mediaIssueDetail == b.mediaIssueDetail;
   }

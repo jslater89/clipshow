@@ -5,6 +5,8 @@ import "dart:io";
 import "package:logging/logging.dart";
 import "package:path/path.dart" as p;
 
+import "package:obs_clipshow/src/ingestion/media_duration_probe.dart";
+
 /// Generates JPEG thumbnails next to video files using `ffprobe` + `ffmpeg`.
 /// Work runs in the background with bounded concurrency so ingestion stays fast.
 /// Default concurrency is 4 parallel `ffmpeg` processes; adjust [maxConcurrentJobs] if needed.
@@ -116,7 +118,8 @@ class ThumbnailService {
       return;
     }
 
-    final _DurationProbe probe = await _probeDurationSeconds(videoPath);
+    final MediaDurationProbeResult probe =
+        await MediaDurationProbe.probeSeconds(videoPath);
     if (!probe.ok) {
       onThumbnailSettled?.call(videoPath, probe.stderr);
       return;
@@ -174,54 +177,4 @@ class ThumbnailService {
     _queuedOrRunning.clear();
     await _readyController.close();
   }
-
-  Future<_DurationProbe> _probeDurationSeconds(String videoPath) async {
-    try {
-      final ProcessResult result = await Process.run(
-        "ffprobe",
-        <String>[
-          "-v",
-          "error",
-          "-show_entries",
-          "format=duration",
-          "-of",
-          "default=noprint_wrappers=1:nokey=1",
-          videoPath,
-        ],
-      );
-      final String stderr = "${result.stderr}";
-      if (result.exitCode != 0) {
-        return _DurationProbe.fail(stderr);
-      }
-      final String out = (result.stdout as String).trim();
-      if (out.isEmpty) {
-        return _DurationProbe.fail("empty duration output");
-      }
-      final double? duration = double.tryParse(out);
-      if (duration == null) {
-        return _DurationProbe.fail("unparsed duration: $out");
-      }
-      return _DurationProbe.ok(duration);
-    } catch (error) {
-      return _DurationProbe.fail("$error");
-    }
-  }
-}
-
-class _DurationProbe {
-  const _DurationProbe._({
-    required this.ok,
-    this.durationSeconds,
-    this.stderr = "",
-  });
-
-  final bool ok;
-  final double? durationSeconds;
-  final String stderr;
-
-  factory _DurationProbe.ok(double durationSeconds) =>
-      _DurationProbe._(ok: true, durationSeconds: durationSeconds);
-
-  factory _DurationProbe.fail(String stderr) =>
-      _DurationProbe._(ok: false, stderr: stderr);
 }

@@ -12,7 +12,7 @@ class AppDatabase {
     return databaseFactoryFfi.openDatabase(
       workspace.databasePath,
       options: OpenDatabaseOptions(
-        version: 5,
+        version: 6,
         onConfigure: (Database db) async {
           await db.execute("PRAGMA foreign_keys = ON;");
         },
@@ -26,6 +26,7 @@ class AppDatabase {
               file_size_bytes INTEGER NOT NULL,
               modified_at_ms INTEGER NOT NULL,
               created_at_ms INTEGER NOT NULL,
+              duration_ms INTEGER,
               media_issue TEXT NOT NULL DEFAULT 'none',
               media_issue_detail TEXT
             );
@@ -56,6 +57,9 @@ class AppDatabase {
           }
           if (oldVersion < 5) {
             await _addDisplayNameOverrideColumnsIfMissing(db);
+          }
+          if (oldVersion < 6) {
+            await _addMasterDurationMsColumnIfMissing(db);
           }
         },
       ),
@@ -167,6 +171,21 @@ class AppDatabase {
       await db.execute("""
         ALTER TABLE clips
         ADD COLUMN display_name_override TEXT;
+      """);
+    }
+  }
+
+  Future<void> _addMasterDurationMsColumnIfMissing(Database db) async {
+    final List<Map<String, Object?>> masterColumns = await db.rawQuery(
+      "PRAGMA table_info(master_media_files);",
+    );
+    final bool masterHasColumn = masterColumns.any(
+      (Map<String, Object?> row) => row["name"] == "duration_ms",
+    );
+    if (!masterHasColumn) {
+      await db.execute("""
+        ALTER TABLE master_media_files
+        ADD COLUMN duration_ms INTEGER;
       """);
     }
   }
