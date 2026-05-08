@@ -1,3 +1,10 @@
+/// Persisted issue state for a row in [master_media_files] (and in-memory model).
+enum MediaIssue {
+  none,
+  empty,
+  unreadable,
+}
+
 class MasterMediaFile {
   const MasterMediaFile({
     required this.id,
@@ -6,6 +13,8 @@ class MasterMediaFile {
     required this.fileSizeBytes,
     required this.modifiedAtMs,
     required this.createdAtMs,
+    this.mediaIssue = MediaIssue.none,
+    this.mediaIssueDetail,
   });
 
   final int id;
@@ -14,6 +23,8 @@ class MasterMediaFile {
   final int fileSizeBytes;
   final int modifiedAtMs;
   final int createdAtMs;
+  final MediaIssue mediaIssue;
+  final String? mediaIssueDetail;
 
   factory MasterMediaFile.fromMap(Map<String, Object?> map) {
     return MasterMediaFile(
@@ -23,6 +34,18 @@ class MasterMediaFile {
       fileSizeBytes: map["file_size_bytes"]! as int,
       modifiedAtMs: map["modified_at_ms"]! as int,
       createdAtMs: map["created_at_ms"]! as int,
+      mediaIssue: _parseMediaIssue(map["media_issue"] as String?),
+      mediaIssueDetail: map["media_issue_detail"] as String?,
+    );
+  }
+
+  static MediaIssue _parseMediaIssue(String? raw) {
+    if (raw == null || raw.isEmpty) {
+      return MediaIssue.none;
+    }
+    return MediaIssue.values.firstWhere(
+      (MediaIssue e) => e.name == raw,
+      orElse: () => MediaIssue.none,
     );
   }
 }

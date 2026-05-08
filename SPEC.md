@@ -42,7 +42,7 @@ The application operates in two mutually exclusive UI states to prevent broadcas
     3. App loads the master video file and executes `setRange(from, to)`.
     4. App sends WebSocket command to OBS: `SetCurrentProgramScene` -> "Video Scene".
     5. App begins playback.
-* **Overlay:** A transparent `CustomPaint` layer becomes active, accepting mouse/touch drag inputs to draw telestration paths. 
+* **Overlay:** A transparent `CustomPaint` layer becomes active, accepting mouse/touch drag inputs to draw telestration paths.
 * **End of Clip Behavior:** Reaching the `endTime` marker pauses the video on the final frame, keeping the visual on screen to allow the operator to continue telestrating or providing commentary.
 * **Reversion Sequence:**
     1. Triggered manually by the operator pressing the `Escape` key (or a designated hardware hotkey).
@@ -71,3 +71,30 @@ The local database will manage the metadata independently of the physical file s
 * **Phase 2: Playout & OBS Control.** Build the basic `fvp` player, establish the OBS WebSocket connection, and successfully trigger scene transitions upon playout execution and `Escape` key reversion.
 * **Phase 3: Tagging & Organization.** Build the UI to set timestamps, apply string tags, and filter the dashboard view.
 * **Phase 4: Telestration.** Layer the `CustomPaint` widget over the fullscreen video player, implement stroke paths, and map a hotkey to clear the canvas.
+* **Phase 5: Configuration.** Add an application configuration UI for selecting and validating the target OBS scenes in an existing OBS project (e.g., pick Program Video Scene and Face Scene from current scene list, store preferences, and fail safely if scenes are missing/renamed).
+
+## 9. Progress (Current)
+### Completed
+* **Phase 1 Core Delivered:** Workspace selection and restore, SQLite database creation at workspace root, recursive ingestion scan, and live watcher updates for add/remove/modify.
+* **Ingestion Logging:** Added structured logging around workspace restore, ingestion startup, file event handling, and dashboard media updates.
+* **Thumbnail Pipeline:** Video thumbnails are generated using `ffprobe` + `ffmpeg`, stored as `<video>.thumb.jpg`, removed on file delete, and displayed in the left file list.
+* **Dashboard Restructure (Phase 3 Foundation):** Dashboard now uses a three-panel layout: file list (left), preview panel (top right), and tag panel (bottom right), with file selection and play/pllayout actions.
+* **Preview Player:** Shared player component added for preview and playout with keyboard controls and optional visible controls in preview.
+* **Phase 2 Core Implemented (Untested):** OBS websocket service and playout scene-switch flow are written (start -> `"Video Scene"`, `Escape` exit -> `"Face Scene"`), but not yet validated with full end-to-end live OBS testing.
+* **Playout Window Behavior:** Playout defaults to windowed 16:9 with hidden title bar (fullscreen mode retained as a configurable code path), and window bounds restore on exit.
+
+### Implemented Interaction Details
+* **Keyboard Controls:** `Space` play/pause, `Left/Right` seek, `Shift+Left/Right` short seek, and `Ctrl+Left/Right` long seek.
+* **Mouse Controls:** Clicking video toggles play/pause.
+* **Playout UX:** Temporary `Escape` hint appears at playout start and auto-hides after 1 second.
+* **Dashboard UX:** Scroll position is preserved and restored after returning from playout.
+
+### Partially Complete / Next
+* **Phase 3:** Current tagging and filtering UI is local/session-level and serves as a scaffold. Persisted clip/tag data model and full tagging workflow remain.
+* **Phase 4:** Telestration overlay and draw/clear hotkeys are not yet implemented.
+* **Phase 2 Validation Checklist (Live OBS):**
+  * Confirm OBS websocket authentication/connectivity using configured host/port/password.
+  * Enter playout from dashboard and verify scene switches to configured Video Scene.
+  * Press `Escape` in playout and verify scene switches back to configured Face Scene.
+  * Verify no stuck state after repeated enter/exit cycles (scene changes, window state, and app input all recover correctly).
+  * Validate behavior when OBS is unavailable or scenes are missing (user-visible warning, no app crash, and clean return path).

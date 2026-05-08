@@ -29,17 +29,19 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DashboardScreen(
-          viewModel: viewModel,
-          onPlayMedia: (_) {},
-        ),
+        home: DashboardScreen(viewModel: viewModel, onPlayClip: (_) {}),
       ),
     );
 
-    expect(find.text("Select a workspace to start ingesting media."), findsOneWidget);
+    expect(
+      find.text("Select a workspace to start ingesting media."),
+      findsOneWidget,
+    );
   });
 
-  testWidgets("shows media list when files are available", (WidgetTester tester) async {
+  testWidgets("shows media list when files are available", (
+    WidgetTester tester,
+  ) async {
     final DashboardViewModel viewModel = createViewModel();
     addTearDown(viewModel.dispose);
     viewModel.setStateForTest(
@@ -58,10 +60,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DashboardScreen(
-          viewModel: viewModel,
-          onPlayMedia: (_) {},
-        ),
+        home: DashboardScreen(viewModel: viewModel, onPlayClip: (_) {}),
       ),
     );
 

@@ -9,13 +9,9 @@ import "../features/dashboard/dashboard_screen.dart";
 import "../features/dashboard/dashboard_view_model.dart";
 import "../features/playout/playout_clip.dart";
 import "../features/playout/playout_screen.dart";
-import "../media/master_media_file.dart";
 import "../obs/obs_service.dart";
 
-enum PlayoutWindowMode {
-  windowed,
-  fullscreen,
-}
+enum PlayoutWindowMode { windowed, fullscreen }
 
 class ObsClipshowApp extends StatefulWidget {
   const ObsClipshowApp({super.key});
@@ -26,7 +22,8 @@ class ObsClipshowApp extends StatefulWidget {
 
 class _ObsClipshowAppState extends State<ObsClipshowApp> {
   final Logger _logger = Logger("ObsClipshowApp");
-  static const PlayoutWindowMode _playoutWindowMode = PlayoutWindowMode.windowed;
+  static const PlayoutWindowMode _playoutWindowMode =
+      PlayoutWindowMode.windowed;
   static const Size _fallbackPlayoutSize = Size(1280, 720);
   late final DashboardViewModel _viewModel;
   late final ObsService _obsService;
@@ -52,15 +49,10 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     super.dispose();
   }
 
-  Future<void> _enterPlayout(MasterMediaFile mediaFile) async {
+  Future<void> _enterPlayout(PlayoutClip clip) async {
     if (_dashboardScrollController.hasClients) {
       _lastDashboardScrollOffset = _dashboardScrollController.offset;
     }
-    final PlayoutClip clip = PlayoutClip(
-      filePath: mediaFile.filePath,
-      startTimeMs: 0,
-      endTimeMs: null,
-    );
     setState(() {
       _activeClip = clip;
     });
@@ -71,7 +63,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       _logger.warning("Unable to capture window bounds before playout: $error");
     }
 
-    await _applyPlayoutWindowMode(mediaFile.filePath);
+    await _applyPlayoutWindowMode(clip.filePath);
 
     try {
       await _obsService.ensureConnected();
@@ -95,7 +87,9 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       try {
         await windowManager.setBounds(_prePlayoutBounds);
       } catch (error) {
-        _logger.warning("Unable to restore window bounds after playout: $error");
+        _logger.warning(
+          "Unable to restore window bounds after playout: $error",
+        );
       }
     }
     setState(() {
@@ -142,10 +136,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     await windowManager.focus();
   }
 
-  Size _fitWithin({
-    required Size sourceSize,
-    required Size bounds,
-  }) {
+  Size _fitWithin({required Size sourceSize, required Size bounds}) {
     final double widthScale = bounds.width / sourceSize.width;
     final double heightScale = bounds.height / sourceSize.height;
     final double scale = widthScale < heightScale ? widthScale : heightScale;
@@ -158,20 +149,17 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
 
   Future<Size?> _probeVideoSize(String videoPath) async {
     try {
-      final ProcessResult result = await Process.run(
-        "ffprobe",
-        <String>[
-          "-v",
-          "error",
-          "-select_streams",
-          "v:0",
-          "-show_entries",
-          "stream=width,height",
-          "-of",
-          "csv=s=x:p=0",
-          videoPath,
-        ],
-      );
+      final ProcessResult result = await Process.run("ffprobe", <String>[
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "csv=s=x:p=0",
+        videoPath,
+      ]);
       if (result.exitCode != 0) {
         _logger.finer("ffprobe size failed: ${result.stderr}");
         return null;
@@ -202,7 +190,8 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
 
       final double maxScrollExtent =
           _dashboardScrollController.position.maxScrollExtent;
-      final bool canReachExactOffset = maxScrollExtent >= _lastDashboardScrollOffset;
+      final bool canReachExactOffset =
+          maxScrollExtent >= _lastDashboardScrollOffset;
       final double target = canReachExactOffset
           ? _lastDashboardScrollOffset
           : maxScrollExtent;
@@ -220,18 +209,19 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     return MaterialApp(
       title: "Vanalyst Playout",
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.blueGrey,
+          brightness: Brightness.dark,
+        ),
+        brightness: Brightness.dark,
       ),
       home: _activeClip == null
           ? DashboardScreen(
               viewModel: _viewModel,
-              onPlayMedia: _enterPlayout,
+              onPlayClip: _enterPlayout,
               scrollController: _dashboardScrollController,
             )
-          : PlayoutScreen(
-              clip: _activeClip!,
-              onExitRequested: _exitPlayout,
-            ),
+          : PlayoutScreen(clip: _activeClip!, onExitRequested: _exitPlayout),
     );
   }
 }

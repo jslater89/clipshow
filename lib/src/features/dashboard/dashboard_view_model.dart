@@ -5,9 +5,12 @@ import "package:flutter/foundation.dart";
 import "package:logging/logging.dart";
 
 import "../../data/app_database.dart";
+import "../../data/media_repository.dart";
 import "../../ingestion/ingestion_service.dart";
+import "../../ingestion/thumbnail_service.dart";
 import "../../ingestion/workspace_watcher.dart";
 import "../../media/master_media_file.dart";
+import "../../media/media_list_item.dart";
 import "../../workspace/workspace_preferences.dart";
 import "../../workspace/workspace_service.dart";
 
@@ -15,16 +18,18 @@ class DashboardViewModel extends ChangeNotifier {
   DashboardViewModel({
     required WorkspaceService workspaceService,
     required IngestionService ingestionService,
-  })  : _workspaceService = workspaceService,
-        _ingestionService = ingestionService;
+  }) : _workspaceService = workspaceService,
+       _ingestionService = ingestionService;
 
   factory DashboardViewModel.create() {
     final WorkspaceService workspaceService = WorkspaceService(
       appDatabase: AppDatabase(),
       workspacePreferences: WorkspacePreferences(),
     );
+    final ThumbnailService thumbnailService = ThumbnailService();
     final IngestionService ingestionService = IngestionService(
       workspaceWatcher: WorkspaceWatcher(),
+      thumbnailService: thumbnailService,
     );
     return DashboardViewModel(
       workspaceService: workspaceService,
@@ -36,51 +41,80 @@ class DashboardViewModel extends ChangeNotifier {
   final IngestionService _ingestionService;
   final Logger _logger = Logger("DashboardViewModel");
   StreamSubscription<List<MasterMediaFile>>? _mediaSubscription;
+  StreamSubscription<String>? _thumbnailSubscription;
+  MediaRepository? _mediaRepository;
 
   bool _isLoading = false;
   String? _workspacePath;
   List<MasterMediaFile> _mediaFiles = <MasterMediaFile>[];
-  final Map<int, Set<String>> _tagsByMediaId = <int, Set<String>>{};
-  int? _selectedMediaId;
-  String? _activeTagFilter;
+  List<MediaListItem> _allItems = <MediaListItem>[];
+  List<MediaListItem> _visibleItems = <MediaListItem>[];
+  final Map<String, Set<String>> _tagsByItemKey = <String, Set<String>>{};
+  final Set<String> _activeTagFilters = <String>{};
+  final List<String> _allTags = <String>[];
+  final List<String> _savedTags = <String>[];
+  int _previewPositionMs = 0;
+  int? _markInMs;
+  int? _markOutMs;
+  String _tagSearchQuery = "";
+  String? _selectedItemKey;
+  bool _showUntaggedOnly = false;
 
   bool get isLoading => _isLoading;
   String? get workspacePath => _workspacePath;
   List<MasterMediaFile> get mediaFiles => _mediaFiles;
-  int? get selectedMediaId => _selectedMediaId;
-  String? get activeTagFilter => _activeTagFilter;
+  List<MediaListItem> get visibleItems => _visibleItems;
+  List<String> get allTags => _allTags;
+  List<String> get savedTags => _savedTags;
+  Set<String> get activeTagFilters => _activeTagFilters;
+  int? get markInMs => _markInMs;
+  int? get markOutMs => _markOutMs;
+  String get tagSearchQuery => _tagSearchQuery;
+  bool get showUntaggedOnly => _showUntaggedOnly;
+  String? get selectedItemKey => _selectedItemKey;
   MasterMediaFile? get selectedMedia {
-    final int? id = _selectedMediaId;
-    if (id == null) {
+    final MediaListItem? item = selectedItem;
+    if (item == null || item.type != MediaListItemType.master) {
       return null;
     }
-    for (final MasterMediaFile file in _mediaFiles) {
-      if (file.id == id) {
-        return file;
+    return item.master;
+  }
+
+  MediaListItem? get selectedItem {
+    final String? key = _selectedItemKey;
+    if (key == null) {
+      return null;
+    }
+    for (final MediaListItem item in _allItems) {
+      if (item.stableKey == key) {
+        return item;
       }
     }
     return null;
   }
 
-  List<MasterMediaFile> get visibleMediaFiles {
-    final String? filter = _activeTagFilter;
-    if (filter == null || filter.isEmpty) {
-      return _mediaFiles;
+  Set<String> tagsForItem(MediaListItem item) =>
+      _tagsByItemKey[item.stableKey] ?? <String>{};
+
+  List<String> tagSuggestionsFor(String query) {
+    final Iterable<String> userTags = _allTags.where(_isUserTag);
+    final String normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return userTags.take(20).toList();
     }
-    return _mediaFiles
-        .where((MasterMediaFile file) => tagsForMedia(file.id).contains(filter))
+    return userTags
+        .where((String tag) => tag.toLowerCase().contains(normalized))
+        .take(20)
         .toList();
   }
-
-  Set<String> tagsForMedia(int mediaId) =>
-      _tagsByMediaId[mediaId] ?? <String>{};
 
   Future<void> initialize() async {
     _logger.info("Initializing dashboard state.");
     _isLoading = true;
     notifyListeners();
 
-    final WorkspaceSession? session = await _workspaceService.restoreWorkspace();
+    final WorkspaceSession? session = await _workspaceService
+        .restoreWorkspace();
     if (session != null) {
       _logger.info("Restored workspace: ${session.workspace.rootPath}");
       await _startSession(session);
@@ -102,8 +136,9 @@ class DashboardViewModel extends ChangeNotifier {
 
     _isLoading = true;
     notifyListeners();
-    final WorkspaceSession session =
-        await _workspaceService.setWorkspace(selectedDirectory);
+    final WorkspaceSession session = await _workspaceService.setWorkspace(
+      selectedDirectory,
+    );
     _logger.info("Workspace set to: $selectedDirectory");
     await _startSession(session);
     _isLoading = false;
@@ -111,30 +146,25 @@ class DashboardViewModel extends ChangeNotifier {
   }
 
   Future<void> _startSession(WorkspaceSession session) async {
+    _mediaRepository = session.mediaRepository;
     _workspacePath = session.workspace.rootPath;
     await _mediaSubscription?.cancel();
-    _mediaSubscription = _ingestionService.mediaFiles.listen((List<MasterMediaFile> files) {
+    await _thumbnailSubscription?.cancel();
+    _thumbnailSubscription = _ingestionService.thumbnailReady.listen(
+      (String _) => notifyListeners(),
+    );
+    _mediaSubscription = _ingestionService.mediaFiles.listen((
+      List<MasterMediaFile> files,
+    ) {
       _mediaFiles = files;
-      final Set<int> currentIds = files.map((MasterMediaFile file) => file.id).toSet();
-      _tagsByMediaId.removeWhere((int key, _) => !currentIds.contains(key));
-      if (_selectedMediaId != null && !currentIds.contains(_selectedMediaId)) {
-        _selectedMediaId = null;
-      }
-      if (_activeTagFilter != null) {
-        final bool filterStillExists = files.any(
-          (MasterMediaFile file) => tagsForMedia(file.id).contains(_activeTagFilter),
-        );
-        if (!filterStillExists) {
-          _activeTagFilter = null;
-        }
-      }
       _logger.info("Dashboard received ${files.length} media item(s).");
-      notifyListeners();
+      unawaited(_reloadFromRepository());
     });
     await _ingestionService.start(
       workspacePath: session.workspace.rootPath,
       repository: session.mediaRepository,
     );
+    await _reloadFromRepository();
   }
 
   @visibleForTesting
@@ -152,53 +182,237 @@ class DashboardViewModel extends ChangeNotifier {
     }
     if (mediaFiles != null) {
       _mediaFiles = mediaFiles;
+      _allItems = mediaFiles.map(MediaListItem.master).toList();
+      _visibleItems = List<MediaListItem>.from(_allItems);
     }
     if (selectedMediaId != null) {
-      _selectedMediaId = selectedMediaId;
+      _selectedItemKey = "m:$selectedMediaId";
     }
     notifyListeners();
   }
 
-  void selectMedia(int mediaId) {
-    _selectedMediaId = mediaId;
+  @visibleForTesting
+  void setItemsForTest({
+    required List<MediaListItem> items,
+    Map<String, Set<String>>? tagsByItemKey,
+  }) {
+    _allItems = items;
+    _visibleItems = List<MediaListItem>.from(items);
+    _tagsByItemKey
+      ..clear()
+      ..addAll(tagsByItemKey ?? <String, Set<String>>{});
+    _applyFilters();
     notifyListeners();
   }
 
-  void addTagToSelectedMedia(String tag) {
-    final int? mediaId = _selectedMediaId;
-    if (mediaId == null) {
+  void selectItem(MediaListItem item) {
+    _selectedItemKey = item.stableKey;
+    notifyListeners();
+  }
+
+  Future<void> addTagToSelectedMedia(String tag) async {
+    final MediaListItem? item = selectedItem;
+    if (item == null) {
       return;
     }
-    final String normalized = tag.trim();
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    final String normalized = repository.normalizeTag(tag);
     if (normalized.isEmpty) {
       return;
     }
-    final Set<String> tags = _tagsByMediaId.putIfAbsent(mediaId, () => <String>{});
-    tags.add(normalized);
-    notifyListeners();
+    await repository.addTagToMedia(
+      mediaType: item.type,
+      mediaId: item.id,
+      tag: normalized,
+    );
+    await _reloadFromRepository();
   }
 
-  void removeTagFromSelectedMedia(String tag) {
-    final int? mediaId = _selectedMediaId;
-    if (mediaId == null) {
+  Future<void> removeTagFromSelectedMedia(String tag) async {
+    final MediaListItem? item = selectedItem;
+    final MediaRepository? repository = _mediaRepository;
+    if (item == null || repository == null) {
       return;
     }
-    _tagsByMediaId[mediaId]?.remove(tag);
-    notifyListeners();
+    await repository.removeTagFromMedia(
+      mediaType: item.type,
+      mediaId: item.id,
+      tag: tag,
+    );
+    await _reloadFromRepository();
   }
 
   void toggleTagFilter(String tag) {
-    if (_activeTagFilter == tag) {
-      _activeTagFilter = null;
+    if (_activeTagFilters.contains(tag)) {
+      _activeTagFilters.remove(tag);
     } else {
-      _activeTagFilter = tag;
+      _activeTagFilters.add(tag);
+    }
+    _applyFilters();
+    notifyListeners();
+  }
+
+  void setTagSearchQuery(String query) {
+    _tagSearchQuery = query;
+    _applyFilters();
+    notifyListeners();
+  }
+
+  void setShowUntaggedOnly(bool value) {
+    _showUntaggedOnly = value;
+    _applyFilters();
+    notifyListeners();
+  }
+
+  Future<void> addSavedTag(String tag) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.addSavedTag(tag);
+    await _reloadFromRepository();
+  }
+
+  Future<void> removeSavedTag(String tag) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.removeSavedTag(tag);
+    await _reloadFromRepository();
+  }
+
+  Future<void> applySavedTagToSelectedMedia(String tag) async {
+    await addTagToSelectedMedia(tag);
+  }
+
+  Future<void> applyAllSavedTagsToSelectedMedia() async {
+    final MediaListItem? item = selectedItem;
+    final MediaRepository? repository = _mediaRepository;
+    if (item == null || repository == null || _savedTags.isEmpty) {
+      return;
+    }
+    for (final String tag in _savedTags) {
+      await repository.addTagToMedia(
+        mediaType: item.type,
+        mediaId: item.id,
+        tag: tag,
+      );
+    }
+    await _reloadFromRepository();
+  }
+
+  void markInAtCurrentPosition() {
+    _markInMs = _previewPositionMs;
+    if (_markOutMs != null && _markOutMs! <= _markInMs!) {
+      _markOutMs = null;
     }
     notifyListeners();
   }
+
+  void markOutAtCurrentPosition() {
+    _markOutMs = _previewPositionMs;
+    notifyListeners();
+  }
+
+  void setPreviewPositionMs(int positionMs) {
+    _previewPositionMs = positionMs;
+  }
+
+  Future<String?> saveClipFromSelectedMaster() async {
+    final MediaRepository? repository = _mediaRepository;
+    final MasterMediaFile? master = selectedMedia;
+    if (repository == null || master == null) {
+      return "Select a master file first.";
+    }
+    final int inMs = _markInMs ?? 0;
+    final int? outMs = _markOutMs;
+    if (outMs != null && outMs <= inMs) {
+      return "Mark Out must be greater than Mark In.";
+    }
+    await repository.createClip(
+      masterMediaId: master.id,
+      inMs: inMs,
+      outMs: outMs,
+    );
+    await _reloadFromRepository();
+    return null;
+  }
+
+  Future<String?> deleteSelectedClip() async {
+    final MediaRepository? repository = _mediaRepository;
+    final MediaListItem? item = selectedItem;
+    if (repository == null || item == null || item.type != MediaListItemType.clip) {
+      return "Select a clip first.";
+    }
+    await repository.deleteClipById(item.id);
+    await _reloadFromRepository();
+    return null;
+  }
+
+  Future<void> _reloadFromRepository() async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    final List<MediaListItem> items = await repository.listMixedItems();
+    final Map<String, Set<String>> tagsByItemKey = await repository
+        .listTagsForItems(items);
+    _allItems = items;
+    _tagsByItemKey
+      ..clear()
+      ..addAll(tagsByItemKey);
+    _allTags
+      ..clear()
+      ..addAll(await repository.listAllTags());
+    _savedTags
+      ..clear()
+      ..addAll(await repository.listSavedTags());
+    if (_selectedItemKey != null &&
+        !_allItems.any(
+          (MediaListItem item) => item.stableKey == _selectedItemKey,
+        )) {
+      _selectedItemKey = null;
+    }
+    _applyFilters();
+    notifyListeners();
+  }
+
+  void _applyFilters() {
+    final String search = _tagSearchQuery.trim().toLowerCase();
+    final Set<String> requiredTags = _activeTagFilters
+        .map((String tag) => tag.toLowerCase())
+        .toSet();
+    _visibleItems = _allItems.where((MediaListItem item) {
+      final Set<String> tags = tagsForItem(item);
+      final Set<String> userTags = tags.where(_isUserTag).toSet();
+      final Set<String> tagsLower = tags
+          .map((String tag) => tag.toLowerCase())
+          .toSet();
+      if (_showUntaggedOnly && userTags.isNotEmpty) {
+        return false;
+      }
+      if (requiredTags.isNotEmpty && !requiredTags.every(tagsLower.contains)) {
+        return false;
+      }
+      if (search.isNotEmpty &&
+          !tagsLower.any((String tag) => tag.contains(search))) {
+        return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  bool _isUserTag(String tag) =>
+      tag != MediaRepository.masterTag && tag != MediaRepository.clipTag;
 
   @override
   void dispose() {
     unawaited(_mediaSubscription?.cancel());
+    unawaited(_thumbnailSubscription?.cancel());
     unawaited(_ingestionService.dispose());
     super.dispose();
   }

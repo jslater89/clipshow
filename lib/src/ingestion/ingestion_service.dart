@@ -34,8 +34,14 @@ class IngestionService {
   StreamSubscription<WatchEvent>? _watchSubscription;
   MediaRepository? _repository;
   String? _workspacePath;
+  bool _disposed = false;
+  int _scanGeneration = 0;
+  Timer? _snapshotDebounce;
 
   Stream<List<MasterMediaFile>> get mediaFiles => _mediaController.stream;
+
+  /// Fires when a thumbnail file has been written for a video path (for UI refresh).
+  Stream<String> get thumbnailReady => _thumbnailService.thumbnailReady;
 
   Future<void> start({
     required String workspacePath,
@@ -44,14 +50,34 @@ class IngestionService {
     _logger.info("Starting ingestion for workspace: $workspacePath");
     _repository = repository;
     _workspacePath = workspacePath;
-    final int scannedCount = await _scanAllExistingFiles();
-    await _emitSnapshot();
-    _logger.info("Initial scan completed. Imported files: $scannedCount");
+    _scanGeneration++;
+    _thumbnailService.onThumbnailSettled = _onThumbnailSettled;
 
     await _watchSubscription?.cancel();
     _workspaceWatcher.start(workspacePath);
     _watchSubscription = _workspaceWatcher.events.listen(_handleWatchEvent);
     _logger.info("Workspace watcher started.");
+
+    // Show current DB state immediately (often empty) so the UI is not blocked
+    // on a full directory walk + thumbnail queue.
+    await _emitSnapshot();
+
+    final int generation = _scanGeneration;
+    unawaited(_runInitialScanInBackground(generation));
+  }
+
+  /// Walks the tree asynchronously; list rows appear in batches via [_emitSnapshot].
+  Future<void> _runInitialScanInBackground(int generation) async {
+    try {
+      final int scannedCount = await _scanAllExistingFiles(generation);
+      if (_disposed || generation != _scanGeneration) {
+        return;
+      }
+      await _emitSnapshot();
+      _logger.info("Initial scan completed. Imported files: $scannedCount");
+    } catch (error, stackTrace) {
+      _logger.severe("Initial scan failed: $error", error, stackTrace);
+    }
   }
 
   Future<void> stop() async {
@@ -62,12 +88,18 @@ class IngestionService {
   }
 
   Future<void> dispose() async {
+    _disposed = true;
+    _snapshotDebounce?.cancel();
+    _snapshotDebounce = null;
     await stop();
     await _workspaceWatcher.dispose();
     await _mediaController.close();
+    await _thumbnailService.dispose();
   }
 
-  Future<int> _scanAllExistingFiles() async {
+  static const int _scanEmitBatchSize = 50;
+
+  Future<int> _scanAllExistingFiles(int generation) async {
     final MediaRepository repository = _requireRepository();
     final String workspacePath = _requireWorkspacePath();
     int importedCount = 0;
@@ -80,6 +112,9 @@ class IngestionService {
 
     await for (final FileSystemEntity entity
         in root.list(recursive: true, followLinks: false)) {
+      if (_disposed || generation != _scanGeneration) {
+        break;
+      }
       if (entity is! File) {
         continue;
       }
@@ -91,29 +126,36 @@ class IngestionService {
         filePath: entity.path,
       );
       importedCount++;
+      if (importedCount == 1 || importedCount % _scanEmitBatchSize == 0) {
+        await _emitSnapshot();
+      }
     }
     return importedCount;
   }
 
   Future<void> _handleWatchEvent(WatchEvent event) async {
-    final MediaRepository repository = _requireRepository();
-    _logger.fine("Watch event ${event.type} for path: ${event.path}");
-    if (!isSupportedVideoPath(event.path)) {
-      _logger.finer("Ignored non-video path: ${event.path}");
+    if (_disposed) {
       return;
     }
+    final MediaRepository repository = _requireRepository();
+    if (!isSupportedVideoPath(event.path)) {
+      // _logger.finer("Ignored non-video path: ${event.path}");
+      return;
+    }
+    _logger.fine("Watch event ${event.type} for path: ${event.path}");
 
     if (event.type == ChangeType.REMOVE) {
-      await _thumbnailService.deleteThumbnailForVideoPath(
-        _normalizedPath(event.path),
-      );
-      await repository.deleteByPath(_normalizedPath(event.path));
+      final String normalizedPath = _normalizedPath(event.path);
+      await _thumbnailService.deleteThumbnailForVideoPath(normalizedPath);
+      await repository.deleteByPath(normalizedPath);
       _logger.info("Removed media record: ${_normalizedPath(event.path)}");
       await _emitSnapshot();
       return;
     }
 
     if (event.type == ChangeType.ADD || event.type == ChangeType.MODIFY) {
+      final String normalizedPath = _normalizedPath(event.path);
+      await repository.clearUnreadableIssue(normalizedPath);
       await _upsertFromPath(
         repository: repository,
         filePath: event.path,
@@ -133,14 +175,20 @@ class IngestionService {
       return;
     }
     final FileStat stat = await file.stat();
+    final String normalizedPath = _normalizedPath(file.path);
     await repository.upsertMasterMedia(
-      filePath: _normalizedPath(file.path),
+      filePath: normalizedPath,
       fileName: p.basename(file.path),
       fileSizeBytes: stat.size,
       modifiedAtMs: stat.modified.millisecondsSinceEpoch,
       createdAtMs: stat.changed.millisecondsSinceEpoch,
     );
-    await _thumbnailService.generateThumbnail(_normalizedPath(file.path));
+    if (stat.size == 0) {
+      await repository.setMediaIssue(normalizedPath, MediaIssue.empty);
+    } else {
+      await repository.clearEmptyIssue(normalizedPath);
+    }
+    _thumbnailService.requestThumbnail(normalizedPath);
   }
 
   Future<void> _emitSnapshot() async {
@@ -148,6 +196,39 @@ class IngestionService {
     final List<MasterMediaFile> current = await repository.listAll();
     _logger.fine("Emitting media snapshot with ${current.length} item(s).");
     _mediaController.add(current);
+  }
+
+  Future<void> _onThumbnailSettled(
+    String normalizedPath,
+    String? failureDetail,
+  ) async {
+    if (_disposed) {
+      return;
+    }
+    final MediaRepository repository = _requireRepository();
+    if (failureDetail != null) {
+      await repository.setMediaIssue(
+        normalizedPath,
+        MediaIssue.unreadable,
+        detail: failureDetail,
+      );
+      _scheduleDebouncedSnapshot();
+      return;
+    }
+    final int cleared = await repository.clearUnreadableIssue(normalizedPath);
+    if (cleared > 0) {
+      _scheduleDebouncedSnapshot();
+    }
+  }
+
+  void _scheduleDebouncedSnapshot() {
+    _snapshotDebounce?.cancel();
+    _snapshotDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (_disposed) {
+        return;
+      }
+      unawaited(_emitSnapshot());
+    });
   }
 
   MediaRepository _requireRepository() {

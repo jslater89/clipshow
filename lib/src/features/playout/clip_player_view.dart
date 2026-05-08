@@ -29,6 +29,14 @@ class SeekLongForwardIntent extends Intent {
   const SeekLongForwardIntent();
 }
 
+class MarkInIntent extends Intent {
+  const MarkInIntent();
+}
+
+class MarkOutIntent extends Intent {
+  const MarkOutIntent();
+}
+
 class ClipPlayerView extends StatefulWidget {
   const ClipPlayerView({
     super.key,
@@ -42,6 +50,9 @@ class ClipPlayerView extends StatefulWidget {
     this.longSeekStep = const Duration(seconds: 15),
     this.overlay,
     this.onEscapePressed,
+    this.onPositionChanged,
+    this.onMarkInRequested,
+    this.onMarkOutRequested,
   });
 
   final String filePath;
@@ -54,6 +65,9 @@ class ClipPlayerView extends StatefulWidget {
   final Duration longSeekStep;
   final Widget? overlay;
   final Future<void> Function()? onEscapePressed;
+  final ValueChanged<int>? onPositionChanged;
+  final VoidCallback? onMarkInRequested;
+  final VoidCallback? onMarkOutRequested;
 
   @override
   State<ClipPlayerView> createState() => _ClipPlayerViewState();
@@ -90,8 +104,9 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     });
 
     try {
-      final VideoPlayerController controller =
-          VideoPlayerController.file(File(widget.filePath));
+      final VideoPlayerController controller = VideoPlayerController.file(
+        File(widget.filePath),
+      );
       _controller = controller;
       await controller.initialize();
       await controller.seekTo(Duration(milliseconds: widget.startTimeMs));
@@ -103,7 +118,9 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         setState(() {});
       }
     } catch (error) {
-      _logger.severe("Failed to initialize player for ${widget.filePath}: $error");
+      _logger.severe(
+        "Failed to initialize player for ${widget.filePath}: $error",
+      );
       if (mounted) {
         setState(() {
           _errorMessage = "Unable to load selected media.";
@@ -126,6 +143,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         controller.seekTo(Duration(milliseconds: endMs));
       }
     }
+    widget.onPositionChanged?.call(controller.value.position.inMilliseconds);
     if (mounted) {
       setState(() {});
     }
@@ -151,9 +169,10 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
 
     final Duration position = controller.value.position;
     final Duration duration = controller.value.duration;
+    final Duration clipStart = Duration(milliseconds: widget.startTimeMs);
     Duration next = position + offset;
-    if (next < Duration.zero) {
-      next = Duration.zero;
+    if (next < clipStart) {
+      next = clipStart;
     }
 
     if (widget.endTimeMs != null) {
@@ -195,8 +214,10 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     return Shortcuts(
       shortcuts: <ShortcutActivator, Intent>{
         const SingleActivator(LogicalKeyboardKey.space): const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft): const SeekBackwardIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowRight): const SeekForwardIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft):
+            const SeekBackwardIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowRight):
+            const SeekForwardIntent(),
         const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true):
             const SeekShortBackwardIntent(),
         const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true):
@@ -205,8 +226,13 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
             const SeekLongBackwardIntent(),
         const SingleActivator(LogicalKeyboardKey.arrowRight, control: true):
             const SeekLongForwardIntent(),
+        if (widget.onMarkInRequested != null)
+          const SingleActivator(LogicalKeyboardKey.keyI): const MarkInIntent(),
+        if (widget.onMarkOutRequested != null)
+          const SingleActivator(LogicalKeyboardKey.keyO): const MarkOutIntent(),
         if (widget.onEscapePressed != null)
-          const SingleActivator(LogicalKeyboardKey.escape): const DismissIntent(),
+          const SingleActivator(LogicalKeyboardKey.escape):
+              const DismissIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -252,6 +278,18 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
               return null;
             },
           ),
+          MarkInIntent: CallbackAction<MarkInIntent>(
+            onInvoke: (_) {
+              widget.onMarkInRequested?.call();
+              return null;
+            },
+          ),
+          MarkOutIntent: CallbackAction<MarkOutIntent>(
+            onInvoke: (_) {
+              widget.onMarkOutRequested?.call();
+              return null;
+            },
+          ),
           DismissIntent: CallbackAction<DismissIntent>(
             onInvoke: (_) {
               _handleEscape();
@@ -259,10 +297,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
             },
           ),
         },
-        child: Focus(
-          autofocus: true,
-          child: _buildBody(),
-        ),
+        child: Focus(autofocus: true, child: _buildBody()),
       ),
     );
   }
@@ -278,9 +313,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       );
     }
     if (controller == null || !controller.value.isInitialized) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
     return Stack(
       fit: StackFit.expand,
