@@ -22,9 +22,13 @@ class DashboardWorkspaceHeader extends StatelessWidget {
       children: <Widget>[
         Tooltip(
           message: "Open workspace",
-          child: IconButton(
-            onPressed: viewModel.isLoading ? null : viewModel.pickAndSetWorkspace,
-            icon: const Icon(Icons.folder_open),
+          child: Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            child: IconButton(
+              onPressed: viewModel.isLoading ? null : viewModel.pickAndSetWorkspace,
+              icon: const Icon(Icons.folder_open),
+            ),
           ),
         ),
         const SizedBox(width: 8),
@@ -52,9 +56,13 @@ class DashboardWorkspaceHeader extends StatelessWidget {
         if (obsConnectionHealthy != null) const SizedBox(width: 8),
         Tooltip(
           message: "Workspace settings",
-          child: IconButton(
-            onPressed: onWorkspaceSettingsRequested,
-            icon: const Icon(Icons.settings),
+          child: Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            child: IconButton(
+              onPressed: onWorkspaceSettingsRequested,
+              icon: const Icon(Icons.settings),
+            ),
           ),
         ),
       ],

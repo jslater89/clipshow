@@ -35,6 +35,14 @@ class PlayoutSeekMicroForwardIntent extends Intent {
   const PlayoutSeekMicroForwardIntent();
 }
 
+class PlayoutSeekToStartIntent extends Intent {
+  const PlayoutSeekToStartIntent();
+}
+
+class PlayoutSeekToEndIntent extends Intent {
+  const PlayoutSeekToEndIntent();
+}
+
 class PlayoutToggleHelpIntent extends Intent {
   const PlayoutToggleHelpIntent();
 }
@@ -122,6 +130,10 @@ class PlayoutHotkeysLayer extends StatelessWidget {
             const PlayoutSeekMicroBackwardIntent(),
         const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true):
             const PlayoutSeekMicroForwardIntent(),
+        const SingleActivator(LogicalKeyboardKey.home):
+            const PlayoutSeekToStartIntent(),
+        const SingleActivator(LogicalKeyboardKey.end):
+            const PlayoutSeekToEndIntent(),
         const SingleActivator(LogicalKeyboardKey.keyH):
             const PlayoutToggleHelpIntent(),
         if (onTelestratorToggleRequested != null)
@@ -212,6 +224,18 @@ class PlayoutHotkeysLayer extends StatelessWidget {
                   return null;
                 },
               ),
+          PlayoutSeekToStartIntent: CallbackAction<PlayoutSeekToStartIntent>(
+            onInvoke: (_) {
+              controller.seekToStart();
+              return null;
+            },
+          ),
+          PlayoutSeekToEndIntent: CallbackAction<PlayoutSeekToEndIntent>(
+            onInvoke: (_) {
+              controller.seekToEnd();
+              return null;
+            },
+          ),
           PlayoutToggleHelpIntent: CallbackAction<PlayoutToggleHelpIntent>(
             onInvoke: (_) {
               onHelpToggleRequested();

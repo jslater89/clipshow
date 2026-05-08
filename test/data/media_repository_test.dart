@@ -7,6 +7,7 @@ import "package:sqflite_common_ffi/sqflite_ffi.dart";
 import "package:obs_clipshow/src/data/app_database.dart";
 import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
+import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/media/workspace.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -145,6 +146,50 @@ void main() {
       await database.close();
     });
 
+    test("persists display name overrides for masters and clips", () async {
+      final AppDatabase appDatabase = AppDatabase();
+      final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+      final database = await appDatabase.openForWorkspace(workspace);
+      final MediaRepository repository = MediaRepository(database);
+
+      await repository.upsertMasterMedia(
+        filePath: "/tmp/source.mp4",
+        fileName: "source.mp4",
+        fileSizeBytes: 3000,
+        modifiedAtMs: 3000,
+        createdAtMs: 1000,
+      );
+      final MasterMediaFile master = (await repository.listAll()).single;
+      await repository.createClip(masterMediaId: master.id, inMs: 1000, outMs: 4000);
+      final MediaClip clip = (await repository.listClips()).single;
+
+      await repository.setDisplayNameOverride(
+        mediaType: MediaListItemType.master,
+        mediaId: master.id,
+        displayNameOverride: "Warmup Angle",
+      );
+      await repository.setDisplayNameOverride(
+        mediaType: MediaListItemType.clip,
+        mediaId: clip.id,
+        displayNameOverride: "Goal Replay",
+      );
+
+      final MasterMediaFile updatedMaster = (await repository.listAll()).single;
+      final MediaClip updatedClip = (await repository.listClips()).single;
+      expect(updatedMaster.displayNameOverride, "Warmup Angle");
+      expect(updatedClip.displayNameOverride, "Goal Replay");
+
+      await repository.setDisplayNameOverride(
+        mediaType: MediaListItemType.clip,
+        mediaId: clip.id,
+        displayNameOverride: " ",
+      );
+      final MediaClip resetClip = (await repository.listClips()).single;
+      expect(resetClip.displayNameOverride, isNull);
+
+      await database.close();
+    });
+
     test("upgrades v2 workspace database to include new tag tables", () async {
       sqfliteFfiInit();
       final String dbPath = p.join(tempDirectory.path, "obs_clipshow.db");
@@ -256,6 +301,105 @@ void main() {
           "scene_switch_profiles",
           "workspace_settings",
         ]),
+      );
+      await upgraded.close();
+    });
+
+    test("upgrades v4 workspace database to include display name overrides", () async {
+      sqfliteFfiInit();
+      final String dbPath = p.join(tempDirectory.path, "obs_clipshow.db");
+      final Database legacy = await databaseFactoryFfi.openDatabase(
+        dbPath,
+        options: OpenDatabaseOptions(
+          version: 4,
+          onCreate: (Database db, int version) async {
+            await db.execute("""
+              CREATE TABLE master_media_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_path TEXT NOT NULL UNIQUE,
+                file_name TEXT NOT NULL,
+                file_size_bytes INTEGER NOT NULL,
+                modified_at_ms INTEGER NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                media_issue TEXT NOT NULL DEFAULT 'none',
+                media_issue_detail TEXT
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE clips (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                master_media_id INTEGER NOT NULL,
+                in_ms INTEGER NOT NULL,
+                out_ms INTEGER,
+                created_at_ms INTEGER NOT NULL
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE media_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_type TEXT NOT NULL,
+                media_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                UNIQUE(media_type, media_id, tag_id)
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE saved_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE workspace_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE scene_switch_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE ignored_folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                relative_path TEXT NOT NULL UNIQUE
+              );
+            """);
+          },
+        ),
+      );
+      await legacy.close();
+
+      final AppDatabase appDatabase = AppDatabase();
+      final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+      final Database upgraded = await appDatabase.openForWorkspace(workspace);
+      final List<Map<String, Object?>> masterColumns = await upgraded.rawQuery(
+        "PRAGMA table_info(master_media_files);",
+      );
+      final List<Map<String, Object?>> clipColumns = await upgraded.rawQuery(
+        "PRAGMA table_info(clips);",
+      );
+      expect(
+        masterColumns.any(
+          (Map<String, Object?> row) => row["name"] == "display_name_override",
+        ),
+        isTrue,
+      );
+      expect(
+        clipColumns.any(
+          (Map<String, Object?> row) => row["name"] == "display_name_override",
+        ),
+        isTrue,
       );
       await upgraded.close();
     });

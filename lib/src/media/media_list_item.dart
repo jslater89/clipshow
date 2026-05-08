@@ -26,6 +26,16 @@ class MediaListItem {
   String get fileName =>
       type == MediaListItemType.master ? master!.fileName : clip!.fileName;
 
+  String get displayName {
+    final String? override = type == MediaListItemType.master
+        ? master!.displayNameOverride
+        : clip!.displayNameOverride;
+    if (override == null || override.trim().isEmpty) {
+      return fileName;
+    }
+    return override;
+  }
+
   MediaIssue get mediaIssue =>
       type == MediaListItemType.master ? master!.mediaIssue : MediaIssue.none;
 

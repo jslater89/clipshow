@@ -29,7 +29,14 @@ class _DashboardBodyState extends State<DashboardBody> {
   static const double _resizeHandleHeight = 20.0;
 
   final GlobalKey _splitPaneKey = GlobalKey();
+  final FocusNode _previewFocusNode = FocusNode(debugLabel: "DashboardPreviewFocus");
   double _previewToTagRatio = 2.0;
+
+  @override
+  void dispose() {
+    _previewFocusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,6 +67,11 @@ class _DashboardBodyState extends State<DashboardBody> {
             mediaItems: visibleMediaItems,
             scrollController: widget.scrollController,
             onPlayClip: widget.onPlayClip,
+            onPreviewFocusRequested: _previewFocusNode.requestFocus,
+            onMediaItemSelected: (MediaListItem item) {
+              viewModel.selectItem(item);
+              _previewFocusNode.requestFocus();
+            },
           ),
         ),
         const SizedBox(width: 16),
@@ -72,10 +84,18 @@ class _DashboardBodyState extends State<DashboardBody> {
                 children: <Widget>[
                   Expanded(
                     flex: previewFlex,
-                    child: DashboardPreviewPanel(onPlayClip: widget.onPlayClip),
+                    child: DashboardPreviewPanel(
+                      onPlayClip: widget.onPlayClip,
+                      focusNode: _previewFocusNode,
+                    ),
                   ),
                   _buildResizeHandle(context),
-                  Expanded(flex: tagFlex, child: DashboardTagPanel()),
+                  Expanded(
+                    flex: tagFlex,
+                    child: DashboardTagPanel(
+                      onPreviewFocusRequested: _previewFocusNode.requestFocus,
+                    ),
+                  ),
                 ],
               );
             },

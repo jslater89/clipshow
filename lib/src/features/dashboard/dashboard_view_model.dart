@@ -138,6 +138,17 @@ class DashboardViewModel extends ChangeNotifier {
         .toList();
   }
 
+  List<String> searchTagSuggestionsFor(String query) {
+    final String normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return _allTags.take(20).toList();
+    }
+    return _allTags
+        .where((String tag) => tag.toLowerCase().contains(normalized))
+        .take(20)
+        .toList();
+  }
+
   Future<void> initialize() async {
     _logger.info("Initializing dashboard state.");
     _isLoading = true;
@@ -243,6 +254,19 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void selectMasterForClip(MediaListItem clipItem) {
+    if (clipItem.type != MediaListItemType.clip) {
+      return;
+    }
+    final int masterId = clipItem.clip!.masterMediaId;
+    for (final MediaListItem item in _allItems) {
+      if (item.type == MediaListItemType.master && item.id == masterId) {
+        selectItem(item);
+        return;
+      }
+    }
+  }
+
   Future<void> addTagToSelectedMedia(String tag) async {
     final MediaListItem? item = selectedItem;
     if (item == null) {
@@ -342,6 +366,19 @@ class DashboardViewModel extends ChangeNotifier {
       return;
     }
     await repository.removeSavedTag(tag);
+    await _reloadFromRepository();
+  }
+
+  Future<void> setDisplayNameOverride(MediaListItem item, String? override) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.setDisplayNameOverride(
+      mediaType: item.type,
+      mediaId: item.id,
+      displayNameOverride: override,
+    );
     await _reloadFromRepository();
   }
 
@@ -469,6 +506,59 @@ class DashboardViewModel extends ChangeNotifier {
     await repository.deleteClipById(item.id);
     await _reloadFromRepository();
     return null;
+  }
+
+  Future<void> nudgeSelectedClipStart(int deltaMs) async {
+    final MediaRepository? repository = _mediaRepository;
+    final MediaListItem? item = selectedItem;
+    if (repository == null ||
+        item == null ||
+        item.type != MediaListItemType.clip) {
+      return;
+    }
+    final int currentIn = item.clip!.inMs;
+    final int? currentOut = item.clip!.outMs;
+    int nextIn = currentIn + deltaMs;
+    if (nextIn < 0) {
+      nextIn = 0;
+    }
+    if (currentOut != null && nextIn >= currentOut) {
+      nextIn = currentOut - 1;
+      if (nextIn < 0) {
+        nextIn = 0;
+      }
+    }
+    await repository.updateClipRange(
+      clipId: item.id,
+      inMs: nextIn,
+      outMs: currentOut,
+    );
+    await _reloadFromRepository();
+  }
+
+  Future<void> nudgeSelectedClipEnd(int deltaMs) async {
+    final MediaRepository? repository = _mediaRepository;
+    final MediaListItem? item = selectedItem;
+    if (repository == null ||
+        item == null ||
+        item.type != MediaListItemType.clip) {
+      return;
+    }
+    final int currentIn = item.clip!.inMs;
+    final int? currentOut = item.clip!.outMs;
+    if (currentOut == null) {
+      return;
+    }
+    int nextOut = currentOut + deltaMs;
+    if (nextOut <= currentIn) {
+      nextOut = currentIn + 1;
+    }
+    await repository.updateClipRange(
+      clipId: item.id,
+      inMs: currentIn,
+      outMs: nextOut,
+    );
+    await _reloadFromRepository();
   }
 
   Future<void> _reloadFromRepository() async {
@@ -686,6 +776,10 @@ class DashboardViewModel extends ChangeNotifier {
         final bool isClip = item.type == MediaListItemType.clip;
         return <String, Object?>{
           "identifier": isClip ? item.stableKey : item.fileName,
+          "fileName": item.fileName,
+          "displayNameOverride": isClip
+              ? item.clip!.displayNameOverride
+              : item.master!.displayNameOverride,
           "relativePath": p.relative(item.filePath, from: workspaceRoot),
           "tags": (tagsByItem[item.stableKey] ?? <String>{}).toList()..sort(),
           "clipRange": isClip
@@ -745,8 +839,11 @@ class DashboardViewModel extends ChangeNotifier {
       }
       if (fileNameSearch.isNotEmpty &&
           !(_fileSearchUsesFullPath
-              ? item.filePath.toLowerCase().contains(fileNameSearch)
-              : item.fileName.toLowerCase().contains(fileNameSearch))) {
+              ? item.filePath.toLowerCase().contains(fileNameSearch) ||
+                    item.fileName.toLowerCase().contains(fileNameSearch) ||
+                    item.displayName.toLowerCase().contains(fileNameSearch)
+              : item.fileName.toLowerCase().contains(fileNameSearch) ||
+                    item.displayName.toLowerCase().contains(fileNameSearch))) {
         return false;
       }
       return true;

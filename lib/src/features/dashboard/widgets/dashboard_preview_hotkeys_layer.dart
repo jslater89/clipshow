@@ -47,11 +47,20 @@ class PreviewSeekMicroForwardIntent extends Intent {
   const PreviewSeekMicroForwardIntent();
 }
 
+class PreviewSeekToStartIntent extends Intent {
+  const PreviewSeekToStartIntent();
+}
+
+class PreviewSeekToEndIntent extends Intent {
+  const PreviewSeekToEndIntent();
+}
+
 class DashboardPreviewHotkeysLayer extends StatelessWidget {
   const DashboardPreviewHotkeysLayer({
     super.key,
     required this.child,
     required this.controller,
+    required this.focusNode,
     this.onMarkInRequested,
     this.onMarkOutRequested,
     this.onSaveClipRequested,
@@ -59,6 +68,7 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
 
   final Widget child;
   final ClipPlayerController controller;
+  final FocusNode focusNode;
   final VoidCallback? onMarkInRequested;
   final VoidCallback? onMarkOutRequested;
   final VoidCallback? onSaveClipRequested;
@@ -84,6 +94,10 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
             const PreviewSeekMicroBackwardIntent(),
         const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true):
             const PreviewSeekMicroForwardIntent(),
+        const SingleActivator(LogicalKeyboardKey.home):
+            const PreviewSeekToStartIntent(),
+        const SingleActivator(LogicalKeyboardKey.end):
+            const PreviewSeekToEndIntent(),
         if (onMarkInRequested != null)
           const SingleActivator(LogicalKeyboardKey.keyI):
               const PreviewMarkInIntent(),
@@ -156,6 +170,18 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
                   return null;
                 },
               ),
+          PreviewSeekToStartIntent: CallbackAction<PreviewSeekToStartIntent>(
+            onInvoke: (_) {
+              controller.seekToStart();
+              return null;
+            },
+          ),
+          PreviewSeekToEndIntent: CallbackAction<PreviewSeekToEndIntent>(
+            onInvoke: (_) {
+              controller.seekToEnd();
+              return null;
+            },
+          ),
           PreviewMarkInIntent: CallbackAction<PreviewMarkInIntent>(
             onInvoke: (_) {
               onMarkInRequested?.call();
@@ -175,7 +201,7 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
             },
           ),
         },
-        child: Focus(autofocus: true, child: child),
+        child: Focus(focusNode: focusNode, autofocus: true, child: child),
       ),
     );
   }

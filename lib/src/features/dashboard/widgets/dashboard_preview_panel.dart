@@ -14,9 +14,14 @@ import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 
 class DashboardPreviewPanel extends StatefulWidget {
-  const DashboardPreviewPanel({super.key, required this.onPlayClip});
+  const DashboardPreviewPanel({
+    super.key,
+    required this.onPlayClip,
+    required this.focusNode,
+  });
 
   final void Function(PlayoutClip clip) onPlayClip;
+  final FocusNode focusNode;
 
   @override
   State<DashboardPreviewPanel> createState() => _DashboardPreviewPanelState();
@@ -27,6 +32,10 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
   static const String _debugLogPath =
       "/home/jay/development/personal/obs_clipshow/.cursor/debug-c1d67a.log";
   String? _lastLoggedSelectionKey;
+  static const EdgeInsets _nudgeButtonPadding = EdgeInsets.symmetric(
+    horizontal: 8,
+    vertical: 4,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -52,6 +61,8 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
     final MediaIssue previewIssue = selectedItem == null
         ? MediaIssue.none
         : selectedItem.mediaIssue;
+    final bool isClipSelection =
+        selectedItem != null && selectedItem.type == MediaListItemType.clip;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -61,50 +72,55 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
             const Text("Preview"),
             const SizedBox(height: 12),
             Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  color: Colors.black,
-                  child: selectedItem == null
-                      ? const Center(
-                          child: Text(
-                            "Select a file from the list.",
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        )
-                      : previewIssue != MediaIssue.none
-                      ? _PreviewIssueMessage(
-                          issue: previewIssue,
-                          detail: selectedItem.mediaIssueDetail,
-                        )
-                      : DashboardPreviewHotkeysLayer(
-                          controller: _previewPlayerController,
-                          onMarkInRequested: selectedMedia == null
-                              ? null
-                              : viewModel.markInAtCurrentPosition,
-                          onMarkOutRequested: selectedMedia == null
-                              ? null
-                              : viewModel.markOutAtCurrentPosition,
-                          onSaveClipRequested: selectedMedia == null
-                              ? null
-                              : () =>
-                                    viewModel.saveClipFromCurrentMarks(context),
-                          child: ClipPlayerView(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => widget.focusNode.requestFocus(),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    color: Colors.black,
+                    child: selectedItem == null
+                        ? const Center(
+                            child: Text(
+                              "Select a file from the list.",
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          )
+                        : previewIssue != MediaIssue.none
+                        ? _PreviewIssueMessage(
+                            issue: previewIssue,
+                            detail: selectedItem.mediaIssueDetail,
+                          )
+                        : DashboardPreviewHotkeysLayer(
                             controller: _previewPlayerController,
-                            filePath: selectedItem.filePath,
-                            startTimeMs:
-                                selectedItem.type == MediaListItemType.clip
-                                ? selectedItem.clip!.inMs
-                                : 0,
-                            endTimeMs:
-                                selectedItem.type == MediaListItemType.clip
-                                ? selectedItem.clip!.outMs
-                                : null,
-                            autoPlay: false,
-                            showControls: true,
-                            onPositionChanged: viewModel.setPreviewPositionMs,
+                            focusNode: widget.focusNode,
+                            onMarkInRequested: selectedMedia == null
+                                ? null
+                                : viewModel.markInAtCurrentPosition,
+                            onMarkOutRequested: selectedMedia == null
+                                ? null
+                                : viewModel.markOutAtCurrentPosition,
+                            onSaveClipRequested: selectedMedia == null
+                                ? null
+                                : () =>
+                                      viewModel.saveClipFromCurrentMarks(context),
+                            child: ClipPlayerView(
+                              controller: _previewPlayerController,
+                              filePath: selectedItem.filePath,
+                              startTimeMs:
+                                  selectedItem.type == MediaListItemType.clip
+                                  ? selectedItem.clip!.inMs
+                                  : 0,
+                              endTimeMs:
+                                  selectedItem.type == MediaListItemType.clip
+                                  ? selectedItem.clip!.outMs
+                                  : null,
+                              autoPlay: false,
+                              showControls: true,
+                              onPositionChanged: viewModel.setPreviewPositionMs,
+                            ),
                           ),
-                        ),
+                  ),
                 ),
               ),
             ),
@@ -112,32 +128,125 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
             Wrap(
               spacing: 8,
               children: <Widget>[
-                OutlinedButton(
-                  onPressed: selectedMedia == null
-                      ? null
-                      : viewModel.markInAtCurrentPosition,
-                  child: Text(
-                    viewModel.markInMs == null
-                        ? "(i) Mark In"
-                        : "(i) Mark In ${formatMs(viewModel.markInMs!)}",
+                if (!isClipSelection) ...<Widget>[
+                  OutlinedButton(
+                    onPressed: selectedMedia == null
+                        ? null
+                        : viewModel.markInAtCurrentPosition,
+                    child: Text(
+                      viewModel.markInMs == null
+                          ? "(i) Mark In"
+                          : "(i) Mark In ${formatMs(viewModel.markInMs!)}",
+                    ),
                   ),
-                ),
-                OutlinedButton(
-                  onPressed: selectedMedia == null
-                      ? null
-                      : viewModel.markOutAtCurrentPosition,
-                  child: Text(
-                    viewModel.markOutMs == null
-                        ? "(o) Mark Out"
-                        : "Mark Out ${formatMs(viewModel.markOutMs!)}",
+                  OutlinedButton(
+                    onPressed: selectedMedia == null
+                        ? null
+                        : viewModel.markOutAtCurrentPosition,
+                    child: Text(
+                      viewModel.markOutMs == null
+                          ? "(o) Mark Out"
+                          : "Mark Out ${formatMs(viewModel.markOutMs!)}",
+                    ),
                   ),
-                ),
-                OutlinedButton(
-                  onPressed: selectedMedia == null
-                      ? null
-                      : () => viewModel.saveClipFromCurrentMarks(context),
-                  child: const Text("(s) Save Clip"),
-                ),
+                  OutlinedButton(
+                    onPressed: selectedMedia == null
+                        ? null
+                        : () => viewModel.saveClipFromCurrentMarks(context),
+                    child: const Text("(s) Save Clip"),
+                  ),
+                ],
+                if (isClipSelection) ...<Widget>[
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text("Nudge Start:"),
+                  ),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: _nudgeButtonPadding,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () =>
+                        unawaited(viewModel.nudgeSelectedClipStart(-2500)),
+                    child: const Text("-2.5s"),
+                  ),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: _nudgeButtonPadding,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () =>
+                        unawaited(viewModel.nudgeSelectedClipStart(-500)),
+                    child: const Text("-0.5s"),
+                  ),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: _nudgeButtonPadding,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () =>
+                        unawaited(viewModel.nudgeSelectedClipStart(500)),
+                    child: const Text("+0.5s"),
+                  ),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: _nudgeButtonPadding,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () =>
+                        unawaited(viewModel.nudgeSelectedClipStart(2500)),
+                    child: const Text("+2.5s"),
+                  ),
+                  const SizedBox(width: 12),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text("End:"),
+                  ),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: _nudgeButtonPadding,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () =>
+                        unawaited(viewModel.nudgeSelectedClipEnd(-2500)),
+                    child: const Text("-2.5s"),
+                  ),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: _nudgeButtonPadding,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () =>
+                        unawaited(viewModel.nudgeSelectedClipEnd(-500)),
+                    child: const Text("-0.5s"),
+                  ),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: _nudgeButtonPadding,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () =>
+                        unawaited(viewModel.nudgeSelectedClipEnd(500)),
+                    child: const Text("+0.5s"),
+                  ),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: _nudgeButtonPadding,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () =>
+                        unawaited(viewModel.nudgeSelectedClipEnd(2500)),
+                    child: const Text("+2.5s"),
+                  ),
+                ],
                 OutlinedButton.icon(
                   onPressed:
                       selectedItem == null ||

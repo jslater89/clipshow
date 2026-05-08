@@ -184,6 +184,7 @@ class MediaRepository {
       SELECT
         clips.id,
         clips.master_media_id,
+        clips.display_name_override,
         clips.in_ms,
         clips.out_ms,
         clips.created_at_ms,
@@ -210,6 +211,45 @@ class MediaRepository {
       );
       await _deleteOrphanTags(txn);
     });
+  }
+
+  Future<void> updateClipRange({
+    required int clipId,
+    required int inMs,
+    required int? outMs,
+  }) async {
+    await _database.update(
+      "clips",
+      <String, Object?>{
+        "in_ms": inMs,
+        "out_ms": outMs,
+      },
+      where: "id = ?",
+      whereArgs: <Object?>[clipId],
+    );
+  }
+
+  Future<void> setDisplayNameOverride({
+    required MediaListItemType mediaType,
+    required int mediaId,
+    required String? displayNameOverride,
+  }) async {
+    final String? normalized = _normalizeDisplayNameOverride(displayNameOverride);
+    if (mediaType == MediaListItemType.master) {
+      await _database.update(
+        "master_media_files",
+        <String, Object?>{"display_name_override": normalized},
+        where: "id = ?",
+        whereArgs: <Object?>[mediaId],
+      );
+      return;
+    }
+    await _database.update(
+      "clips",
+      <String, Object?>{"display_name_override": normalized},
+      where: "id = ?",
+      whereArgs: <Object?>[mediaId],
+    );
   }
 
   Future<Set<String>> listTagsForMedia({
@@ -845,5 +885,16 @@ class MediaRepository {
       return detail;
     }
     return detail.substring(0, _maxIssueDetailLength);
+  }
+
+  String? _normalizeDisplayNameOverride(String? raw) {
+    if (raw == null) {
+      return null;
+    }
+    final String trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed;
   }
 }

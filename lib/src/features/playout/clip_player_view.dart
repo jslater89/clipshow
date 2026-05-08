@@ -16,6 +16,14 @@ class ClipPlayerController {
     await _state?._seekBy(offset);
   }
 
+  Future<void> seekToStart() async {
+    await _state?._seekToStart();
+  }
+
+  Future<void> seekToEnd() async {
+    await _state?._seekToEnd();
+  }
+
   void _attach(_ClipPlayerViewState state) {
     _state = state;
   }
@@ -186,6 +194,27 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     }
 
     await controller.seekTo(next);
+  }
+
+  Future<void> _seekToStart() async {
+    final VideoPlayerController? controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+    await controller.seekTo(Duration(milliseconds: widget.startTimeMs));
+  }
+
+  Future<void> _seekToEnd() async {
+    final VideoPlayerController? controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+    final int? clipEndMs = widget.endTimeMs;
+    if (clipEndMs != null) {
+      await controller.seekTo(Duration(milliseconds: clipEndMs));
+      return;
+    }
+    await controller.seekTo(controller.value.duration);
   }
 
   @override

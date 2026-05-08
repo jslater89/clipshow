@@ -16,12 +16,16 @@ class DashboardFileListPanel extends StatelessWidget {
     required this.workspacePath,
     required this.mediaItems,
     required this.onPlayClip,
+    required this.onMediaItemSelected,
+    required this.onPreviewFocusRequested,
     this.scrollController,
   });
 
   final String workspacePath;
   final List<MediaListItem> mediaItems;
   final void Function(PlayoutClip clip) onPlayClip;
+  final void Function(MediaListItem item) onMediaItemSelected;
+  final VoidCallback onPreviewFocusRequested;
   final ScrollController? scrollController;
 
   @override
@@ -45,7 +49,7 @@ class DashboardFileListPanel extends StatelessWidget {
                     Expanded(
                       child: Autocomplete<String>(
                         optionsBuilder: (TextEditingValue textEditingValue) {
-                          return viewModel.tagSuggestionsFor(
+                          return viewModel.searchTagSuggestionsFor(
                             textEditingValue.text,
                           );
                         },
@@ -82,6 +86,10 @@ class DashboardFileListPanel extends StatelessWidget {
                                   border: OutlineInputBorder(),
                                 ),
                                 onChanged: viewModel.setTagSearchQuery,
+                                onTapOutside: (_) {
+                                  focusNode.unfocus();
+                                  onPreviewFocusRequested();
+                                },
                                 onSubmitted: (_) {
                                   onFieldSubmitted();
                                   if (handledSearchAutocompleteSelection) {
@@ -121,6 +129,10 @@ class DashboardFileListPanel extends StatelessWidget {
                           ),
                         ),
                         onChanged: viewModel.setFileNameSearchQuery,
+                        onTapOutside: (_) {
+                          FocusScope.of(context).unfocus();
+                          onPreviewFocusRequested();
+                        },
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -193,10 +205,26 @@ class DashboardFileListPanel extends StatelessWidget {
                     videoPath: item.filePath,
                     issue: mediaIssue,
                   ),
-                  title: Text(
-                    item.type == MediaListItemType.master
-                        ? item.fileName
-                        : "${item.fileName} (${clipRangeLabel(item.clip!)})",
+                  title: Text.rich(
+                    TextSpan(
+                      children: <InlineSpan>[
+                        TextSpan(
+                          text: item.type == MediaListItemType.master
+                              ? item.displayName
+                              : "${item.displayName} (${clipRangeLabel(item.clip!)})",
+                        ),
+                        if (item.displayName != item.fileName)
+                          const WidgetSpan(
+                            alignment: PlaceholderAlignment.middle,
+                            child: Padding(
+                              padding: EdgeInsets.only(left: 6),
+                              child: Icon(Icons.edit, size: 14),
+                            ),
+                          ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -228,7 +256,9 @@ class DashboardFileListPanel extends StatelessWidget {
                       ),
                     ],
                   ),
-                  onTap: () => viewModel.selectItem(item),
+                  onTap: () {
+                    onMediaItemSelected(item);
+                  },
                   trailing: IconButton(
                     tooltip: mediaIssue == MediaIssue.none
                         ? "Play"

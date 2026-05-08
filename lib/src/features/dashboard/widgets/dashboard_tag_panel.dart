@@ -3,12 +3,18 @@ import "dart:async";
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
+import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 
 class DashboardTagPanel extends StatefulWidget {
-  const DashboardTagPanel({super.key});
+  const DashboardTagPanel({
+    super.key,
+    required this.onPreviewFocusRequested,
+  });
+
+  final VoidCallback onPreviewFocusRequested;
 
   @override
   State<DashboardTagPanel> createState() => _DashboardTagPanelState();
@@ -43,25 +49,84 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                   child: Center(child: Text("Select a file to manage tags.")),
                 )
               else ...<Widget>[
-                Text(
-                  selectedItem.fileName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Flexible(
+                      child: Text(
+                        selectedItem.displayName == selectedItem.fileName
+                            ? selectedItem.fileName
+                            : "${selectedItem.displayName} (${selectedItem.fileName})",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      onPressed: () async {
+                        final String? updated = await _showRenameDisplayNameDialog(
+                          context,
+                          initialValue: selectedItem.displayName,
+                        );
+                        if (updated == null) {
+                          return;
+                        }
+                        final String? override =
+                            updated.trim().isEmpty ||
+                                updated.trim() == selectedItem.fileName
+                            ? null
+                            : updated.trim();
+                        await viewModel.setDisplayNameOverride(
+                          selectedItem,
+                          override,
+                        );
+                      },
+                      icon: const Icon(Icons.edit, size: 16),
+                      label: const Text("Edit"),
+                    ),
+                    TextButton(
+                      onPressed: selectedItem.displayName == selectedItem.fileName
+                          ? null
+                          : () => unawaited(
+                              viewModel.setDisplayNameOverride(selectedItem, null),
+                            ),
+                      child: const Text("Clear"),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
+                if (selectedItem.type == MediaListItemType.clip)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () =>
+                          viewModel.selectMasterForClip(selectedItem),
+                      icon: const Icon(Icons.link),
+                      label: const Text("Go to Source Master"),
+                    ),
+                  ),
+                if (selectedItem.type == MediaListItemType.clip)
+                  const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: selectedTags
                       .map(
-                        (String tag) => InputChip(
-                          label: Text(tag),
-                          backgroundColor: tagChipColor(context, tag),
-                          onDeleted: () => unawaited(
-                            viewModel.removeTagFromSelectedMedia(tag),
-                          ),
-                          onPressed: () => viewModel.toggleTagFilter(tag),
-                        ),
+                        (String tag) {
+                          final bool isSystemTag =
+                              tag == MediaRepository.masterTag ||
+                              tag == MediaRepository.clipTag;
+                          return InputChip(
+                            label: Text(tag),
+                            backgroundColor: tagChipColor(context, tag),
+                            onDeleted: isSystemTag
+                                ? null
+                                : () => unawaited(
+                                    viewModel.removeTagFromSelectedMedia(tag),
+                                  ),
+                            onPressed: () => viewModel.toggleTagFilter(tag),
+                          );
+                        },
                       )
                       .toList(),
                 ),
@@ -96,6 +161,10 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                                   labelText: "Add Tag",
                                   border: OutlineInputBorder(),
                                 ),
+                                onTapOutside: (_) {
+                                  focusNode.unfocus();
+                                  widget.onPreviewFocusRequested();
+                                },
                                 onSubmitted: (_) {
                                   onFieldSubmitted();
                                   if (_handledAutocompleteSelection) {
@@ -175,6 +244,10 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                                   labelText: "Add Saved Tag",
                                   border: OutlineInputBorder(),
                                 ),
+                                onTapOutside: (_) {
+                                  focusNode.unfocus();
+                                  widget.onPreviewFocusRequested();
+                                },
                                 onSubmitted: (_) {
                                   onFieldSubmitted();
                                   if (_handledSavedAutocompleteSelection) {
@@ -277,4 +350,44 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
     unawaited(viewModel.addSavedTag(tag));
     controller.clear();
   }
+
+}
+
+Future<String?> _showRenameDisplayNameDialog(
+  BuildContext context, {
+  required String initialValue,
+}) async {
+  String draft = initialValue;
+  return showDialog<String>(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: const Text("Rename Display Name"),
+        content: TextFormField(
+          initialValue: initialValue,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: "Display name",
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (String value) {
+            draft = value;
+          },
+          onFieldSubmitted: (_) {
+            Navigator.of(context).pop(draft);
+          },
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text("Cancel"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(draft),
+            child: const Text("Save"),
+          ),
+        ],
+      );
+    },
+  );
 }

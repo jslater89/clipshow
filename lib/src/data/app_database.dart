@@ -12,7 +12,7 @@ class AppDatabase {
     return databaseFactoryFfi.openDatabase(
       workspace.databasePath,
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 5,
         onConfigure: (Database db) async {
           await db.execute("PRAGMA foreign_keys = ON;");
         },
@@ -22,6 +22,7 @@ class AppDatabase {
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               file_path TEXT NOT NULL UNIQUE,
               file_name TEXT NOT NULL,
+              display_name_override TEXT,
               file_size_bytes INTEGER NOT NULL,
               modified_at_ms INTEGER NOT NULL,
               created_at_ms INTEGER NOT NULL,
@@ -53,6 +54,9 @@ class AppDatabase {
           if (oldVersion < 4) {
             await _createWorkspaceSettingsTables(db);
           }
+          if (oldVersion < 5) {
+            await _addDisplayNameOverrideColumnsIfMissing(db);
+          }
         },
       ),
     );
@@ -63,6 +67,7 @@ class AppDatabase {
       CREATE TABLE clips (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         master_media_id INTEGER NOT NULL,
+        display_name_override TEXT,
         in_ms INTEGER NOT NULL,
         out_ms INTEGER,
         created_at_ms INTEGER NOT NULL,
@@ -136,6 +141,34 @@ class AppDatabase {
         relative_path TEXT NOT NULL UNIQUE
       );
     """);
+  }
+
+  Future<void> _addDisplayNameOverrideColumnsIfMissing(Database db) async {
+    final List<Map<String, Object?>> masterColumns = await db.rawQuery(
+      "PRAGMA table_info(master_media_files);",
+    );
+    final bool masterHasColumn = masterColumns.any(
+      (Map<String, Object?> row) => row["name"] == "display_name_override",
+    );
+    if (!masterHasColumn) {
+      await db.execute("""
+        ALTER TABLE master_media_files
+        ADD COLUMN display_name_override TEXT;
+      """);
+    }
+
+    final List<Map<String, Object?>> clipColumns = await db.rawQuery(
+      "PRAGMA table_info(clips);",
+    );
+    final bool clipsHasColumn = clipColumns.any(
+      (Map<String, Object?> row) => row["name"] == "display_name_override",
+    );
+    if (!clipsHasColumn) {
+      await db.execute("""
+        ALTER TABLE clips
+        ADD COLUMN display_name_override TEXT;
+      """);
+    }
   }
 
   void _initializeDriverOnce() {
