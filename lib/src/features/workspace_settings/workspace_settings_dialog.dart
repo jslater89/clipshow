@@ -200,7 +200,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
               SizedBox(
                 width: 280,
                 child: DropdownButtonFormField<MdkLogVerbosity>(
-                  value: viewModel.mdkLogVerbosity,
+                  initialValue: viewModel.mdkLogVerbosity,
                   decoration: const InputDecoration(
                     labelText: "MDK log verbosity",
                     border: OutlineInputBorder(),
@@ -475,7 +475,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 children: <Widget>[
                   Expanded(
                     child: DropdownButtonFormField<WebhookMethod>(
-                      value: _newWebhookMethod,
+                      initialValue: _newWebhookMethod,
                       items: WebhookMethod.values
                           .map(
                             (WebhookMethod value) => DropdownMenuItem<WebhookMethod>(
@@ -512,7 +512,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   if (_newWebhookMethod == WebhookMethod.post) ...<Widget>[
                     Expanded(
                       child: DropdownButtonFormField<WebhookPostBodyType>(
-                        value: _newWebhookPostBodyType,
+                        initialValue: _newWebhookPostBodyType,
                         items: WebhookPostBodyType.values
                             .map(
                               (WebhookPostBodyType value) =>
@@ -762,7 +762,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                     FilledButton(
                       onPressed: () => Navigator.of(
                         context,
-                      ).pop(Color.fromARGB(255, r, g, b).value),
+                      ).pop(Color.fromARGB(255, r, g, b).toARGB32()),
                       child: const Text("Use"),
                     ),
                   ],

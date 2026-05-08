@@ -29,7 +29,13 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DashboardScreen(viewModel: viewModel, onPlayClip: (_) {}),
+        home: DashboardScreen(
+          viewModel: viewModel,
+          onPlayClip: (_) {},
+          onWorkspaceSettingsRequested: () {},
+          obsConnectionHealthy: true,
+          obsLastSuccessfulPingHms: "15:00:00",
+        ),
       ),
     );
 
@@ -60,7 +66,13 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DashboardScreen(viewModel: viewModel, onPlayClip: (_) {}),
+        home: DashboardScreen(
+          viewModel: viewModel,
+          onPlayClip: (_) {},
+          onWorkspaceSettingsRequested: () {},
+          obsConnectionHealthy: true,
+          obsLastSuccessfulPingHms: "15:00:00",
+        ),
       ),
     );
 

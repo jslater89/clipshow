@@ -233,8 +233,8 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                                 SnackBar(
                                   content: Text(
                                     changedItems == 0
-                                        ? "No ${targetLabel} items changed."
-                                        : "Applied saved tags to $changedItems ${targetLabel} item${changedItems == 1 ? "" : "s"}.",
+                                        ? "No $targetLabel items changed."
+                                        : "Applied saved tags to $changedItems $targetLabel item${changedItems == 1 ? "" : "s"}.",
                                   ),
                                 ),
                               );
