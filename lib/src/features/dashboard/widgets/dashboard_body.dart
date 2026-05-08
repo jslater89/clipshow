@@ -26,8 +26,9 @@ class _DashboardBodyState extends State<DashboardBody> {
   static const double _minPreviewToTagRatio = 0.5; // 1:2
   static const double _maxPreviewToTagRatio = 2.0; // 2:1
   static const int _tagFlexBase = 100;
-  static const double _dragSensitivity = 300.0;
+  static const double _resizeHandleHeight = 20.0;
 
+  final GlobalKey _splitPaneKey = GlobalKey();
   double _previewToTagRatio = 2.0;
 
   @override
@@ -64,15 +65,20 @@ class _DashboardBodyState extends State<DashboardBody> {
         const SizedBox(width: 16),
         Expanded(
           flex: 6,
-          child: Column(
-            children: <Widget>[
-              Expanded(
-                flex: previewFlex,
-                child: DashboardPreviewPanel(onPlayClip: widget.onPlayClip),
-              ),
-              _buildResizeHandle(context),
-              Expanded(flex: tagFlex, child: DashboardTagPanel()),
-            ],
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              return Column(
+                key: _splitPaneKey,
+                children: <Widget>[
+                  Expanded(
+                    flex: previewFlex,
+                    child: DashboardPreviewPanel(onPlayClip: widget.onPlayClip),
+                  ),
+                  _buildResizeHandle(context),
+                  Expanded(flex: tagFlex, child: DashboardTagPanel()),
+                ],
+              );
+            },
           ),
         ),
       ],
@@ -86,17 +92,34 @@ class _DashboardBodyState extends State<DashboardBody> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onVerticalDragUpdate: (DragUpdateDetails details) {
+          final BuildContext? splitPaneContext = _splitPaneKey.currentContext;
+          if (splitPaneContext == null) {
+            return;
+          }
+          final RenderObject? renderObject = splitPaneContext.findRenderObject();
+          if (renderObject is! RenderBox) {
+            return;
+          }
+          final double availableHeight =
+              renderObject.size.height - _resizeHandleHeight;
+          if (availableHeight <= 1) {
+            return;
+          }
+          final double localY =
+              renderObject.globalToLocal(details.globalPosition).dy;
+          final double nextPreviewHeight = (localY - (_resizeHandleHeight / 2))
+              .clamp(0.0, availableHeight);
+          final double nextTagHeight = (availableHeight - nextPreviewHeight)
+              .clamp(1.0, availableHeight);
           setState(() {
-            final double nextRatio =
-                _previewToTagRatio + (details.delta.dy / _dragSensitivity);
-            _previewToTagRatio = nextRatio.clamp(
+            _previewToTagRatio = (nextPreviewHeight / nextTagHeight).clamp(
               _minPreviewToTagRatio,
               _maxPreviewToTagRatio,
             );
           });
         },
         child: SizedBox(
-          height: 20,
+          height: _resizeHandleHeight,
           child: Center(
             child: Icon(
               Icons.drag_handle,

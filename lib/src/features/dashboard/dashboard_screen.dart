@@ -10,11 +10,17 @@ class DashboardScreen extends StatelessWidget {
     super.key,
     required this.viewModel,
     required this.onPlayClip,
+    required this.onWorkspaceSettingsRequested,
+    required this.obsConnectionHealthy,
+    required this.obsLastSuccessfulPingHms,
     this.scrollController,
   });
 
   final DashboardViewModel viewModel;
   final void Function(PlayoutClip clip) onPlayClip;
+  final VoidCallback onWorkspaceSettingsRequested;
+  final bool? obsConnectionHealthy;
+  final String? obsLastSuccessfulPingHms;
   final ScrollController? scrollController;
 
   @override
@@ -22,13 +28,16 @@ class DashboardScreen extends StatelessWidget {
     return ChangeNotifierProvider<DashboardViewModel>.value(
       value: viewModel,
       child: Scaffold(
-        appBar: AppBar(title: const Text("dashboard")),
         body: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const DashboardWorkspaceHeader(),
+              DashboardWorkspaceHeader(
+                onWorkspaceSettingsRequested: onWorkspaceSettingsRequested,
+                obsConnectionHealthy: obsConnectionHealthy,
+                obsLastSuccessfulPingHms: obsLastSuccessfulPingHms,
+              ),
               const SizedBox(height: 16),
               Expanded(
                 child: DashboardBody(

@@ -45,17 +45,28 @@ String formatMs(int value) {
   return "${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
 }
 
-PlayoutClip toPlayoutClip(MediaListItem item) {
+PlayoutClip toPlayoutClip(MediaListItem item, {int? initialOffsetMs}) {
   if (item.type == MediaListItemType.master) {
+    final int startTimeMs = initialOffsetMs == null ? 0 : initialOffsetMs < 0 ? 0 : initialOffsetMs;
     return PlayoutClip(
       filePath: item.filePath,
-      startTimeMs: 0,
+      startTimeMs: startTimeMs,
       endTimeMs: null,
     );
   }
+  final int clipInMs = item.clip!.inMs;
+  final int? clipOutMs = item.clip!.outMs;
+  final int startTimeMs;
+  if (initialOffsetMs == null || initialOffsetMs < clipInMs) {
+    startTimeMs = clipInMs;
+  } else if (clipOutMs != null && initialOffsetMs > clipOutMs) {
+    startTimeMs = clipOutMs;
+  } else {
+    startTimeMs = initialOffsetMs;
+  }
   return PlayoutClip(
     filePath: item.filePath,
-    startTimeMs: item.clip!.inMs,
-    endTimeMs: item.clip!.outMs,
+    startTimeMs: startTimeMs,
+    endTimeMs: clipOutMs,
   );
 }

@@ -3,6 +3,7 @@ import "package:sqflite/sqflite.dart";
 import 'package:obs_clipshow/src/media/master_media_file.dart';
 import 'package:obs_clipshow/src/media/media_clip.dart';
 import 'package:obs_clipshow/src/media/media_list_item.dart';
+import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 class MediaRepository {
   MediaRepository(this._database);
@@ -122,6 +123,19 @@ class MediaRepository {
       orderBy: "modified_at_ms DESC, file_name ASC",
     );
     return rows.map(MasterMediaFile.fromMap).toList();
+  }
+
+  Future<MasterMediaFile?> getMasterByPath(String filePath) async {
+    final List<Map<String, Object?>> rows = await _database.query(
+      "master_media_files",
+      where: "file_path = ?",
+      whereArgs: <Object?>[filePath],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return MasterMediaFile.fromMap(rows.single);
   }
 
   Future<int> createClip({
@@ -311,6 +325,35 @@ class MediaRepository {
     });
   }
 
+  Future<void> addTagsToItems({
+    required List<MediaListItem> items,
+    required List<String> tags,
+  }) async {
+    if (items.isEmpty || tags.isEmpty) {
+      return;
+    }
+    final List<String> normalizedTags = tags
+        .map(normalizeTag)
+        .where((String tag) => tag.isNotEmpty)
+        .toSet()
+        .toList();
+    if (normalizedTags.isEmpty) {
+      return;
+    }
+    await _database.transaction((Transaction txn) async {
+      for (final MediaListItem item in items) {
+        for (final String tag in normalizedTags) {
+          await _attachTagToMedia(
+            txn,
+            mediaType: item.type,
+            mediaId: item.id,
+            tag: tag,
+          );
+        }
+      }
+    });
+  }
+
   Future<void> removeTagFromMedia({
     required MediaListItemType mediaType,
     required int mediaId,
@@ -415,6 +458,317 @@ class MediaRepository {
       visible.add(item);
     }
     return visible;
+  }
+
+  Future<WorkspaceSettingsBundle> loadWorkspaceSettings() async {
+    final TelestratorDefaults telestratorDefaults =
+        await _loadTelestratorDefaults();
+    final DecoderConfig decoderConfig = await _loadDecoderConfig();
+    final MdkLogVerbosity mdkLogVerbosity = await _loadMdkLogVerbosity();
+    final ObsSceneSwitchConfig? obsConfig = await _loadObsSceneSwitchConfig();
+    final List<WebhookSceneSwitchConfig> webhooks =
+        await _loadWebhookSceneSwitchConfigs();
+    final List<String> ignoredFolders = await listIgnoredFolders();
+    return WorkspaceSettingsBundle(
+      telestratorDefaults: telestratorDefaults,
+      decoderConfig: decoderConfig,
+      mdkLogVerbosity: mdkLogVerbosity,
+      obsSceneSwitchConfig: obsConfig,
+      webhookSceneSwitchConfigs: webhooks,
+      ignoredFolders: ignoredFolders,
+    );
+  }
+
+  Future<TelestratorDefaults> _loadTelestratorDefaults() async {
+    final TelestratorDefaults fallback = TelestratorDefaults.fallback();
+    final int colorOneArgb = int.tryParse(
+          await _getWorkspaceSetting("telestrator.color1") ??
+              fallback.colorOneArgb.toString(),
+        ) ??
+        fallback.colorOneArgb;
+    final int colorTwoArgb = int.tryParse(
+          await _getWorkspaceSetting("telestrator.color2") ??
+              fallback.colorTwoArgb.toString(),
+        ) ??
+        fallback.colorTwoArgb;
+    final int colorThreeArgb = int.tryParse(
+          await _getWorkspaceSetting("telestrator.color3") ??
+              fallback.colorThreeArgb.toString(),
+        ) ??
+        fallback.colorThreeArgb;
+    final double brushSize = double.tryParse(
+          await _getWorkspaceSetting("telestrator.brushSize") ??
+              fallback.brushSize.toString(),
+        ) ??
+        fallback.brushSize;
+    final bool enabledByDefault =
+        (await _getWorkspaceSetting("telestrator.enabledByDefault")) == "true"
+        ? true
+        : fallback.enabledByDefault;
+    return TelestratorDefaults(
+      colorOneArgb: colorOneArgb,
+      colorTwoArgb: colorTwoArgb,
+      colorThreeArgb: colorThreeArgb,
+      brushSize: brushSize,
+      enabledByDefault: enabledByDefault,
+    );
+  }
+
+  Future<void> saveTelestratorDefaults(TelestratorDefaults value) async {
+    await _putWorkspaceSetting("telestrator.color1", value.colorOneArgb.toString());
+    await _putWorkspaceSetting("telestrator.color2", value.colorTwoArgb.toString());
+    await _putWorkspaceSetting("telestrator.color3", value.colorThreeArgb.toString());
+    await _putWorkspaceSetting("telestrator.brushSize", value.brushSize.toString());
+    await _putWorkspaceSetting(
+      "telestrator.enabledByDefault",
+      value.enabledByDefault.toString(),
+    );
+  }
+
+  Future<DecoderConfig> _loadDecoderConfig() async {
+    final String? storedList = await _getWorkspaceSetting("decoder.enabledProfiles");
+    if (storedList != null && storedList.trim().isNotEmpty) {
+      final List<DecoderProfile> parsed = storedList
+          .split(",")
+          .map((String raw) => raw.trim())
+          .where((String raw) => raw.isNotEmpty)
+          .map(
+            (String name) => DecoderProfile.values.firstWhere(
+              (DecoderProfile item) => item.name == name,
+              orElse: () => DecoderProfile.vaapi,
+            ),
+          )
+          .toList();
+      if (parsed.isNotEmpty) {
+        return DecoderConfig(enabledProfiles: parsed);
+      }
+    }
+    final String stored = await _getWorkspaceSetting("decoder.profile") ?? "vaapi";
+    final DecoderProfile profile = DecoderProfile.values.firstWhere(
+      (DecoderProfile item) => item.name == stored,
+      orElse: () => DecoderProfile.vaapi,
+    );
+    return DecoderConfig(enabledProfiles: <DecoderProfile>[profile]);
+  }
+
+  Future<void> saveDecoderConfig(DecoderConfig value) async {
+    final List<DecoderProfile> normalized = value.enabledProfiles.isEmpty
+        ? <DecoderProfile>[DecoderProfile.vaapi]
+        : value.enabledProfiles;
+    await _putWorkspaceSetting(
+      "decoder.enabledProfiles",
+      normalized.map((DecoderProfile item) => item.name).join(","),
+    );
+    await _putWorkspaceSetting("decoder.profile", normalized.first.name);
+  }
+
+  Future<MdkLogVerbosity> _loadMdkLogVerbosity() async {
+    final String stored = await _getWorkspaceSetting("mdk.logVerbosity") ?? "warning";
+    return MdkLogVerbosity.values.firstWhere(
+      (MdkLogVerbosity item) => item.name == stored,
+      orElse: () => MdkLogVerbosity.warning,
+    );
+  }
+
+  Future<void> saveMdkLogVerbosity(MdkLogVerbosity value) async {
+    await _putWorkspaceSetting("mdk.logVerbosity", value.name);
+  }
+
+  Future<ObsSceneSwitchConfig?> _loadObsSceneSwitchConfig() async {
+    final List<Map<String, Object?>> rows = await _database.query(
+      "scene_switch_profiles",
+      where: "profile_type = ?",
+      whereArgs: <Object?>["obs"],
+      orderBy: "id DESC",
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    final Map<String, Object?> row = rows.single;
+    return ObsSceneSwitchConfig(
+      enabled: (row["enabled"] as int? ?? 1) == 1,
+      serverAddress: (row["obs_server_address"] as String?) ?? "127.0.0.1",
+      port: (row["obs_port"] as int?) ?? 4455,
+      password: (row["obs_password"] as String?) ?? "",
+      videoScene: (row["obs_video_scene"] as String?) ?? "Video Scene",
+      faceScene: (row["obs_face_scene"] as String?) ?? "Face Scene",
+    );
+  }
+
+  Future<void> saveObsSceneSwitchConfig(ObsSceneSwitchConfig? value) async {
+    await _database.transaction((Transaction txn) async {
+      if (value == null) {
+        await txn.delete(
+          "scene_switch_profiles",
+          where: "profile_type = ?",
+          whereArgs: <Object?>["obs"],
+        );
+        return;
+      }
+      final List<Map<String, Object?>> existing = await txn.query(
+        "scene_switch_profiles",
+        columns: <String>["id"],
+        where: "profile_type = ?",
+        whereArgs: <Object?>["obs"],
+        limit: 1,
+      );
+      final Map<String, Object?> payload = <String, Object?>{
+        "profile_type": "obs",
+        "name": "OBS",
+        "enabled": value.enabled ? 1 : 0,
+        "obs_server_address": value.serverAddress,
+        "obs_port": value.port,
+        "obs_password": value.password,
+        "obs_video_scene": value.videoScene,
+        "obs_face_scene": value.faceScene,
+      };
+      if (existing.isEmpty) {
+        await txn.insert("scene_switch_profiles", payload);
+      } else {
+        await txn.update(
+          "scene_switch_profiles",
+          payload,
+          where: "id = ?",
+          whereArgs: <Object?>[existing.single["id"]],
+        );
+      }
+    });
+  }
+
+  Future<List<WebhookSceneSwitchConfig>> _loadWebhookSceneSwitchConfigs() async {
+    final List<Map<String, Object?>> rows = await _database.query(
+      "scene_switch_profiles",
+      where: "profile_type = ?",
+      whereArgs: <Object?>["webhook"],
+      orderBy: "id ASC",
+    );
+    return rows.map((Map<String, Object?> row) {
+      return WebhookSceneSwitchConfig(
+        id: row["id"]! as int,
+        name: (row["name"] as String?) ?? "Webhook",
+        enabled: (row["enabled"] as int? ?? 1) == 1,
+        url: (row["webhook_url"] as String?) ?? "",
+        method: ((row["webhook_method"] as String?) ?? "POST").toUpperCase() == "GET"
+            ? WebhookMethod.get
+            : WebhookMethod.post,
+        getQueryParamName: (row["webhook_get_query_param"] as String?) ?? "scene",
+        postBodyType:
+            ((row["webhook_post_body_type"] as String?) ?? "json").toLowerCase() ==
+                "form"
+            ? WebhookPostBodyType.form
+            : WebhookPostBodyType.json,
+        sceneKey: (row["webhook_scene_key"] as String?) ?? "scene",
+      );
+    }).toList();
+  }
+
+  Future<int> addWebhookSceneSwitchConfig(WebhookSceneSwitchConfig value) async {
+    return _database.insert("scene_switch_profiles", <String, Object?>{
+      "profile_type": "webhook",
+      "name": value.name,
+      "enabled": value.enabled ? 1 : 0,
+      "webhook_url": value.url,
+      "webhook_method": value.method == WebhookMethod.get ? "GET" : "POST",
+      "webhook_get_query_param": value.getQueryParamName,
+      "webhook_post_body_type":
+          value.postBodyType == WebhookPostBodyType.form ? "form" : "json",
+      "webhook_scene_key": value.sceneKey,
+    });
+  }
+
+  Future<void> updateWebhookSceneSwitchConfig(WebhookSceneSwitchConfig value) async {
+    await _database.update(
+      "scene_switch_profiles",
+      <String, Object?>{
+        "name": value.name,
+        "enabled": value.enabled ? 1 : 0,
+        "webhook_url": value.url,
+        "webhook_method": value.method == WebhookMethod.get ? "GET" : "POST",
+        "webhook_get_query_param": value.getQueryParamName,
+        "webhook_post_body_type":
+            value.postBodyType == WebhookPostBodyType.form ? "form" : "json",
+        "webhook_scene_key": value.sceneKey,
+      },
+      where: "id = ? AND profile_type = ?",
+      whereArgs: <Object?>[value.id, "webhook"],
+    );
+  }
+
+  Future<void> deleteWebhookSceneSwitchConfig(int id) async {
+    await _database.delete(
+      "scene_switch_profiles",
+      where: "id = ? AND profile_type = ?",
+      whereArgs: <Object?>[id, "webhook"],
+    );
+  }
+
+  Future<void> setObsSceneSwitchEnabled(bool enabled) async {
+    await _database.update(
+      "scene_switch_profiles",
+      <String, Object?>{"enabled": enabled ? 1 : 0},
+      where: "profile_type = ?",
+      whereArgs: <Object?>["obs"],
+    );
+  }
+
+  Future<void> setWebhookSceneSwitchEnabled(int id, bool enabled) async {
+    await _database.update(
+      "scene_switch_profiles",
+      <String, Object?>{"enabled": enabled ? 1 : 0},
+      where: "id = ? AND profile_type = ?",
+      whereArgs: <Object?>[id, "webhook"],
+    );
+  }
+
+  Future<List<String>> listIgnoredFolders() async {
+    final List<Map<String, Object?>> rows = await _database.query(
+      "ignored_folders",
+      columns: <String>["relative_path"],
+      orderBy: "relative_path ASC",
+    );
+    return rows
+        .map((Map<String, Object?> row) => row["relative_path"]! as String)
+        .toList();
+  }
+
+  Future<void> addIgnoredFolder(String relativePath) async {
+    final String normalized = normalizeTag(relativePath).replaceAll("\\", "/");
+    if (normalized.isEmpty) {
+      return;
+    }
+    await _database.insert("ignored_folders", <String, Object?>{
+      "relative_path": normalized,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> removeIgnoredFolder(String relativePath) async {
+    await _database.delete(
+      "ignored_folders",
+      where: "relative_path = ?",
+      whereArgs: <Object?>[relativePath],
+    );
+  }
+
+  Future<String?> _getWorkspaceSetting(String key) async {
+    final List<Map<String, Object?>> rows = await _database.query(
+      "workspace_settings",
+      columns: <String>["value"],
+      where: "key = ?",
+      whereArgs: <Object?>[key],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return rows.single["value"]! as String;
+  }
+
+  Future<void> _putWorkspaceSetting(String key, String value) async {
+    await _database.insert("workspace_settings", <String, Object?>{
+      "key": key,
+      "value": value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   String normalizeTag(String raw) {

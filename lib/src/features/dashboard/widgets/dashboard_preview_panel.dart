@@ -159,7 +159,12 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   onPressed:
                       selectedItem == null || previewIssue != MediaIssue.none
                       ? null
-                      : () => widget.onPlayClip(toPlayoutClip(selectedItem)),
+                      : () => widget.onPlayClip(
+                          toPlayoutClip(
+                            selectedItem,
+                            initialOffsetMs: viewModel.previewPositionMs,
+                          ),
+                        ),
                   icon: const Icon(Icons.fullscreen),
                   label: const Text("Playout"),
                 ),

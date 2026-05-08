@@ -37,6 +37,9 @@ class IngestionService {
   bool _disposed = false;
   int _scanGeneration = 0;
   Timer? _snapshotDebounce;
+  Set<String> _ignoredRelativeFolders = <String>{};
+  final Map<String, MasterMediaFile> _snapshotByPath =
+      <String, MasterMediaFile>{};
 
   Stream<List<MasterMediaFile>> get mediaFiles => _mediaController.stream;
 
@@ -50,6 +53,8 @@ class IngestionService {
     _logger.info("Starting ingestion for workspace: $workspacePath");
     _repository = repository;
     _workspacePath = workspacePath;
+    await _refreshIgnoredFolders();
+    await _loadSnapshotFromRepository();
     _scanGeneration++;
     _thumbnailService.onThumbnailSettled = _onThumbnailSettled;
 
@@ -73,7 +78,9 @@ class IngestionService {
       if (_disposed || generation != _scanGeneration) {
         return;
       }
-      await _emitSnapshot();
+      if (scannedCount > 0) {
+        await _emitSnapshot();
+      }
       _logger.info("Initial scan completed. Imported files: $scannedCount");
     } catch (error, stackTrace) {
       _logger.severe("Initial scan failed: $error", error, stackTrace);
@@ -85,6 +92,13 @@ class IngestionService {
     await _watchSubscription?.cancel();
     _watchSubscription = null;
     await _workspaceWatcher.stop();
+  }
+
+  Future<void> refreshIgnoredFolders() async {
+    if (_repository == null) {
+      return;
+    }
+    await _refreshIgnoredFolders();
   }
 
   Future<void> dispose() async {
@@ -118,13 +132,19 @@ class IngestionService {
       if (entity is! File) {
         continue;
       }
+      if (_isIgnoredPath(entity.path)) {
+        continue;
+      }
       if (!isSupportedVideoPath(entity.path)) {
         continue;
       }
-      await _upsertFromPath(
+      final bool changed = await _upsertFromPath(
         repository: repository,
         filePath: entity.path,
       );
+      if (!changed) {
+        continue;
+      }
       importedCount++;
       if (importedCount == 1 || importedCount % _scanEmitBatchSize == 0) {
         await _emitSnapshot();
@@ -138,6 +158,9 @@ class IngestionService {
       return;
     }
     final MediaRepository repository = _requireRepository();
+    if (_isIgnoredPath(event.path)) {
+      return;
+    }
     if (!isSupportedVideoPath(event.path)) {
       // _logger.finer("Ignored non-video path: ${event.path}");
       return;
@@ -148,6 +171,7 @@ class IngestionService {
       final String normalizedPath = _normalizedPath(event.path);
       await _thumbnailService.deleteThumbnailForVideoPath(normalizedPath);
       await repository.deleteByPath(normalizedPath);
+      _snapshotByPath.remove(normalizedPath);
       _logger.info("Removed media record: ${_normalizedPath(event.path)}");
       await _emitSnapshot();
       return;
@@ -156,23 +180,25 @@ class IngestionService {
     if (event.type == ChangeType.ADD || event.type == ChangeType.MODIFY) {
       final String normalizedPath = _normalizedPath(event.path);
       await repository.clearUnreadableIssue(normalizedPath);
-      await _upsertFromPath(
+      final bool changed = await _upsertFromPath(
         repository: repository,
         filePath: event.path,
       );
       _logger.info("Upserted media record: ${_normalizedPath(event.path)}");
-      await _emitSnapshot();
+      if (changed) {
+        await _emitSnapshot();
+      }
     }
   }
 
-  Future<void> _upsertFromPath({
+  Future<bool> _upsertFromPath({
     required MediaRepository repository,
     required String filePath,
   }) async {
     final File file = File(filePath);
     if (!await file.exists()) {
       _logger.warning("Video path no longer exists: $filePath");
-      return;
+      return false;
     }
     final FileStat stat = await file.stat();
     final String normalizedPath = _normalizedPath(file.path);
@@ -189,13 +215,20 @@ class IngestionService {
       await repository.clearEmptyIssue(normalizedPath);
     }
     _thumbnailService.requestThumbnail(normalizedPath);
+    return _updateSnapshotEntryFromRepository(repository, normalizedPath);
   }
 
   Future<void> _emitSnapshot() async {
-    final MediaRepository repository = _requireRepository();
-    final List<MasterMediaFile> current = await repository.listAll();
+    final List<MasterMediaFile> current = _snapshotByPath.values.toList()
+      ..sort((MasterMediaFile a, MasterMediaFile b) {
+        final int byModified = b.modifiedAtMs.compareTo(a.modifiedAtMs);
+        if (byModified != 0) {
+          return byModified;
+        }
+        return a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase());
+      });
     _logger.fine("Emitting media snapshot with ${current.length} item(s).");
-    _mediaController.add(current);
+    _mediaController.add(List<MasterMediaFile>.unmodifiable(current));
   }
 
   Future<void> _onThumbnailSettled(
@@ -212,11 +245,13 @@ class IngestionService {
         MediaIssue.unreadable,
         detail: failureDetail,
       );
+      await _updateSnapshotEntryFromRepository(repository, normalizedPath);
       _scheduleDebouncedSnapshot();
       return;
     }
     final int cleared = await repository.clearUnreadableIssue(normalizedPath);
     if (cleared > 0) {
+      await _updateSnapshotEntryFromRepository(repository, normalizedPath);
       _scheduleDebouncedSnapshot();
     }
   }
@@ -253,4 +288,72 @@ class IngestionService {
   }
 
   String _normalizedPath(String path) => p.normalize(p.absolute(path));
+
+  Future<void> _loadSnapshotFromRepository() async {
+    final MediaRepository repository = _requireRepository();
+    final List<MasterMediaFile> current = await repository.listAll();
+    _snapshotByPath
+      ..clear()
+      ..addEntries(
+        current.map(
+          (MasterMediaFile item) => MapEntry<String, MasterMediaFile>(
+            item.filePath,
+            item,
+          ),
+        ),
+      );
+  }
+
+  Future<bool> _updateSnapshotEntryFromRepository(
+    MediaRepository repository,
+    String normalizedPath,
+  ) async {
+    final MasterMediaFile? latest = await repository.getMasterByPath(normalizedPath);
+    final MasterMediaFile? previous = _snapshotByPath[normalizedPath];
+    if (latest == null) {
+      final bool removed = _snapshotByPath.remove(normalizedPath) != null;
+      return removed;
+    }
+    _snapshotByPath[normalizedPath] = latest;
+    return !_isSameSnapshotRow(previous, latest);
+  }
+
+  bool _isSameSnapshotRow(MasterMediaFile? a, MasterMediaFile b) {
+    if (a == null) {
+      return false;
+    }
+    return a.id == b.id &&
+        a.filePath == b.filePath &&
+        a.fileName == b.fileName &&
+        a.fileSizeBytes == b.fileSizeBytes &&
+        a.modifiedAtMs == b.modifiedAtMs &&
+        a.createdAtMs == b.createdAtMs &&
+        a.mediaIssue == b.mediaIssue &&
+        a.mediaIssueDetail == b.mediaIssueDetail;
+  }
+
+  Future<void> _refreshIgnoredFolders() async {
+    final MediaRepository repository = _requireRepository();
+    _ignoredRelativeFolders = (await repository.listIgnoredFolders())
+        .map((String folder) => folder.replaceAll("\\", "/"))
+        .toSet();
+  }
+
+  bool _isIgnoredPath(String path) {
+    final String workspacePath = _requireWorkspacePath();
+    final String normalizedAbsolutePath = _normalizedPath(path).replaceAll("\\", "/");
+    final String normalizedWorkspace = _normalizedPath(workspacePath).replaceAll(
+      "\\",
+      "/",
+    );
+    final String relativePath = p
+        .relative(normalizedAbsolutePath, from: normalizedWorkspace)
+        .replaceAll("\\", "/");
+    for (final String ignored in _ignoredRelativeFolders) {
+      if (relativePath == ignored || relativePath.startsWith("$ignored/")) {
+        return true;
+      }
+    }
+    return false;
+  }
 }

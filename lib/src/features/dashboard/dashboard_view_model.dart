@@ -1,8 +1,11 @@
 import "dart:async";
+import "dart:convert";
+import "dart:io";
 
 import "package:file_picker/file_picker.dart";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
+import "package:path/path.dart" as p;
 
 import "package:obs_clipshow/src/data/app_database.dart";
 import "package:obs_clipshow/src/data/media_repository.dart";
@@ -11,10 +14,13 @@ import "package:obs_clipshow/src/ingestion/thumbnail_service.dart";
 import "package:obs_clipshow/src/ingestion/workspace_watcher.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 import "package:obs_clipshow/src/workspace/workspace_preferences.dart";
 import "package:obs_clipshow/src/workspace/workspace_service.dart";
 
 class DashboardViewModel extends ChangeNotifier {
+  static const int _savedTagApplyBatchSize = 100;
+
   DashboardViewModel({
     required WorkspaceService workspaceService,
     required IngestionService ingestionService,
@@ -57,8 +63,11 @@ class DashboardViewModel extends ChangeNotifier {
   int? _markInMs;
   int? _markOutMs;
   String _tagSearchQuery = "";
+  String _fileNameSearchQuery = "";
+  bool _fileSearchUsesFullPath = false;
   String? _selectedItemKey;
   bool _showUntaggedOnly = false;
+  WorkspaceSettingsBundle? _workspaceSettings;
 
   bool get isLoading => _isLoading;
   String? get workspacePath => _workspacePath;
@@ -69,9 +78,30 @@ class DashboardViewModel extends ChangeNotifier {
   Set<String> get activeTagFilters => _activeTagFilters;
   int? get markInMs => _markInMs;
   int? get markOutMs => _markOutMs;
+  int get previewPositionMs => _previewPositionMs;
   String get tagSearchQuery => _tagSearchQuery;
+  String get fileNameSearchQuery => _fileNameSearchQuery;
+  bool get fileSearchUsesFullPath => _fileSearchUsesFullPath;
+  bool get hasActiveItemFilters =>
+      _showUntaggedOnly ||
+      _activeTagFilters.isNotEmpty ||
+      _tagSearchQuery.trim().isNotEmpty ||
+      _fileNameSearchQuery.trim().isNotEmpty;
   bool get showUntaggedOnly => _showUntaggedOnly;
   String? get selectedItemKey => _selectedItemKey;
+  TelestratorDefaults get telestratorDefaults =>
+      _workspaceSettings?.telestratorDefaults ?? TelestratorDefaults.fallback();
+  DecoderConfig get decoderConfig =>
+      _workspaceSettings?.decoderConfig ?? const DecoderConfig.fallback();
+  MdkLogVerbosity get mdkLogVerbosity =>
+      _workspaceSettings?.mdkLogVerbosity ?? MdkLogVerbosity.warning;
+  ObsSceneSwitchConfig? get obsSceneSwitchConfig =>
+      _workspaceSettings?.obsSceneSwitchConfig;
+  List<WebhookSceneSwitchConfig> get webhookSceneSwitchConfigs =>
+      _workspaceSettings?.webhookSceneSwitchConfigs ??
+      <WebhookSceneSwitchConfig>[];
+  List<String> get ignoredFolders =>
+      _workspaceSettings?.ignoredFolders ?? <String>[];
   MasterMediaFile? get selectedMedia {
     final MediaListItem? item = selectedItem;
     if (item == null || item.type != MediaListItemType.master) {
@@ -164,6 +194,7 @@ class DashboardViewModel extends ChangeNotifier {
       workspacePath: session.workspace.rootPath,
       repository: session.mediaRepository,
     );
+    await _loadWorkspaceSettings();
     await _reloadFromRepository();
   }
 
@@ -257,8 +288,35 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void addTagFilter(String tag) {
+    final String normalized = tag.trim();
+    if (normalized.isEmpty) {
+      return;
+    }
+    final bool alreadySelected = _activeTagFilters.any(
+      (String existing) => existing.toLowerCase() == normalized.toLowerCase(),
+    );
+    if (alreadySelected) {
+      return;
+    }
+    _activeTagFilters.add(normalized);
+    _applyFilters();
+    notifyListeners();
+  }
+
   void setTagSearchQuery(String query) {
     _tagSearchQuery = query;
+    notifyListeners();
+  }
+
+  void setFileNameSearchQuery(String query) {
+    _fileNameSearchQuery = query;
+    _applyFilters();
+    notifyListeners();
+  }
+
+  void toggleFileSearchScope() {
+    _fileSearchUsesFullPath = !_fileSearchUsesFullPath;
     _applyFilters();
     notifyListeners();
   }
@@ -305,6 +363,53 @@ class DashboardViewModel extends ChangeNotifier {
       );
     }
     await _reloadFromRepository();
+  }
+
+  Future<int> applyAllSavedTagsToItems({required bool filteredOnly}) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null || _savedTags.isEmpty) {
+      return 0;
+    }
+    final List<MediaListItem> targetItems = List<MediaListItem>.from(
+      filteredOnly ? _visibleItems : _allItems,
+    );
+    final List<String> savedTags = List<String>.from(_savedTags);
+    if (targetItems.isEmpty) {
+      return 0;
+    }
+    final List<String> savedTagsLower = savedTags
+        .map((String tag) => tag.toLowerCase())
+        .toList();
+    final List<MediaListItem> itemsNeedingUpdate = <MediaListItem>[];
+    for (final MediaListItem item in targetItems) {
+      final Set<String> existingTagsLower =
+          (_tagsByItemKey[item.stableKey] ?? <String>{})
+              .map((String tag) => tag.toLowerCase())
+              .toSet();
+      final bool needsUpdate = savedTagsLower.any(
+        (String tag) => !existingTagsLower.contains(tag),
+      );
+      if (needsUpdate) {
+        itemsNeedingUpdate.add(item);
+      }
+    }
+    if (itemsNeedingUpdate.isEmpty) {
+      return 0;
+    }
+    for (int i = 0; i < itemsNeedingUpdate.length; i += _savedTagApplyBatchSize) {
+      final int end = (i + _savedTagApplyBatchSize < itemsNeedingUpdate.length)
+          ? i + _savedTagApplyBatchSize
+          : itemsNeedingUpdate.length;
+      final List<MediaListItem> batch = itemsNeedingUpdate.sublist(i, end);
+      await repository.addTagsToItems(items: batch, tags: savedTags);
+      await _refreshTagsForItems(batch, refreshAllTags: false);
+    }
+    _allTags
+      ..clear()
+      ..addAll(await repository.listAllTags());
+    _applyFilters();
+    notifyListeners();
+    return itemsNeedingUpdate.length;
   }
 
   void markInAtCurrentPosition() {
@@ -394,8 +499,235 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _loadWorkspaceSettings() async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    _workspaceSettings = await repository.loadWorkspaceSettings();
+  }
+
+  Future<void> saveTelestratorDefaults(TelestratorDefaults value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveTelestratorDefaults(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> saveDecoderConfig(DecoderConfig value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveDecoderConfig(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> saveMdkLogVerbosity(MdkLogVerbosity value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveMdkLogVerbosity(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> saveObsSceneSwitchConfig(ObsSceneSwitchConfig? value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveObsSceneSwitchConfig(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> setObsSceneSwitchEnabled(bool enabled) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.setObsSceneSwitchEnabled(enabled);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> addWebhookSceneSwitchConfig(WebhookSceneSwitchConfig value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.addWebhookSceneSwitchConfig(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> updateWebhookSceneSwitchConfig(
+    WebhookSceneSwitchConfig value,
+  ) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.updateWebhookSceneSwitchConfig(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> deleteWebhookSceneSwitchConfig(int id) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.deleteWebhookSceneSwitchConfig(id);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> setWebhookSceneSwitchEnabled(int id, bool enabled) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.setWebhookSceneSwitchEnabled(id, enabled);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> addIgnoredFolder(String relativePath) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.addIgnoredFolder(relativePath);
+    await _ingestionService.refreshIgnoredFolders();
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> removeIgnoredFolder(String relativePath) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.removeIgnoredFolder(relativePath);
+    await _ingestionService.refreshIgnoredFolders();
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> exportWorkspace() async {
+    final MediaRepository? repository = _mediaRepository;
+    final String? workspaceRoot = _workspacePath;
+    if (repository == null || workspaceRoot == null) {
+      return;
+    }
+    final String? outputPath = await FilePicker.saveFile(
+      dialogTitle: "Export Workspace JSON",
+      fileName: "workspace_export.json",
+      type: FileType.custom,
+      allowedExtensions: <String>["json"],
+    );
+    if (outputPath == null || outputPath.trim().isEmpty) {
+      return;
+    }
+    final List<MediaListItem> items = await repository.listMixedItems();
+    final Map<String, Set<String>> tagsByItem = await repository.listTagsForItems(items);
+    final WorkspaceSettingsBundle settings = await repository.loadWorkspaceSettings();
+    final Map<String, Object?> payload = <String, Object?>{
+      "workspacePath": workspaceRoot,
+      "settings": <String, Object?>{
+        "telestratorDefaults": <String, Object?>{
+          "color1": settings.telestratorDefaults.colorOneArgb,
+          "color2": settings.telestratorDefaults.colorTwoArgb,
+          "color3": settings.telestratorDefaults.colorThreeArgb,
+          "brushSize": settings.telestratorDefaults.brushSize,
+          "enabledByDefault": settings.telestratorDefaults.enabledByDefault,
+        },
+        "decoderConfig": <String, Object?>{
+          "enabledProfiles": settings.decoderConfig.enabledProfiles
+              .map((DecoderProfile item) => item.name)
+              .toList(),
+        },
+        "mdkLogVerbosity": settings.mdkLogVerbosity.name,
+        "sceneSwitch": <String, Object?>{
+          "obs": settings.obsSceneSwitchConfig == null
+              ? null
+              : <String, Object?>{
+                  "serverAddress": settings.obsSceneSwitchConfig!.serverAddress,
+                  "enabled": settings.obsSceneSwitchConfig!.enabled,
+                  "port": settings.obsSceneSwitchConfig!.port,
+                  "password": settings.obsSceneSwitchConfig!.password,
+                  "videoScene": settings.obsSceneSwitchConfig!.videoScene,
+                  "faceScene": settings.obsSceneSwitchConfig!.faceScene,
+                },
+          "webhooks": settings.webhookSceneSwitchConfigs
+              .map(
+                (WebhookSceneSwitchConfig item) => <String, Object?>{
+                  "name": item.name,
+                  "enabled": item.enabled,
+                  "url": item.url,
+                  "method": item.method.name.toUpperCase(),
+                  "getQueryParamName": item.getQueryParamName,
+                  "postBodyType": item.postBodyType.name,
+                  "sceneKey": item.sceneKey,
+                },
+              )
+              .toList(),
+        },
+        "ignoredFolders": settings.ignoredFolders,
+      },
+      "mediaItems": items.map((MediaListItem item) {
+        final bool isClip = item.type == MediaListItemType.clip;
+        return <String, Object?>{
+          "identifier": isClip ? item.stableKey : item.fileName,
+          "relativePath": p.relative(item.filePath, from: workspaceRoot),
+          "tags": (tagsByItem[item.stableKey] ?? <String>{}).toList()..sort(),
+          "clipRange": isClip
+              ? <String, Object?>{
+                  "inMs": item.clip!.inMs,
+                  "outMs": item.clip!.outMs,
+                }
+              : null,
+        };
+      }).toList(),
+    };
+    await File(outputPath).writeAsString(
+      const JsonEncoder.withIndent("  ").convert(payload),
+    );
+  }
+
+  Future<void> _refreshTagsForItems(
+    List<MediaListItem> items, {
+    required bool refreshAllTags,
+  }) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null || items.isEmpty) {
+      return;
+    }
+    final Map<String, Set<String>> tagsByItemKey = await repository.listTagsForItems(
+      items,
+    );
+    for (final MediaListItem item in items) {
+      _tagsByItemKey[item.stableKey] =
+          tagsByItemKey[item.stableKey] ?? <String>{};
+    }
+    if (refreshAllTags) {
+      _allTags
+        ..clear()
+        ..addAll(await repository.listAllTags());
+    }
+    _applyFilters();
+    notifyListeners();
+  }
+
   void _applyFilters() {
-    final String search = _tagSearchQuery.trim().toLowerCase();
+    final String fileNameSearch = _fileNameSearchQuery.trim().toLowerCase();
     final Set<String> requiredTags = _activeTagFilters
         .map((String tag) => tag.toLowerCase())
         .toSet();
@@ -411,8 +743,10 @@ class DashboardViewModel extends ChangeNotifier {
       if (requiredTags.isNotEmpty && !requiredTags.every(tagsLower.contains)) {
         return false;
       }
-      if (search.isNotEmpty &&
-          !tagsLower.any((String tag) => tag.contains(search))) {
+      if (fileNameSearch.isNotEmpty &&
+          !(_fileSearchUsesFullPath
+              ? item.filePath.toLowerCase().contains(fileNameSearch)
+              : item.fileName.toLowerCase().contains(fileNameSearch))) {
         return false;
       }
       return true;

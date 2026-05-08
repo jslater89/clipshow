@@ -64,7 +64,7 @@ void main() {
       viewModel.setItemsForTest(
         items: <MediaListItem>[tagged, untagged],
         tagsByItemKey: <String, Set<String>>{
-          tagged.stableKey: <String>{"Master"},
+          tagged.stableKey: <String>{"Match Day"},
         },
       );
       viewModel.setShowUntaggedOnly(true);
@@ -73,7 +73,7 @@ void main() {
       expect(viewModel.visibleItems.single.stableKey, untagged.stableKey);
     });
 
-    test("filters by tag search query", () {
+    test("keeps list unchanged while tag search query is being typed", () {
       final DashboardViewModel viewModel = createViewModel();
       addTearDown(viewModel.dispose);
 
@@ -88,8 +88,7 @@ void main() {
       );
       viewModel.setTagSearchQuery("stage");
 
-      expect(viewModel.visibleItems, hasLength(1));
-      expect(viewModel.visibleItems.single.stableKey, stage.stableKey);
+      expect(viewModel.visibleItems, hasLength(2));
     });
   });
 }

@@ -12,7 +12,7 @@ class AppDatabase {
     return databaseFactoryFfi.openDatabase(
       workspace.databasePath,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onConfigure: (Database db) async {
           await db.execute("PRAGMA foreign_keys = ON;");
         },
@@ -34,6 +34,7 @@ class AppDatabase {
             ON master_media_files(modified_at_ms DESC);
           """);
           await _createClipAndTagTables(db);
+          await _createWorkspaceSettingsTables(db);
         },
         onUpgrade: (Database db, int oldVersion, int newVersion) async {
           if (oldVersion < 2) {
@@ -48,6 +49,9 @@ class AppDatabase {
           }
           if (oldVersion < 3) {
             await _createClipAndTagTables(db);
+          }
+          if (oldVersion < 4) {
+            await _createWorkspaceSettingsTables(db);
           }
         },
       ),
@@ -93,6 +97,43 @@ class AppDatabase {
       CREATE TABLE saved_tags (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      );
+    """);
+  }
+
+  Future<void> _createWorkspaceSettingsTables(Database db) async {
+    await db.execute("""
+      CREATE TABLE workspace_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    """);
+    await db.execute("""
+      CREATE TABLE scene_switch_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile_type TEXT NOT NULL CHECK(profile_type IN ('obs', 'webhook')),
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        obs_server_address TEXT,
+        obs_port INTEGER,
+        obs_password TEXT,
+        obs_video_scene TEXT,
+        obs_face_scene TEXT,
+        webhook_url TEXT,
+        webhook_method TEXT CHECK(webhook_method IN ('GET', 'POST')),
+        webhook_get_query_param TEXT,
+        webhook_post_body_type TEXT CHECK(webhook_post_body_type IN ('form', 'json')),
+        webhook_scene_key TEXT
+      );
+    """);
+    await db.execute("""
+      CREATE INDEX idx_scene_switch_profiles_type
+      ON scene_switch_profiles(profile_type);
+    """);
+    await db.execute("""
+      CREATE TABLE ignored_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        relative_path TEXT NOT NULL UNIQUE
       );
     """);
   }

@@ -51,8 +51,9 @@ class DashboardFileListPanel extends StatelessWidget {
                         },
                         onSelected: (String value) {
                           handledSearchAutocompleteSelection = true;
-                          activeSearchInputController?.text = value;
-                          viewModel.setTagSearchQuery(value);
+                          viewModel.addTagFilter(value);
+                          activeSearchInputController?.clear();
+                          viewModel.setTagSearchQuery("");
                         },
                         fieldViewBuilder:
                             (
@@ -87,12 +88,39 @@ class DashboardFileListPanel extends StatelessWidget {
                                     handledSearchAutocompleteSelection = false;
                                     return;
                                   }
-                                  viewModel.setTagSearchQuery(
+                                  viewModel.addTagFilter(
                                     textEditingController.text,
                                   );
+                                  textEditingController.clear();
+                                  viewModel.setTagSearchQuery("");
                                 },
                               );
                             },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: viewModel.fileNameSearchQuery,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          hintText: viewModel.fileSearchUsesFullPath
+                              ? "Search workspace path"
+                              : "Search filename",
+                          border: const OutlineInputBorder(),
+                          suffixIcon: IconButton(
+                            tooltip: viewModel.fileSearchUsesFullPath
+                                ? "Searching full workspace path (click for filename only)"
+                                : "Searching filename only (click for full workspace path)",
+                            icon: Icon(
+                              viewModel.fileSearchUsesFullPath
+                                  ? Icons.folder_open
+                                  : Icons.description_outlined,
+                            ),
+                            onPressed: viewModel.toggleFileSearchScope,
+                          ),
+                        ),
+                        onChanged: viewModel.setFileNameSearchQuery,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -104,19 +132,35 @@ class DashboardFileListPanel extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: viewModel.activeTagFilters.isEmpty
-                      ? <Widget>[const Text("No active tag filters")]
-                      : viewModel.activeTagFilters
-                            .map(
-                              (String tag) => InputChip(
-                                label: Text("Filter: $tag"),
-                                onDeleted: () => viewModel.toggleTagFilter(tag),
-                              ),
-                            )
-                            .toList(),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: viewModel.activeTagFilters.isEmpty
+                            ? <Widget>[const Text("No active tag filters")]
+                            : viewModel.activeTagFilters
+                                  .map(
+                                    (String tag) => InputChip(
+                                      label: Text("Filter: $tag"),
+                                      onDeleted: () =>
+                                          viewModel.toggleTagFilter(tag),
+                                    ),
+                                  )
+                                  .toList(),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        "${mediaItems.length} ${mediaItems.length == 1 ? "file" : "files"}",
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

@@ -68,7 +68,8 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                 const SizedBox(height: 10),
                 Row(
                   children: <Widget>[
-                    Expanded(
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 400),
                       child: Autocomplete<String>(
                         optionsBuilder: (TextEditingValue textEditingValue) {
                           return viewModel.tagSuggestionsFor(
@@ -126,19 +127,6 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                 Row(
                   children: <Widget>[
                     const Text("Saved Tags"),
-                    const Spacer(),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: OutlinedButton.icon(
-                        onPressed: viewModel.savedTags.isEmpty
-                            ? null
-                            : () => unawaited(
-                                viewModel.applyAllSavedTagsToSelectedMedia(),
-                              ),
-                        icon: const Icon(Icons.arrow_upward),
-                        label: const Text("Apply"),
-                      ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -158,7 +146,8 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                 const SizedBox(height: 10),
                 Row(
                   children: <Widget>[
-                    Expanded(
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 400),
                       child: Autocomplete<String>(
                         optionsBuilder: (TextEditingValue textEditingValue) {
                           return viewModel.tagSuggestionsFor(
@@ -212,6 +201,48 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                         _submitSavedTag(viewModel, controller);
                       },
                       child: const Text("Add"),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: viewModel.savedTags.isEmpty
+                          ? null
+                          : () => unawaited(
+                              viewModel.applyAllSavedTagsToSelectedMedia(),
+                            ),
+                      icon: const Icon(Icons.arrow_upward),
+                      label: const Text("to current"),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: viewModel.savedTags.isEmpty
+                          ? null
+                          : () async {
+                              final bool filteredOnly =
+                                  viewModel.hasActiveItemFilters;
+                              final int changedItems = await viewModel
+                                  .applyAllSavedTagsToItems(
+                                    filteredOnly: filteredOnly,
+                                  );
+                              if (!context.mounted) {
+                                return;
+                              }
+                              final String targetLabel = filteredOnly
+                                  ? "filtered"
+                                  : "all";
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    changedItems == 0
+                                        ? "No ${targetLabel} items changed."
+                                        : "Applied saved tags to $changedItems ${targetLabel} item${changedItems == 1 ? "" : "s"}.",
+                                  ),
+                                ),
+                              );
+                            },
+                      icon: const Icon(Icons.arrow_back),
+                      label: Text(
+                        "to ${viewModel.hasActiveItemFilters ? "filtered" : "all"}",
+                      ),
                     ),
                   ],
                 ),

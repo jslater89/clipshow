@@ -2,6 +2,7 @@ import "dart:io";
 import "dart:convert";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
+import "package:provider/provider.dart";
 import "package:screen_retriever/screen_retriever.dart";
 import "package:window_manager/window_manager.dart";
 import "dart:async";
@@ -10,7 +11,9 @@ import 'package:obs_clipshow/src/features/dashboard/dashboard_screen.dart';
 import 'package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart';
 import 'package:obs_clipshow/src/features/playout/playout_clip.dart';
 import 'package:obs_clipshow/src/features/playout/playout_screen.dart';
+import "package:obs_clipshow/src/features/workspace_settings/workspace_settings_dialog.dart";
 import 'package:obs_clipshow/src/obs/obs_service.dart';
+import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 enum PlayoutWindowMode { windowed, fullscreen }
 
@@ -31,25 +34,140 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   late final DashboardViewModel _viewModel;
   late final ObsService _obsService;
   final ScrollController _dashboardScrollController = ScrollController();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   double _lastDashboardScrollOffset = 0;
   Rect? _prePlayoutBounds;
   PlayoutClip? _activeClip;
+  Timer? _obsPingTimer;
+  String? _obsConfigKey;
+  bool _obsPingInFlight = false;
+  bool? _obsConnectionHealthy;
+  DateTime? _lastSuccessfulObsPingAt;
 
   @override
   void initState() {
     super.initState();
     _viewModel = DashboardViewModel.create();
     _obsService = ObsService();
+    _viewModel.addListener(_handleViewModelChanged);
     _unlockAspectRatio();
     _viewModel.initialize();
   }
 
   @override
   void dispose() {
+    _viewModel.removeListener(_handleViewModelChanged);
+    _obsPingTimer?.cancel();
     unawaited(_obsService.close());
     _dashboardScrollController.dispose();
     _viewModel.dispose();
     super.dispose();
+  }
+
+  void _handleViewModelChanged() {
+    _syncObsMonitoringFromSettings();
+  }
+
+  void _syncObsMonitoringFromSettings() {
+    final ObsSceneSwitchConfig? obsConfig = _viewModel.obsSceneSwitchConfig;
+    if (obsConfig == null || !obsConfig.enabled) {
+      _obsConfigKey = null;
+      _stopObsPingLoop();
+      if ((_obsConnectionHealthy != null || _lastSuccessfulObsPingAt != null) &&
+          mounted) {
+        setState(() {
+          _obsConnectionHealthy = null;
+          _lastSuccessfulObsPingAt = null;
+        });
+      }
+      return;
+    }
+    final String nextKey =
+        "${obsConfig.serverAddress}:${obsConfig.port}:${obsConfig.password}:${obsConfig.videoScene}:${obsConfig.faceScene}";
+    if (_obsConfigKey != nextKey) {
+      _obsConfigKey = nextKey;
+      if (mounted) {
+        setState(() {
+          _obsConnectionHealthy = false;
+          _lastSuccessfulObsPingAt = null;
+        });
+      }
+    }
+    _startObsPingLoop();
+    unawaited(_attemptObsPing());
+  }
+
+  Future<void> _attemptObsPing() async {
+    if (_obsPingInFlight) {
+      return;
+    }
+    final ObsSceneSwitchConfig? obsConfig = _viewModel.obsSceneSwitchConfig;
+    if (obsConfig == null || !obsConfig.enabled) {
+      return;
+    }
+    _obsPingInFlight = true;
+    final ObsService service = _buildObsService(obsConfig);
+    try {
+      await service.ensureConnected();
+      await service.close();
+      _markObsRequestSuccess();
+    } catch (_) {
+      _markObsRequestFailure();
+    } finally {
+      _obsPingInFlight = false;
+    }
+  }
+
+  void _markObsRequestSuccess() {
+    final DateTime now = DateTime.now();
+    if (mounted) {
+      setState(() {
+        _obsConnectionHealthy = true;
+        _lastSuccessfulObsPingAt = now;
+      });
+    }
+  }
+
+  void _markObsRequestFailure() {
+    if (_obsConnectionHealthy != false && mounted) {
+      setState(() {
+        _obsConnectionHealthy = false;
+      });
+    }
+    _startObsPingLoop();
+  }
+
+  void _startObsPingLoop() {
+    if (_obsPingTimer != null) {
+      return;
+    }
+    _obsPingTimer = Timer.periodic(const Duration(seconds: 12), (Timer _) {
+      unawaited(_attemptObsPing());
+    });
+  }
+
+  void _stopObsPingLoop() {
+    _obsPingTimer?.cancel();
+    _obsPingTimer = null;
+  }
+
+  String? _formatHms(DateTime? value) {
+    if (value == null) {
+      return null;
+    }
+    final String hh = value.hour.toString().padLeft(2, "0");
+    final String mm = value.minute.toString().padLeft(2, "0");
+    final String ss = value.second.toString().padLeft(2, "0");
+    return "$hh:$mm:$ss";
+  }
+
+  ObsService _buildObsService(ObsSceneSwitchConfig obsConfig) {
+    return ObsService(
+      url: "ws://${obsConfig.serverAddress}:${obsConfig.port}",
+      password: obsConfig.password.isEmpty ? null : obsConfig.password,
+      videoSceneName: obsConfig.videoScene,
+      faceSceneName: obsConfig.faceScene,
+    );
   }
 
   Future<void> _enterPlayout(PlayoutClip clip) async {
@@ -97,21 +215,11 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     );
     // #endregion
 
-    try {
-      await _obsService.ensureConnected();
-      await _obsService.switchToVideoScene();
-    } catch (error) {
-      _logger.warning("Unable to switch OBS to video scene: $error");
-    }
+    await _switchToVideoScene();
   }
 
   Future<void> _exitPlayout() async {
-    try {
-      await _obsService.ensureConnected();
-      await _obsService.switchToFaceScene();
-    } catch (error) {
-      _logger.warning("Unable to switch OBS to face scene: $error");
-    }
+    await _switchToFaceScene();
     await windowManager.setFullScreen(false);
     await windowManager.setTitleBarStyle(TitleBarStyle.normal);
     await _unlockAspectRatio();
@@ -309,6 +417,109 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     }
   }
 
+  Future<void> _showWorkspaceSettings() async {
+    final BuildContext? dialogContext = _navigatorKey.currentContext;
+    if (dialogContext == null) {
+      return;
+    }
+    await showDialog<void>(
+      context: dialogContext,
+      builder: (BuildContext context) {
+        return ChangeNotifierProvider<DashboardViewModel>.value(
+          value: _viewModel,
+          child: const WorkspaceSettingsDialog(),
+        );
+      },
+    );
+  }
+
+  Future<void> _switchToVideoScene() async {
+    await _runSceneSwitch(enteringPlayout: true);
+  }
+
+  Future<void> _switchToFaceScene() async {
+    await _runSceneSwitch(enteringPlayout: false);
+  }
+
+  Future<void> _runSceneSwitch({required bool enteringPlayout}) async {
+    final ObsSceneSwitchConfig? obsConfig = _viewModel.obsSceneSwitchConfig;
+    final List<WebhookSceneSwitchConfig> webhooks =
+        _viewModel.webhookSceneSwitchConfigs;
+    bool attempted = false;
+    if (obsConfig != null && obsConfig.enabled) {
+      attempted = true;
+      final ObsService service = _buildObsService(obsConfig);
+      try {
+        await service.ensureConnected();
+        if (enteringPlayout) {
+          await service.switchToVideoScene();
+        } else {
+          await service.switchToFaceScene();
+        }
+        _markObsRequestSuccess();
+      } catch (error) {
+        _markObsRequestFailure();
+        _logger.warning("Unable to switch OBS scene using profile: $error");
+      } finally {
+        await service.close();
+      }
+    }
+    for (final WebhookSceneSwitchConfig webhook in webhooks.where((WebhookSceneSwitchConfig item) => item.enabled)) {
+      attempted = true;
+      try {
+        await _sendSceneSwitchWebhook(webhook, enteringPlayout: enteringPlayout);
+      } catch (error) {
+        _logger.warning("Unable to call scene-switch webhook ${webhook.name}: $error");
+      }
+    }
+    if (!attempted) {
+      _logger.fine("No scene-switch profile configured; skipping scene switch.");
+    }
+  }
+
+  Future<void> _sendSceneSwitchWebhook(
+    WebhookSceneSwitchConfig webhook, {
+    required bool enteringPlayout,
+  }) async {
+    final String sceneName = enteringPlayout ? "Video Scene" : "Face Scene";
+    final Uri uri = Uri.parse(webhook.url);
+    final HttpClient client = HttpClient();
+    try {
+      if (webhook.method == WebhookMethod.get) {
+        final String paramKey = webhook.getQueryParamName.trim().isEmpty
+            ? "scene"
+            : webhook.getQueryParamName.trim();
+        final Uri requestUri = uri.replace(
+          queryParameters: <String, String>{
+            ...uri.queryParameters,
+            paramKey: sceneName,
+          },
+        );
+        final HttpClientRequest request = await client.getUrl(requestUri);
+        await request.close();
+        return;
+      }
+      final HttpClientRequest request = await client.postUrl(uri);
+      final String sceneKey = webhook.sceneKey.trim().isEmpty
+          ? "scene"
+          : webhook.sceneKey.trim();
+      if (webhook.postBodyType == WebhookPostBodyType.form) {
+        request.headers.contentType = ContentType(
+          "application",
+          "x-www-form-urlencoded",
+          charset: "utf-8",
+        );
+        request.write(Uri(queryParameters: <String, String>{sceneKey: sceneName}).query);
+      } else {
+        request.headers.contentType = ContentType.json;
+        request.write(jsonEncode(<String, String>{sceneKey: sceneName}));
+      }
+      await request.close();
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   void _debugLog({
     required String hypothesisId,
     required String location,
@@ -341,6 +552,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: "Vanalyst Playout",
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -353,6 +565,9 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
           ? DashboardScreen(
               viewModel: _viewModel,
               onPlayClip: _enterPlayout,
+              onWorkspaceSettingsRequested: _showWorkspaceSettings,
+              obsConnectionHealthy: _obsConnectionHealthy,
+              obsLastSuccessfulPingHms: _formatHms(_lastSuccessfulObsPingAt),
               scrollController: _dashboardScrollController,
             )
           : PlayoutScreen(clip: _activeClip!, onExitRequested: _exitPlayout),

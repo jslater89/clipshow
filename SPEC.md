@@ -83,6 +83,7 @@ The local database will manage the metadata independently of the physical file s
 * **Filters, Search, and Autocomplete:** Tag filters include `All` and `Untagged`; search and tag autocomplete support faster clip discovery and consistent tagging.
 * **Preview/Playout Player Refactor:** Shared clip player and hotkey handling were refactored for reuse across dashboard preview and playout with cleaner separation of concerns.
 * **Phase 2 Core Implemented:** OBS websocket service and playout scene-switch flow are integrated (start -> `"Video Scene"`, `Escape` exit -> `"Face Scene"`), with playout help/hotkeys surfaced in the UI.
+* **Phase 4 Complete (Telestrator):** The playout telestrator feature set is delivered and integrated into the playout flow.
 * **Playout Window Behavior:** Playout defaults to windowed 16:9 with hidden title bar (fullscreen retained as a configurable code path), and window bounds restore on exit.
 * **Telestrator Overlay Delivered:** Playout includes a draw layer with clear/visibility hotkeys, HUD visibility behavior, and lifecycle handling so overlay state resets correctly on exit.
 * **Seek and Clamp Behavior Updated:** Seek mappings now include Alt micro-seek in addition to short/standard/long jumps, and clip-range seeking clamps correctly at segment bounds.
@@ -95,7 +96,7 @@ The local database will manage the metadata independently of the physical file s
 
 ### Partially Complete / Next
 * **Deeper Validation:** Full end-to-end live OBS verification and stress testing are still required.
-* **Focused Test Coverage:** Additional automated tests are still needed for tag/save/search flows, seek/clamp boundaries, and telestrator hotkey/HUD behavior.
+* **Focused Test Coverage:** Additional automated tests are still needed for tag/save/search flows and seek/clamp boundaries, plus regression coverage around recently delivered playout and telestrator flows.
 * **Phase 2 Validation Checklist (Live OBS):**
   * Confirm OBS websocket authentication/connectivity using configured host/port/password.
   * Enter playout from dashboard and verify scene switches to configured Video Scene.

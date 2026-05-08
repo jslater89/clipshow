@@ -9,6 +9,7 @@ import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/media/workspace.dart";
+import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 void main() {
   group("MediaRepository", () {
@@ -182,6 +183,168 @@ void main() {
         orderedEquals(<String>["clips", "media_tags", "saved_tags", "tags"]),
       );
       await upgraded.close();
+    });
+
+    test("upgrades v3 workspace database to include settings tables", () async {
+      sqfliteFfiInit();
+      final String dbPath = p.join(tempDirectory.path, "obs_clipshow.db");
+      final Database legacy = await databaseFactoryFfi.openDatabase(
+        dbPath,
+        options: OpenDatabaseOptions(
+          version: 3,
+          onCreate: (Database db, int version) async {
+            await db.execute("""
+              CREATE TABLE master_media_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_path TEXT NOT NULL UNIQUE,
+                file_name TEXT NOT NULL,
+                file_size_bytes INTEGER NOT NULL,
+                modified_at_ms INTEGER NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                media_issue TEXT NOT NULL DEFAULT 'none',
+                media_issue_detail TEXT
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE clips (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                master_media_id INTEGER NOT NULL,
+                in_ms INTEGER NOT NULL,
+                out_ms INTEGER,
+                created_at_ms INTEGER NOT NULL
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE media_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_type TEXT NOT NULL,
+                media_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                UNIQUE(media_type, media_id, tag_id)
+              );
+            """);
+            await db.execute("""
+              CREATE TABLE saved_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE
+              );
+            """);
+          },
+        ),
+      );
+      await legacy.close();
+
+      final AppDatabase appDatabase = AppDatabase();
+      final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+      final Database upgraded = await appDatabase.openForWorkspace(workspace);
+      final List<Map<String, Object?>> tables = await upgraded.rawQuery("""
+        SELECT name FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN ('workspace_settings', 'scene_switch_profiles', 'ignored_folders')
+        ORDER BY name ASC
+        """);
+      expect(
+        tables.map((Map<String, Object?> row) => row["name"]),
+        orderedEquals(<String>[
+          "ignored_folders",
+          "scene_switch_profiles",
+          "workspace_settings",
+        ]),
+      );
+      await upgraded.close();
+    });
+
+    test("supports workspace settings, OBS singleton, and webhook list", () async {
+      final AppDatabase appDatabase = AppDatabase();
+      final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+      final database = await appDatabase.openForWorkspace(workspace);
+      final MediaRepository repository = MediaRepository(database);
+
+      await repository.saveTelestratorDefaults(
+        const TelestratorDefaults(
+          colorOneArgb: 0xFF111111,
+          colorTwoArgb: 0xFF222222,
+          colorThreeArgb: 0xFF333333,
+          brushSize: 10,
+          enabledByDefault: true,
+        ),
+      );
+      await repository.saveDecoderConfig(
+        const DecoderConfig(enabledProfiles: <DecoderProfile>[DecoderProfile.vdpau]),
+      );
+      await repository.saveMdkLogVerbosity(MdkLogVerbosity.error);
+      await repository.saveObsSceneSwitchConfig(
+        const ObsSceneSwitchConfig(
+          enabled: true,
+          serverAddress: "10.0.0.20",
+          port: 4456,
+          password: "pw",
+          videoScene: "video",
+          faceScene: "face",
+        ),
+      );
+      await repository.saveObsSceneSwitchConfig(
+        const ObsSceneSwitchConfig(
+          enabled: false,
+          serverAddress: "10.0.0.30",
+          port: 4457,
+          password: "pw2",
+          videoScene: "video2",
+          faceScene: "face2",
+        ),
+      );
+
+      await repository.addWebhookSceneSwitchConfig(
+        const WebhookSceneSwitchConfig(
+          id: 0,
+          name: "wh1",
+          enabled: true,
+          url: "https://example.com/a",
+          method: WebhookMethod.post,
+          getQueryParamName: "scene",
+          postBodyType: WebhookPostBodyType.json,
+          sceneKey: "scene",
+        ),
+      );
+      await repository.addWebhookSceneSwitchConfig(
+        const WebhookSceneSwitchConfig(
+          id: 0,
+          name: "wh2",
+          enabled: false,
+          url: "https://example.com/b",
+          method: WebhookMethod.get,
+          getQueryParamName: "s",
+          postBodyType: WebhookPostBodyType.form,
+          sceneKey: "k",
+        ),
+      );
+
+      await repository.addIgnoredFolder("20260713");
+      await repository.addIgnoredFolder("nested/day2");
+
+      final WorkspaceSettingsBundle settings = await repository.loadWorkspaceSettings();
+      expect(settings.telestratorDefaults.brushSize, 10);
+      expect(settings.decoderConfig.enabledProfiles.first, DecoderProfile.vdpau);
+      expect(settings.mdkLogVerbosity, MdkLogVerbosity.error);
+      expect(settings.obsSceneSwitchConfig, isNotNull);
+      expect(settings.obsSceneSwitchConfig!.serverAddress, "10.0.0.30");
+      expect(settings.obsSceneSwitchConfig!.enabled, isFalse);
+      expect(settings.webhookSceneSwitchConfigs, hasLength(2));
+      expect(settings.webhookSceneSwitchConfigs.first.enabled, isTrue);
+      expect(settings.webhookSceneSwitchConfigs.last.enabled, isFalse);
+      expect(settings.ignoredFolders, contains("20260713"));
+
+      await repository.saveObsSceneSwitchConfig(null);
+      final WorkspaceSettingsBundle disabled = await repository.loadWorkspaceSettings();
+      expect(disabled.obsSceneSwitchConfig, isNull);
+
+      await database.close();
     });
 
     test("deletes tag row when it is no longer attached to any media", () async {
