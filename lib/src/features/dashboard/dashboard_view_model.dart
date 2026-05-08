@@ -1,7 +1,7 @@
 import "dart:async";
 
 import "package:file_picker/file_picker.dart";
-import "package:flutter/foundation.dart";
+import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 
 import "../../data/app_database.dart";
@@ -207,6 +207,8 @@ class DashboardViewModel extends ChangeNotifier {
 
   void selectItem(MediaListItem item) {
     _selectedItemKey = item.stableKey;
+    _markInMs = null;
+    _markOutMs = null;
     notifyListeners();
   }
 
@@ -321,6 +323,16 @@ class DashboardViewModel extends ChangeNotifier {
   void setPreviewPositionMs(int positionMs) {
     _previewPositionMs = positionMs;
   }
+
+  void saveClipFromCurrentMarks(BuildContext context) async {
+    final error = await saveClipFromSelectedMaster();
+    if (error != null && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
+    }
+  }
+
 
   Future<String?> saveClipFromSelectedMaster() async {
     final MediaRepository? repository = _mediaRepository;

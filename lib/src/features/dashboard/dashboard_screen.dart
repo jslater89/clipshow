@@ -2,6 +2,7 @@ import "dart:io";
 import "dart:async";
 
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 import "package:path/path.dart" as p;
 
 import "../../media/master_media_file.dart";
@@ -343,16 +344,23 @@ class _FileListPanel extends StatelessWidget {
   }
 }
 
-class _PreviewPanel extends StatelessWidget {
+class _PreviewPanel extends StatefulWidget {
   const _PreviewPanel({required this.viewModel, required this.onPlayClip});
 
   final DashboardViewModel viewModel;
   final void Function(PlayoutClip clip) onPlayClip;
 
   @override
+  State<_PreviewPanel> createState() => _PreviewPanelState();
+}
+
+class _PreviewPanelState extends State<_PreviewPanel> {
+  final ClipPlayerController _previewPlayerController = ClipPlayerController();
+
+  @override
   Widget build(BuildContext context) {
-    final MediaListItem? selectedItem = viewModel.selectedItem;
-    final MasterMediaFile? selectedMedia = viewModel.selectedMedia;
+    final MediaListItem? selectedItem = widget.viewModel.selectedItem;
+    final MasterMediaFile? selectedMedia = widget.viewModel.selectedMedia;
     final MediaIssue previewIssue = selectedItem == null
         ? MediaIssue.none
         : selectedItem.mediaIssue;
@@ -381,24 +389,34 @@ class _PreviewPanel extends StatelessWidget {
                           issue: previewIssue,
                           detail: selectedItem.mediaIssueDetail,
                         )
-                      : ClipPlayerView(
-                          filePath: selectedItem.filePath,
-                          startTimeMs:
-                              selectedItem.type == MediaListItemType.clip
-                              ? selectedItem.clip!.inMs
-                              : 0,
-                          endTimeMs: selectedItem.type == MediaListItemType.clip
-                              ? selectedItem.clip!.outMs
-                              : null,
-                          autoPlay: false,
-                          showControls: true,
-                          onPositionChanged: viewModel.setPreviewPositionMs,
+                      : _PreviewHotkeysLayer(
+                          controller: _previewPlayerController,
                           onMarkInRequested: selectedMedia == null
                               ? null
-                              : viewModel.markInAtCurrentPosition,
+                              : widget.viewModel.markInAtCurrentPosition,
                           onMarkOutRequested: selectedMedia == null
                               ? null
-                              : viewModel.markOutAtCurrentPosition,
+                              : widget.viewModel.markOutAtCurrentPosition,
+                          onSaveClipRequested: selectedMedia == null
+                              ? null
+                              : () => widget.viewModel.saveClipFromCurrentMarks(
+                                  context,
+                                ),
+                          child: ClipPlayerView(
+                            controller: _previewPlayerController,
+                            filePath: selectedItem.filePath,
+                            startTimeMs:
+                                selectedItem.type == MediaListItemType.clip
+                                ? selectedItem.clip!.inMs
+                                : 0,
+                            endTimeMs: selectedItem.type == MediaListItemType.clip
+                                ? selectedItem.clip!.outMs
+                                : null,
+                            autoPlay: false,
+                            showControls: true,
+                            onPositionChanged:
+                                widget.viewModel.setPreviewPositionMs,
+                          ),
                         ),
                 ),
               ),
@@ -410,43 +428,35 @@ class _PreviewPanel extends StatelessWidget {
                 OutlinedButton(
                   onPressed: selectedMedia == null
                       ? null
-                      : viewModel.markInAtCurrentPosition,
+                      : widget.viewModel.markInAtCurrentPosition,
                   child: Text(
-                    viewModel.markInMs == null
-                        ? "Mark In"
-                        : "Mark In ${_formatMs(viewModel.markInMs!)}",
+                    widget.viewModel.markInMs == null
+                        ? "(i) Mark In"
+                        : "(i) Mark In ${_formatMs(widget.viewModel.markInMs!)}",
                   ),
                 ),
                 OutlinedButton(
                   onPressed: selectedMedia == null
                       ? null
-                      : viewModel.markOutAtCurrentPosition,
+                      : widget.viewModel.markOutAtCurrentPosition,
                   child: Text(
-                    viewModel.markOutMs == null
-                        ? "Mark Out"
-                        : "Mark Out ${_formatMs(viewModel.markOutMs!)}",
+                    widget.viewModel.markOutMs == null
+                        ? "(o) Mark Out"
+                        : "Mark Out ${_formatMs(widget.viewModel.markOutMs!)}",
                   ),
                 ),
                 OutlinedButton(
                   onPressed: selectedMedia == null
                       ? null
-                      : () async {
-                          final String? error = await viewModel
-                              .saveClipFromSelectedMaster();
-                          if (error != null && context.mounted) {
-                            ScaffoldMessenger.of(
-                              context,
-                            ).showSnackBar(SnackBar(content: Text(error)));
-                          }
-                        },
-                  child: const Text("Save Clip"),
+                      : () => widget.viewModel.saveClipFromCurrentMarks(context),
+                  child: const Text("(s) Save Clip"),
                 ),
                 OutlinedButton.icon(
-                  onPressed: selectedItem == null ||
-                          selectedItem.type != MediaListItemType.clip
+                  onPressed: selectedItem == null || selectedItem.type != MediaListItemType.clip
                       ? null
                       : () async {
-                          final String? error = await viewModel.deleteSelectedClip();
+                          final String? error = await widget.viewModel
+                              .deleteSelectedClip();
                           if (error != null && context.mounted) {
                             ScaffoldMessenger.of(
                               context,
@@ -460,7 +470,7 @@ class _PreviewPanel extends StatelessWidget {
                   onPressed:
                       selectedItem == null || previewIssue != MediaIssue.none
                       ? null
-                      : () => onPlayClip(
+                      : () => widget.onPlayClip(
                           PlayoutClip(
                             filePath: selectedItem.filePath,
                             startTimeMs:
@@ -745,6 +755,157 @@ class _TagPanelState extends State<_TagPanel> {
     }
     unawaited(widget.viewModel.addSavedTag(tag));
     _savedTagController.clear();
+  }
+}
+
+class _PreviewMarkInIntent extends Intent {
+  const _PreviewMarkInIntent();
+}
+
+class _PreviewMarkOutIntent extends Intent {
+  const _PreviewMarkOutIntent();
+}
+
+class _PreviewSaveClipIntent extends Intent {
+  const _PreviewSaveClipIntent();
+}
+
+class _PreviewSeekBackwardIntent extends Intent {
+  const _PreviewSeekBackwardIntent();
+}
+
+class _PreviewSeekForwardIntent extends Intent {
+  const _PreviewSeekForwardIntent();
+}
+
+class _PreviewSeekShortBackwardIntent extends Intent {
+  const _PreviewSeekShortBackwardIntent();
+}
+
+class _PreviewSeekShortForwardIntent extends Intent {
+  const _PreviewSeekShortForwardIntent();
+}
+
+class _PreviewSeekLongBackwardIntent extends Intent {
+  const _PreviewSeekLongBackwardIntent();
+}
+
+class _PreviewSeekLongForwardIntent extends Intent {
+  const _PreviewSeekLongForwardIntent();
+}
+
+class _PreviewHotkeysLayer extends StatelessWidget {
+  const _PreviewHotkeysLayer({
+    required this.child,
+    required this.controller,
+    this.onMarkInRequested,
+    this.onMarkOutRequested,
+    this.onSaveClipRequested,
+  });
+
+  final Widget child;
+  final ClipPlayerController controller;
+  final VoidCallback? onMarkInRequested;
+  final VoidCallback? onMarkOutRequested;
+  final VoidCallback? onSaveClipRequested;
+
+  @override
+  Widget build(BuildContext context) {
+    return Shortcuts(
+      shortcuts: <ShortcutActivator, Intent>{
+        const SingleActivator(LogicalKeyboardKey.space): const ActivateIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft):
+            const _PreviewSeekBackwardIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowRight):
+            const _PreviewSeekForwardIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true):
+            const _PreviewSeekShortBackwardIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true):
+            const _PreviewSeekShortForwardIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, control: true):
+            const _PreviewSeekLongBackwardIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowRight, control: true):
+            const _PreviewSeekLongForwardIntent(),
+        if (onMarkInRequested != null)
+          const SingleActivator(LogicalKeyboardKey.keyI):
+              const _PreviewMarkInIntent(),
+        if (onMarkOutRequested != null)
+          const SingleActivator(LogicalKeyboardKey.keyO):
+              const _PreviewMarkOutIntent(),
+        if (onSaveClipRequested != null)
+          const SingleActivator(LogicalKeyboardKey.keyS):
+              const _PreviewSaveClipIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              controller.togglePlayPause();
+              return null;
+            },
+          ),
+          _PreviewSeekBackwardIntent: CallbackAction<_PreviewSeekBackwardIntent>(
+            onInvoke: (_) {
+              controller.seekBy(const Duration(seconds: -5));
+              return null;
+            },
+          ),
+          _PreviewSeekForwardIntent: CallbackAction<_PreviewSeekForwardIntent>(
+            onInvoke: (_) {
+              controller.seekBy(const Duration(seconds: 5));
+              return null;
+            },
+          ),
+          _PreviewSeekShortBackwardIntent:
+              CallbackAction<_PreviewSeekShortBackwardIntent>(
+                onInvoke: (_) {
+                  controller.seekBy(const Duration(seconds: -1));
+                  return null;
+                },
+              ),
+          _PreviewSeekShortForwardIntent:
+              CallbackAction<_PreviewSeekShortForwardIntent>(
+                onInvoke: (_) {
+                  controller.seekBy(const Duration(seconds: 1));
+                  return null;
+                },
+              ),
+          _PreviewSeekLongBackwardIntent:
+              CallbackAction<_PreviewSeekLongBackwardIntent>(
+                onInvoke: (_) {
+                  controller.seekBy(const Duration(seconds: -15));
+                  return null;
+                },
+              ),
+          _PreviewSeekLongForwardIntent:
+              CallbackAction<_PreviewSeekLongForwardIntent>(
+                onInvoke: (_) {
+                  controller.seekBy(const Duration(seconds: 15));
+                  return null;
+                },
+              ),
+          _PreviewMarkInIntent: CallbackAction<_PreviewMarkInIntent>(
+            onInvoke: (_) {
+              onMarkInRequested?.call();
+              return null;
+            },
+          ),
+          _PreviewMarkOutIntent: CallbackAction<_PreviewMarkOutIntent>(
+            onInvoke: (_) {
+              onMarkOutRequested?.call();
+              return null;
+            },
+          ),
+          _PreviewSaveClipIntent: CallbackAction<_PreviewSaveClipIntent>(
+            onInvoke: (_) {
+              onSaveClipRequested?.call();
+              return null;
+            },
+          ),
+        },
+        child: Focus(autofocus: true, child: child),
+      ),
+    );
   }
 }
 
