@@ -55,12 +55,17 @@ class PreviewSeekToEndIntent extends Intent {
   const PreviewSeekToEndIntent();
 }
 
+class PreviewToggleHelpIntent extends Intent {
+  const PreviewToggleHelpIntent();
+}
+
 class DashboardPreviewHotkeysLayer extends StatelessWidget {
   const DashboardPreviewHotkeysLayer({
     super.key,
     required this.child,
     required this.controller,
     required this.focusNode,
+    required this.onHelpToggleRequested,
     this.onMarkInRequested,
     this.onMarkOutRequested,
     this.onSaveClipRequested,
@@ -69,6 +74,7 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
   final Widget child;
   final ClipPlayerController controller;
   final FocusNode focusNode;
+  final VoidCallback onHelpToggleRequested;
   final VoidCallback? onMarkInRequested;
   final VoidCallback? onMarkOutRequested;
   final VoidCallback? onSaveClipRequested;
@@ -98,6 +104,8 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
             const PreviewSeekToStartIntent(),
         const SingleActivator(LogicalKeyboardKey.end):
             const PreviewSeekToEndIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyH):
+            const PreviewToggleHelpIntent(),
         if (onMarkInRequested != null)
           const SingleActivator(LogicalKeyboardKey.keyI):
               const PreviewMarkInIntent(),
@@ -197,6 +205,12 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
           PreviewSaveClipIntent: CallbackAction<PreviewSaveClipIntent>(
             onInvoke: (_) {
               onSaveClipRequested?.call();
+              return null;
+            },
+          ),
+          PreviewToggleHelpIntent: CallbackAction<PreviewToggleHelpIntent>(
+            onInvoke: (_) {
+              onHelpToggleRequested();
               return null;
             },
           ),

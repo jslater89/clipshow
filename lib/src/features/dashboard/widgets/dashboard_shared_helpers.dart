@@ -115,30 +115,36 @@ PlayoutClip toPlayoutClip(
     item.filePath,
   );
   if (item.type == MediaListItemType.master) {
-    final int startTimeMs = initialOffsetMs == null
-        ? 0
+    final int startTimeMs = 0;
+    final int? initialPositionMs = initialOffsetMs == null
+        ? null
         : initialOffsetMs < 0
         ? 0
         : initialOffsetMs;
-    return PlayoutClip(
+    final PlayoutClip clip = PlayoutClip(
       filePath: absolute,
       startTimeMs: startTimeMs,
       endTimeMs: null,
+      initialPositionMs: initialPositionMs,
     );
+    return clip;
   }
   final int clipInMs = item.clip!.inMs;
   final int? clipOutMs = item.clip!.outMs;
-  final int startTimeMs;
+  final int startTimeMs = clipInMs;
+  final int? initialPositionMs;
   if (initialOffsetMs == null || initialOffsetMs < clipInMs) {
-    startTimeMs = clipInMs;
+    initialPositionMs = clipInMs;
   } else if (clipOutMs != null && initialOffsetMs > clipOutMs) {
-    startTimeMs = clipOutMs;
+    initialPositionMs = clipOutMs;
   } else {
-    startTimeMs = initialOffsetMs;
+    initialPositionMs = initialOffsetMs;
   }
-  return PlayoutClip(
+  final PlayoutClip clip = PlayoutClip(
     filePath: absolute,
     startTimeMs: startTimeMs,
     endTimeMs: clipOutMs,
+    initialPositionMs: initialPositionMs,
   );
+  return clip;
 }

@@ -152,17 +152,32 @@ class DashboardFileListPanel extends StatelessWidget {
                       child: Wrap(
                         spacing: 8,
                         runSpacing: 8,
-                        children: viewModel.activeTagFilters.isEmpty
-                            ? <Widget>[const Text("No active tag filters")]
-                            : viewModel.activeTagFilters
-                                  .map(
-                                    (String tag) => InputChip(
-                                      label: Text("Filter: $tag"),
-                                      onDeleted: () =>
-                                          viewModel.toggleTagFilter(tag),
-                                    ),
-                                  )
-                                  .toList(),
+                        children: () {
+                          final List<Widget> chips = <Widget>[];
+                          final String? clipFilterLabel =
+                              viewModel.clipsOfMasterFilterChipLabel;
+                          if (clipFilterLabel != null) {
+                            chips.add(
+                              InputChip(
+                                label: Text(clipFilterLabel),
+                                onDeleted: viewModel.clearClipsOfMasterFilter,
+                              ),
+                            );
+                          }
+                          chips.addAll(
+                            viewModel.activeTagFilters.map(
+                              (String tag) => InputChip(
+                                label: Text("Filter: $tag"),
+                                onDeleted: () =>
+                                    viewModel.toggleTagFilter(tag),
+                              ),
+                            ),
+                          );
+                          if (chips.isEmpty) {
+                            chips.add(const Text("No active tag filters"));
+                          }
+                          return chips;
+                        }(),
                       ),
                     ),
                     const SizedBox(width: 12),

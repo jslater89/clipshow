@@ -3,11 +3,11 @@ import "dart:async";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 
-import 'package:obs_clipshow/src/features/playout/clip_player_view.dart';
-import 'package:obs_clipshow/src/features/playout/playout_clip.dart';
-import 'package:obs_clipshow/src/features/playout/playout_hotkeys_layer.dart';
-import 'package:obs_clipshow/src/features/playout/telestrator_canvas.dart';
-import 'package:obs_clipshow/src/features/playout/telestrator_model.dart';
+import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
+import "package:obs_clipshow/src/features/playout/playout_clip.dart";
+import "package:obs_clipshow/src/features/playout/playout_hotkeys_layer.dart";
+import "package:obs_clipshow/src/features/playout/telestrator_canvas.dart";
+import "package:obs_clipshow/src/features/playout/telestrator_model.dart";
 
 class PlayoutScreen extends StatefulWidget {
   const PlayoutScreen({
@@ -96,6 +96,7 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
               filePath: widget.clip.filePath,
               startTimeMs: widget.clip.startTimeMs,
               endTimeMs: widget.clip.endTimeMs,
+              initialPositionMs: widget.clip.initialPositionMs,
               autoPlay: true,
             ),
             Positioned.fill(

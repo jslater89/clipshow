@@ -41,6 +41,7 @@ class ClipPlayerView extends StatefulWidget {
     required this.filePath,
     this.startTimeMs = 0,
     this.endTimeMs,
+    this.initialPositionMs,
     this.autoPlay = false,
     this.showControls = false,
     this.seekStep = const Duration(seconds: 5),
@@ -53,6 +54,7 @@ class ClipPlayerView extends StatefulWidget {
   final String filePath;
   final int startTimeMs;
   final int? endTimeMs;
+  final int? initialPositionMs;
   final bool autoPlay;
   final bool showControls;
   final Duration seekStep;
@@ -113,6 +115,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     if (oldWidget.filePath != widget.filePath ||
         oldWidget.startTimeMs != widget.startTimeMs ||
         oldWidget.endTimeMs != widget.endTimeMs ||
+        oldWidget.initialPositionMs != widget.initialPositionMs ||
         oldWidget.autoPlay != widget.autoPlay ||
         oldWidget.showControls != widget.showControls) {
       _reinitializeController(reason: "didUpdateWidget");
@@ -142,7 +145,21 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         await controller.dispose();
         return;
       }
-      await controller.seekTo(Duration(milliseconds: widget.startTimeMs));
+      Duration initialPosition = Duration(
+        milliseconds: widget.initialPositionMs ?? widget.startTimeMs,
+      );
+      final Duration clipStart = Duration(milliseconds: widget.startTimeMs);
+      if (initialPosition < clipStart) {
+        initialPosition = clipStart;
+      }
+      final int? endMs = widget.endTimeMs;
+      if (endMs != null) {
+        final Duration clipEnd = Duration(milliseconds: endMs);
+        if (initialPosition > clipEnd) {
+          initialPosition = clipEnd;
+        }
+      }
+      await controller.seekTo(initialPosition);
       if (!mounted) {
         await controller.dispose();
         return;

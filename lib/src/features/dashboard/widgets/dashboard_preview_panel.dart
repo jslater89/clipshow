@@ -29,10 +29,17 @@ class DashboardPreviewPanel extends StatefulWidget {
 class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
   final ClipPlayerController _previewPlayerController = ClipPlayerController();
   DashboardViewModel? _viewModel;
+  bool _showPreviewHelp = false;
   static const EdgeInsets _nudgeButtonPadding = EdgeInsets.symmetric(
     horizontal: 8,
     vertical: 4,
   );
+
+  void _togglePreviewHelp() {
+    setState(() {
+      _showPreviewHelp = !_showPreviewHelp;
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -92,6 +99,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                         : DashboardPreviewHotkeysLayer(
                             controller: _previewPlayerController,
                             focusNode: widget.focusNode,
+                            onHelpToggleRequested: _togglePreviewHelp,
                             onMarkInRequested: selectedMedia == null
                                 ? null
                                 : viewModel.markInAtCurrentPosition,
@@ -103,26 +111,41 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                 : () => viewModel.saveClipFromCurrentMarks(
                                     context,
                                   ),
-                            child: ClipPlayerView(
-                              controller: _previewPlayerController,
-                              filePath: workspaceRoot == null
-                                  ? selectedItem.filePath
-                                  : WorkspaceMediaPaths.absoluteMasterPath(
-                                      workspaceRoot,
-                                      selectedItem.filePath,
-                                    ),
-                              startTimeMs:
-                                  selectedItem.type == MediaListItemType.clip
-                                  ? selectedItem.clip!.inMs
-                                  : 0,
-                              endTimeMs:
-                                  selectedItem.type == MediaListItemType.clip
-                                  ? selectedItem.clip!.outMs
-                                  : null,
-                              autoPlay: false,
-                              showControls: true,
-                              onPositionChanged: viewModel.setPreviewPositionMs,
-                              onPlayingChanged: _onPreviewPlayingChanged,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: <Widget>[
+                                ClipPlayerView(
+                                  controller: _previewPlayerController,
+                                  filePath: workspaceRoot == null
+                                      ? selectedItem.filePath
+                                      : WorkspaceMediaPaths.absoluteMasterPath(
+                                          workspaceRoot,
+                                          selectedItem.filePath,
+                                        ),
+                                  startTimeMs:
+                                      selectedItem.type ==
+                                          MediaListItemType.clip
+                                      ? selectedItem.clip!.inMs
+                                      : 0,
+                                  endTimeMs:
+                                      selectedItem.type ==
+                                          MediaListItemType.clip
+                                      ? selectedItem.clip!.outMs
+                                      : null,
+                                  autoPlay: false,
+                                  showControls: true,
+                                  onPositionChanged:
+                                      viewModel.setPreviewPositionMs,
+                                  onPlayingChanged: _onPreviewPlayingChanged,
+                                ),
+                                if (_showPreviewHelp)
+                                  _PreviewHelpOverlay(
+                                    showMarkHotkeys:
+                                        selectedMedia != null &&
+                                        !isClipSelection,
+                                    isClipPreview: isClipSelection,
+                                  ),
+                              ],
                             ),
                           ),
                   ),
@@ -367,6 +390,117 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
     return result ?? false;
   }
 
+}
+
+class _PreviewHelpOverlay extends StatelessWidget {
+  const _PreviewHelpOverlay({
+    required this.showMarkHotkeys,
+    required this.isClipPreview,
+  });
+
+  final bool showMarkHotkeys;
+  final bool isClipPreview;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.65),
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Card(
+            color: colorScheme.surface.withValues(alpha: 0.96),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    "Preview Hotkeys",
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 12),
+                  _previewHotkeySection("Playback", <String, String>{
+                    "Space": "Play/Pause",
+                  }),
+                  const SizedBox(height: 10),
+                  _previewHotkeySection("Seek", <String, String>{
+                    "Left / Right": "Seek 1s",
+                    "Ctrl + Left / Right": "Seek 5s",
+                    "Shift + Left / Right": "Seek 15s",
+                    "Alt + Left / Right": "Seek 0.1s",
+                    "Home / End": "Jump To Start / End",
+                  }),
+                  if (showMarkHotkeys) ...<Widget>[
+                    const SizedBox(height: 10),
+                    _previewHotkeySection("Mark Clip", <String, String>{
+                      "I": "Mark In",
+                      "O": "Mark Out",
+                      "S": "Save Clip",
+                    }),
+                  ],
+                  if (isClipPreview) ...<Widget>[
+                    const SizedBox(height: 10),
+                    Text(
+                      "Clip Range",
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "Nudge start and end with the -2.5s / -0.5s / +0.5s / "
+                      "+2.5s buttons below the preview (no keyboard shortcuts).",
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  _previewHotkeySection("Help", <String, String>{
+                    "H": "Toggle This Help",
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _previewHotkeySection(String title, Map<String, String> entries) {
+    return Builder(
+      builder: (BuildContext context) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(title, style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 6),
+            ...entries.entries.map(
+              (MapEntry<String, String> item) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: <Widget>[
+                    SizedBox(
+                      width: 200,
+                      child: Text(
+                        item.key,
+                        style: TextStyle(
+                          fontFamily: "monospace",
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    Expanded(child: Text(item.value)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class _PreviewIssueMessage extends StatelessWidget {

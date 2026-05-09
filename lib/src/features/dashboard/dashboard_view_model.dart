@@ -75,6 +75,8 @@ class DashboardViewModel extends ChangeNotifier {
   bool _fileSearchUsesFullPath = false;
   String? _selectedItemKey;
   bool _showUntaggedOnly = false;
+  /// When set, [visibleItems] includes only clips whose [MediaClip.masterMediaId] matches.
+  int? _clipsOfMasterFilterMediaId;
   WorkspaceSettingsBundle? _workspaceSettings;
   DashboardMediaPaneTab _mediaPaneTab = DashboardMediaPaneTab.preview;
   final List<String> _captureTags = <String>[];
@@ -99,7 +101,20 @@ class DashboardViewModel extends ChangeNotifier {
       _showUntaggedOnly ||
       _activeTagFilters.isNotEmpty ||
       _tagSearchQuery.trim().isNotEmpty ||
-      _fileNameSearchQuery.trim().isNotEmpty;
+      _fileNameSearchQuery.trim().isNotEmpty ||
+      _clipsOfMasterFilterMediaId != null;
+
+  int? get clipsOfMasterFilterMediaId => _clipsOfMasterFilterMediaId;
+
+  bool get hasClipsOfMasterFilter => _clipsOfMasterFilterMediaId != null;
+
+  String? get clipsOfMasterFilterChipLabel {
+    final int? id = _clipsOfMasterFilterMediaId;
+    if (id == null) {
+      return null;
+    }
+    return "Clips of ${_displayNameForMasterMediaId(id)}";
+  }
   bool get showUntaggedOnly => _showUntaggedOnly;
   String? get selectedItemKey => _selectedItemKey;
   TelestratorDefaults get telestratorDefaults =>
@@ -472,6 +487,7 @@ class DashboardViewModel extends ChangeNotifier {
   }
 
   Future<void> _startSession(WorkspaceSession session) async {
+    _clipsOfMasterFilterMediaId = null;
     _mediaRepository = session.mediaRepository;
     _workspacePath = session.workspace.rootPath;
     await _mediaSubscription?.cancel();
@@ -550,6 +566,46 @@ class DashboardViewModel extends ChangeNotifier {
         return;
       }
     }
+  }
+
+  int clipCountForMaster(int masterMediaId) {
+    int n = 0;
+    for (final MediaListItem item in _allItems) {
+      if (item.type == MediaListItemType.clip &&
+          item.clip!.masterMediaId == masterMediaId) {
+        n++;
+      }
+    }
+    return n;
+  }
+
+  void toggleClipsOfMasterFilter(int masterMediaId) {
+    if (_clipsOfMasterFilterMediaId == masterMediaId) {
+      _clipsOfMasterFilterMediaId = null;
+    } else {
+      _clipsOfMasterFilterMediaId = masterMediaId;
+    }
+    _applyFilters();
+    notifyListeners();
+  }
+
+  void clearClipsOfMasterFilter() {
+    if (_clipsOfMasterFilterMediaId == null) {
+      return;
+    }
+    _clipsOfMasterFilterMediaId = null;
+    _applyFilters();
+    notifyListeners();
+  }
+
+  String _displayNameForMasterMediaId(int masterMediaId) {
+    for (final MediaListItem item in _allItems) {
+      if (item.type == MediaListItemType.master &&
+          item.master!.id == masterMediaId) {
+        return item.displayName;
+      }
+    }
+    return "Master #$masterMediaId";
   }
 
   Future<void> addTagToSelectedMedia(String tag) async {
@@ -1185,6 +1241,13 @@ class DashboardViewModel extends ChangeNotifier {
               : item.fileName.toLowerCase().contains(fileNameSearch) ||
                     item.displayName.toLowerCase().contains(fileNameSearch))) {
         return false;
+      }
+      final int? clipMasterId = _clipsOfMasterFilterMediaId;
+      if (clipMasterId != null) {
+        if (item.type != MediaListItemType.clip ||
+            item.clip!.masterMediaId != clipMasterId) {
+          return false;
+        }
       }
       return true;
     }).toList();
