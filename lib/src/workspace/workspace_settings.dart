@@ -165,6 +165,7 @@ class WorkspaceSettingsBundle {
     required this.webhookSceneSwitchConfigs,
     required this.ignoredFolders,
     required this.capturePathsSettings,
+    required this.pauseIngestScanDuringPreview,
   });
 
   final TelestratorDefaults telestratorDefaults;
@@ -175,4 +176,8 @@ class WorkspaceSettingsBundle {
   final List<WebhookSceneSwitchConfig> webhookSceneSwitchConfigs;
   final List<String> ignoredFolders;
   final CapturePathsSettings capturePathsSettings;
+
+  /// When true (default), background ingest scanning pauses while a clip plays
+  /// in the dashboard preview. Full-screen playout always pauses ingest regardless.
+  final bool pauseIngestScanDuringPreview;
 }

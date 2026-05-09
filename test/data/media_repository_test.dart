@@ -677,6 +677,13 @@ void main() {
         expect(settings.webhookSceneSwitchConfigs.first.enabled, isTrue);
         expect(settings.webhookSceneSwitchConfigs.last.enabled, isFalse);
         expect(settings.ignoredFolders, contains("20260713"));
+        expect(settings.pauseIngestScanDuringPreview, isTrue);
+
+        await repository.savePauseIngestScanDuringPreview(false);
+        expect(
+          (await repository.loadWorkspaceSettings()).pauseIngestScanDuringPreview,
+          isFalse,
+        );
 
         await repository.saveObsSceneSwitchConfig(null);
         final WorkspaceSettingsBundle disabled = await repository

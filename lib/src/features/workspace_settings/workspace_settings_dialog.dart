@@ -354,6 +354,19 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 style: theme.textTheme.bodySmall,
               ),
               const Divider(height: 24),
+              _SectionTitle("Ingestion & preview", theme),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                title: const Text("Pause Background Ingest During Preview"),
+                subtitle: Text(
+                  "When enabled, scanning and ffprobe pause while a clip plays in the dashboard preview to avoid disk contention on slow storage (e.g. USB HDD). Full-screen playout always pauses ingest regardless of this setting. Turn off if media lives on a fast internal or external SSD.",
+                  style: theme.textTheme.bodySmall,
+                ),
+                value: viewModel.pauseIngestScanDuringPreview,
+                onChanged: (bool value) =>
+                    unawaited(viewModel.savePauseIngestScanDuringPreview(value)),
+              ),
+              const Divider(height: 24),
               _SectionTitle("Scene switch settings", theme),
               const SizedBox(height: 8),
               _cardWithTitle(

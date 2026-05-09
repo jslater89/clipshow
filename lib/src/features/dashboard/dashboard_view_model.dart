@@ -78,6 +78,7 @@ class DashboardViewModel extends ChangeNotifier {
   /// When set, [visibleItems] includes only clips whose [MediaClip.masterMediaId] matches.
   int? _clipsOfMasterFilterMediaId;
   WorkspaceSettingsBundle? _workspaceSettings;
+  bool _dashboardPreviewPlaybackActive = false;
   DashboardMediaPaneTab _mediaPaneTab = DashboardMediaPaneTab.preview;
   final List<String> _captureTags = <String>[];
   bool _obsCaptureRecording = false;
@@ -137,6 +138,8 @@ class DashboardViewModel extends ChangeNotifier {
   CapturePathsSettings get capturePathsSettings =>
       _workspaceSettings?.capturePathsSettings ??
       CapturePathsSettings.fallback();
+  bool get pauseIngestScanDuringPreview =>
+      _workspaceSettings?.pauseIngestScanDuringPreview ?? true;
   List<String> get captureTags => List<String>.unmodifiable(_captureTags);
   bool get obsCaptureRecording => _obsCaptureRecording;
   String? get captureStatusMessage => _captureStatusMessage;
@@ -1261,7 +1264,25 @@ class DashboardViewModel extends ChangeNotifier {
   }
 
   void setPreviewPlaying(bool playing) {
-    _ingestionService.setPreviewPlaying(playing);
+    _dashboardPreviewPlaybackActive = playing;
+    _syncIngestPreviewPause();
+  }
+
+  void _syncIngestPreviewPause() {
+    final bool shouldPause =
+        pauseIngestScanDuringPreview && _dashboardPreviewPlaybackActive;
+    _ingestionService.setPreviewPlaying(shouldPause);
+  }
+
+  Future<void> savePauseIngestScanDuringPreview(bool value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.savePauseIngestScanDuringPreview(value);
+    await _loadWorkspaceSettings();
+    _syncIngestPreviewPause();
+    notifyListeners();
   }
 
   @override

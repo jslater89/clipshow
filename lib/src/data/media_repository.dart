@@ -600,6 +600,8 @@ class MediaRepository {
         await _loadWebhookSceneSwitchConfigs();
     final List<String> ignoredFolders = await listIgnoredFolders();
     final CapturePathsSettings capturePaths = await _loadCapturePathsSettings();
+    final bool pauseIngestScanDuringPreview =
+        await _loadPauseIngestScanDuringPreview();
     return WorkspaceSettingsBundle(
       telestratorDefaults: telestratorDefaults,
       decoderConfig: decoderConfig,
@@ -609,6 +611,23 @@ class MediaRepository {
       webhookSceneSwitchConfigs: webhooks,
       ignoredFolders: ignoredFolders,
       capturePathsSettings: capturePaths,
+      pauseIngestScanDuringPreview: pauseIngestScanDuringPreview,
+    );
+  }
+
+  Future<bool> _loadPauseIngestScanDuringPreview() async {
+    final String? stored =
+        await _getWorkspaceSetting("ingestion.pauseScanDuringPreview");
+    if (stored == null) {
+      return true;
+    }
+    return stored == "true";
+  }
+
+  Future<void> savePauseIngestScanDuringPreview(bool value) async {
+    await _putWorkspaceSetting(
+      "ingestion.pauseScanDuringPreview",
+      value ? "true" : "false",
     );
   }
 
