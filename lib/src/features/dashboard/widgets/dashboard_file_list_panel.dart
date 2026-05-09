@@ -48,7 +48,7 @@ class DashboardFileListPanel extends StatelessWidget {
                     const Text("Files"),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Autocomplete<String>(
+                      child: AdaptiveAutocomplete<String>(
                         optionsBuilder: (TextEditingValue textEditingValue) {
                           return viewModel.searchTagSuggestionsFor(
                             textEditingValue.text,

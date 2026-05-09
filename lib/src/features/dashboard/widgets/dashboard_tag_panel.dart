@@ -135,7 +135,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                   children: <Widget>[
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 400),
-                      child: Autocomplete<String>(
+                      child: AdaptiveAutocomplete<String>(
                         optionsBuilder: (TextEditingValue textEditingValue) {
                           return viewModel.tagSuggestionsFor(
                             textEditingValue.text,
@@ -221,7 +221,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                   children: <Widget>[
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 400),
-                      child: Autocomplete<String>(
+                      child: AdaptiveAutocomplete<String>(
                         optionsBuilder: (TextEditingValue textEditingValue) {
                           return viewModel.tagSuggestionsFor(
                             textEditingValue.text,

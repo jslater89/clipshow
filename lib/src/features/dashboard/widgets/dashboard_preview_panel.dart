@@ -1,6 +1,4 @@
 import "dart:async";
-import "dart:convert";
-import "dart:io";
 
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
@@ -30,13 +28,27 @@ class DashboardPreviewPanel extends StatefulWidget {
 
 class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
   final ClipPlayerController _previewPlayerController = ClipPlayerController();
-  static const String _debugLogPath =
-      "/home/jay/development/personal/obs_clipshow/.cursor/debug-c1d67a.log";
-  String? _lastLoggedSelectionKey;
+  DashboardViewModel? _viewModel;
   static const EdgeInsets _nudgeButtonPadding = EdgeInsets.symmetric(
     horizontal: 8,
     vertical: 4,
   );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _viewModel = Provider.of<DashboardViewModel>(context, listen: false);
+  }
+
+  @override
+  void dispose() {
+    _viewModel?.setPreviewPlaying(false);
+    super.dispose();
+  }
+
+  void _onPreviewPlayingChanged(bool playing) {
+    _viewModel?.setPreviewPlaying(playing);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -44,22 +56,6 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
     final String? workspaceRoot = viewModel.workspacePath;
     final MediaListItem? selectedItem = viewModel.selectedItem;
     final MasterMediaFile? selectedMedia = viewModel.selectedMedia;
-    if (selectedItem?.stableKey != _lastLoggedSelectionKey) {
-      _lastLoggedSelectionKey = selectedItem?.stableKey;
-      // #region agent log
-      _debugLog(
-        hypothesisId: "H1,H2,H4",
-        location: "dashboard_preview_panel.dart:build:selectionChanged",
-        message: "Preview selection changed",
-        data: <String, Object?>{
-          "selectedItemKey": selectedItem?.stableKey,
-          "selectedPath": selectedItem?.filePath,
-          "selectedType": selectedItem?.type.name,
-          "selectedIssue": selectedItem?.mediaIssue.name,
-        },
-      );
-      // #endregion
-    }
     final MediaIssue previewIssue = selectedItem == null
         ? MediaIssue.none
         : selectedItem.mediaIssue;
@@ -126,6 +122,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                               autoPlay: false,
                               showControls: true,
                               onPositionChanged: viewModel.setPreviewPositionMs,
+                              onPlayingChanged: _onPreviewPlayingChanged,
                             ),
                           ),
                   ),
@@ -370,34 +367,6 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
     return result ?? false;
   }
 
-  void _debugLog({
-    required String hypothesisId,
-    required String location,
-    required String message,
-    required Map<String, Object?> data,
-    String runId = "initial",
-  }) {
-    final Map<String, Object?> payload = <String, Object?>{
-      "sessionId": "c1d67a",
-      "runId": runId,
-      "hypothesisId": hypothesisId,
-      "location": location,
-      "message": message,
-      "data": data,
-      "timestamp": DateTime.now().millisecondsSinceEpoch,
-    };
-    unawaited(_appendDebugLog(payload));
-  }
-
-  Future<void> _appendDebugLog(Map<String, Object?> payload) async {
-    try {
-      await File(_debugLogPath).writeAsString(
-        "${jsonEncode(payload)}\n",
-        mode: FileMode.append,
-        flush: true,
-      );
-    } catch (_) {}
-  }
 }
 
 class _PreviewIssueMessage extends StatelessWidget {

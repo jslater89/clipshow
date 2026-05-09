@@ -25,6 +25,9 @@ enum DecoderProfile {
 
 enum MdkLogVerbosity { off, error, warning, info, debug, all }
 
+/// Minimum level for `package:logging` [Logger] `"fvp"` (Dart-side plugin traces).
+enum FvpLogVerbosity { off, error, warning, info, debug, all }
+
 class TelestratorDefaults {
   const TelestratorDefaults({
     required this.colorOneArgb,
@@ -157,6 +160,7 @@ class WorkspaceSettingsBundle {
     required this.telestratorDefaults,
     required this.decoderConfig,
     required this.mdkLogVerbosity,
+    required this.fvpLogVerbosity,
     required this.obsSceneSwitchConfig,
     required this.webhookSceneSwitchConfigs,
     required this.ignoredFolders,
@@ -166,6 +170,7 @@ class WorkspaceSettingsBundle {
   final TelestratorDefaults telestratorDefaults;
   final DecoderConfig decoderConfig;
   final MdkLogVerbosity mdkLogVerbosity;
+  final FvpLogVerbosity fvpLogVerbosity;
   final ObsSceneSwitchConfig? obsSceneSwitchConfig;
   final List<WebhookSceneSwitchConfig> webhookSceneSwitchConfigs;
   final List<String> ignoredFolders;

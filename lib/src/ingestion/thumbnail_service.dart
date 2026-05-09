@@ -32,6 +32,7 @@ class ThumbnailService {
   final Set<String> _queuedOrRunning = <String>{};
   int _activeJobs = 0;
   bool _disposed = false;
+  bool _paused = false;
 
   /// [failureDetail] is null on success (thumbnail present or written).
   void Function(String normalizedPath, String? failureDetail)?
@@ -80,8 +81,15 @@ class ThumbnailService {
     _pumpQueue();
   }
 
+  void setScanPaused(bool paused) {
+    _paused = paused;
+    if (!paused) {
+      _pumpQueue();
+    }
+  }
+
   void _pumpQueue() {
-    while (!_disposed && _activeJobs < maxConcurrentJobs && _queue.isNotEmpty) {
+    while (!_disposed && !_paused && _activeJobs < maxConcurrentJobs && _queue.isNotEmpty) {
       final String path = _queue.removeFirst();
       _activeJobs++;
       unawaited(_generateThumbnailJob(path));

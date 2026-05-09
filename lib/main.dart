@@ -2,7 +2,6 @@ import "dart:io";
 
 import "package:flutter/material.dart";
 import "package:fvp/fvp.dart" as fvp;
-import "package:fvp/mdk.dart" as mdk;
 import "package:logging/logging.dart";
 import "package:window_manager/window_manager.dart";
 
@@ -14,6 +13,8 @@ import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // fvp uses Logger("fvp") at Level.FINE only; cap it here (no registerWith hook).
+  hierarchicalLoggingEnabled = true;
   await windowManager.ensureInitialized();
   final _StartupVideoSettings startupSettings =
       await _loadStartupVideoSettings();
@@ -24,14 +25,18 @@ Future<void> main() async {
         "video.decoders": <String>[startupSettings.decoderOption],
       // MDK player buffer: min ms when low + max ms cap (reduces PulseAudio underruns).
       "player": <String, String>{"buffer": "2000+60000"},
+      // Applied after fvp's internal "log":"all"; overrides MDK global log level.
+      "global": <String, Object>{
+        "log": _mdkGlobalLogOption(startupSettings.logVerbosity),
+      },
     },
   );
-  _configureMdkLogging(startupSettings.logVerbosity);
-  _configureLogging();
+  _configureLogging(startupSettings.fvpLogVerbosity);
   runApp(const ObsClipshowApp());
 }
 
-void _configureLogging() {
+void _configureLogging(FvpLogVerbosity fvpLogVerbosity) {
+  Logger("fvp").level = _packageLoggingLevelForFvp(fvpLogVerbosity);
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((LogRecord record) {
     // Keep format simple for terminal and IDE logs.
@@ -49,6 +54,7 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
     return const _StartupVideoSettings(
       decoderOption: "VAAPI",
       logVerbosity: MdkLogVerbosity.warning,
+      fvpLogVerbosity: FvpLogVerbosity.warning,
     );
   }
   final Workspace workspace = Workspace(rootPath: workspacePath);
@@ -104,45 +110,66 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
       (MdkLogVerbosity item) => item.name == logName,
       orElse: () => MdkLogVerbosity.warning,
     );
+    final List<Map<String, Object?>> fvpLogRows = await database.query(
+      "workspace_settings",
+      columns: <String>["value"],
+      where: "key = ?",
+      whereArgs: <Object?>["fvp.logVerbosity"],
+      limit: 1,
+    );
+    final String fvpLogName = fvpLogRows.isEmpty
+        ? FvpLogVerbosity.warning.name
+        : fvpLogRows.single["value"]! as String;
+    final FvpLogVerbosity fvpVerbosity = FvpLogVerbosity.values.firstWhere(
+      (FvpLogVerbosity item) => item.name == fvpLogName,
+      orElse: () => FvpLogVerbosity.warning,
+    );
     return _StartupVideoSettings(
       decoderOption: _decoderOptionForProfile(
         decoderProfiles.isEmpty ? profile : decoderProfiles.first,
       ),
       logVerbosity: verbosity,
+      fvpLogVerbosity: fvpVerbosity,
     );
   } finally {
     await database.close();
   }
 }
 
-void _configureMdkLogging(MdkLogVerbosity verbosity) {
-  if (verbosity == MdkLogVerbosity.off) {
-    mdk.setLogHandler(null);
-    return;
+/// Maps [FvpLogVerbosity] to `package:logging` [Level] for [Logger] `"fvp"`.
+Level _packageLoggingLevelForFvp(FvpLogVerbosity verbosity) {
+  switch (verbosity) {
+    case FvpLogVerbosity.off:
+      return Level.OFF;
+    case FvpLogVerbosity.error:
+      return Level.SEVERE;
+    case FvpLogVerbosity.warning:
+      return Level.WARNING;
+    case FvpLogVerbosity.info:
+      return Level.INFO;
+    case FvpLogVerbosity.debug:
+      return Level.FINE;
+    case FvpLogVerbosity.all:
+      return Level.ALL;
   }
-  mdk.setLogHandler((mdk.LogLevel level, String message) {
-    if (_shouldEmitMdkLog(level, verbosity)) {
-      debugPrint("[MDK:${level.name}] $message");
-    }
-  });
 }
 
-bool _shouldEmitMdkLog(mdk.LogLevel level, MdkLogVerbosity threshold) {
-  if (level == mdk.LogLevel.off) {
-    return false;
+/// Values for MDK [SetGlobalOption("log", …)](https://github.com/wang-bin/mdk-sdk/wiki/Global-Options).
+String _mdkGlobalLogOption(MdkLogVerbosity verbosity) {
+  switch (verbosity) {
+    case MdkLogVerbosity.off:
+      return "Off";
+    case MdkLogVerbosity.error:
+      return "Error";
+    case MdkLogVerbosity.warning:
+      return "Warning";
+    case MdkLogVerbosity.info:
+      return "Info";
+    case MdkLogVerbosity.debug:
+      return "Debug";
+    case MdkLogVerbosity.all:
+      return "All";
   }
-  if (threshold == MdkLogVerbosity.all) {
-    return true;
-  }
-  final Map<MdkLogVerbosity, mdk.LogLevel> mapping =
-      <MdkLogVerbosity, mdk.LogLevel>{
-        MdkLogVerbosity.error: mdk.LogLevel.error,
-        MdkLogVerbosity.warning: mdk.LogLevel.warning,
-        MdkLogVerbosity.info: mdk.LogLevel.info,
-        MdkLogVerbosity.debug: mdk.LogLevel.debug,
-      };
-  final mdk.LogLevel target = mapping[threshold] ?? mdk.LogLevel.warning;
-  return level.index <= target.index;
 }
 
 String _decoderOptionForProfile(DecoderProfile profile) {
@@ -164,8 +191,10 @@ class _StartupVideoSettings {
   const _StartupVideoSettings({
     required this.decoderOption,
     required this.logVerbosity,
+    required this.fvpLogVerbosity,
   });
 
   final String decoderOption;
   final MdkLogVerbosity logVerbosity;
+  final FvpLogVerbosity fvpLogVerbosity;
 }

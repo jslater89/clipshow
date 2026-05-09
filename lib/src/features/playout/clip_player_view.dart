@@ -46,6 +46,7 @@ class ClipPlayerView extends StatefulWidget {
     this.seekStep = const Duration(seconds: 5),
     this.overlay,
     this.onPositionChanged,
+    this.onPlayingChanged,
     this.controller,
   });
 
@@ -57,6 +58,7 @@ class ClipPlayerView extends StatefulWidget {
   final Duration seekStep;
   final Widget? overlay;
   final ValueChanged<int>? onPositionChanged;
+  final ValueChanged<bool>? onPlayingChanged;
   final ClipPlayerController? controller;
 
   @override
@@ -67,6 +69,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   final Logger _logger = Logger("ClipPlayerView");
   VideoPlayerController? _controller;
   String? _errorMessage;
+  bool _lastIsPlaying = false;
 
   /// Completes after all seeks issued through [ClipPlayerController] finish.
   /// Hotkeys call [seekBy] without awaiting, so [_togglePlayPause] drains this
@@ -184,6 +187,11 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       }
     }
     widget.onPositionChanged?.call(controller.value.position.inMilliseconds);
+    final bool isPlaying = controller.value.isPlaying;
+    if (isPlaying != _lastIsPlaying) {
+      _lastIsPlaying = isPlaying;
+      widget.onPlayingChanged?.call(isPlaying);
+    }
     if (mounted) {
       setState(() {});
     }
@@ -321,6 +329,10 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   Future<void> _disposeController() async {
     final VideoPlayerController? controller = _controller;
     controller?.removeListener(_handlePlaybackProgress);
+    if (_lastIsPlaying) {
+      _lastIsPlaying = false;
+      widget.onPlayingChanged?.call(false);
+    }
     if (controller != null) {
       await controller.dispose();
     }

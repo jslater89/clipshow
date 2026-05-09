@@ -220,30 +220,59 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
               const Divider(height: 24),
               _SectionTitle("Decoder config", theme),
               const SizedBox(height: 8),
-              SizedBox(
-                width: 280,
-                child: DropdownButtonFormField<MdkLogVerbosity>(
-                  initialValue: viewModel.mdkLogVerbosity,
-                  decoration: const InputDecoration(
-                    labelText: "MDK log verbosity",
-                    border: OutlineInputBorder(),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: DropdownButtonFormField<MdkLogVerbosity>(
+                      initialValue: viewModel.mdkLogVerbosity,
+                      decoration: const InputDecoration(
+                        labelText: "Mdk Log Verbosity",
+                        border: OutlineInputBorder(),
+                      ),
+                      items: MdkLogVerbosity.values
+                          .map(
+                            (MdkLogVerbosity value) =>
+                                DropdownMenuItem<MdkLogVerbosity>(
+                                  value: value,
+                                  child: Text(value.name),
+                                ),
+                          )
+                          .toList(),
+                      onChanged: (MdkLogVerbosity? value) {
+                        if (value == null) {
+                          return;
+                        }
+                        unawaited(viewModel.saveMdkLogVerbosity(value));
+                      },
+                    ),
                   ),
-                  items: MdkLogVerbosity.values
-                      .map(
-                        (MdkLogVerbosity value) =>
-                            DropdownMenuItem<MdkLogVerbosity>(
-                              value: value,
-                              child: Text(value.name),
-                            ),
-                      )
-                      .toList(),
-                  onChanged: (MdkLogVerbosity? value) {
-                    if (value == null) {
-                      return;
-                    }
-                    unawaited(viewModel.saveMdkLogVerbosity(value));
-                  },
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButtonFormField<FvpLogVerbosity>(
+                      initialValue: viewModel.fvpLogVerbosity,
+                      decoration: const InputDecoration(
+                        labelText: "Fvp Log Verbosity (Dart Logger)",
+                        border: OutlineInputBorder(),
+                      ),
+                      items: FvpLogVerbosity.values
+                          .map(
+                            (FvpLogVerbosity value) =>
+                                DropdownMenuItem<FvpLogVerbosity>(
+                                  value: value,
+                                  child: Text(value.name),
+                                ),
+                          )
+                          .toList(),
+                      onChanged: (FvpLogVerbosity? value) {
+                        if (value == null) {
+                          return;
+                        }
+                        unawaited(viewModel.saveFvpLogVerbosity(value));
+                      },
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
               Row(

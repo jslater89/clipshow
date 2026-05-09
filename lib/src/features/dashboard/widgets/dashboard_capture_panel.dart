@@ -42,7 +42,7 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
               const SizedBox(height: 8),
               Text(
                 obsReady
-                    ? "Recording folder is ignored during ingest; finished files copy to the output folder."
+                    ? "Tags are applied when you stop recording."
                     : "Enable OBS in Workspace Settings to use capture.",
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -63,10 +63,11 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
               ),
               const SizedBox(height: 10),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 400),
-                    child: Autocomplete<String>(
+                    child: AdaptiveAutocomplete<String>(
                       optionsBuilder: (TextEditingValue textEditingValue) {
                         return viewModel.tagSuggestionsFor(
                           textEditingValue.text,
@@ -90,7 +91,6 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                           decoration: const InputDecoration(
                             labelText: "Add Tag",
                             border: OutlineInputBorder(),
-                            helperText: "Applied when you stop recording.",
                           ),
                           onSubmitted: (_) {
                             onFieldSubmitted();

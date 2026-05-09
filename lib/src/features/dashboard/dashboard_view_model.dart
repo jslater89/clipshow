@@ -108,6 +108,9 @@ class DashboardViewModel extends ChangeNotifier {
       _workspaceSettings?.decoderConfig ?? const DecoderConfig.fallbackLinux();
   MdkLogVerbosity get mdkLogVerbosity =>
       _workspaceSettings?.mdkLogVerbosity ?? MdkLogVerbosity.warning;
+
+  FvpLogVerbosity get fvpLogVerbosity =>
+      _workspaceSettings?.fvpLogVerbosity ?? FvpLogVerbosity.warning;
   ObsSceneSwitchConfig? get obsSceneSwitchConfig =>
       _workspaceSettings?.obsSceneSwitchConfig;
   List<WebhookSceneSwitchConfig> get webhookSceneSwitchConfigs =>
@@ -941,6 +944,16 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> saveFvpLogVerbosity(FvpLogVerbosity value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveFvpLogVerbosity(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
   Future<void> saveObsSceneSwitchConfig(ObsSceneSwitchConfig? value) async {
     final MediaRepository? repository = _mediaRepository;
     if (repository == null) {
@@ -1063,6 +1076,7 @@ class DashboardViewModel extends ChangeNotifier {
               .toList(),
         },
         "mdkLogVerbosity": settings.mdkLogVerbosity.name,
+        "fvpLogVerbosity": settings.fvpLogVerbosity.name,
         "sceneSwitch": <String, Object?>{
           "obs": settings.obsSceneSwitchConfig == null
               ? null
@@ -1178,6 +1192,14 @@ class DashboardViewModel extends ChangeNotifier {
 
   bool _isUserTag(String tag) =>
       tag != MediaRepository.masterTag && tag != MediaRepository.clipTag;
+
+  void setPlayoutActive(bool active) {
+    _ingestionService.setPlayoutActive(active);
+  }
+
+  void setPreviewPlaying(bool playing) {
+    _ingestionService.setPreviewPlaying(playing);
+  }
 
   @override
   void dispose() {

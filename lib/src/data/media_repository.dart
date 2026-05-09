@@ -594,6 +594,7 @@ class MediaRepository {
         await _loadTelestratorDefaults();
     final DecoderConfig decoderConfig = await _loadDecoderConfig();
     final MdkLogVerbosity mdkLogVerbosity = await _loadMdkLogVerbosity();
+    final FvpLogVerbosity fvpLogVerbosity = await _loadFvpLogVerbosity();
     final ObsSceneSwitchConfig? obsConfig = await _loadObsSceneSwitchConfig();
     final List<WebhookSceneSwitchConfig> webhooks =
         await _loadWebhookSceneSwitchConfigs();
@@ -603,6 +604,7 @@ class MediaRepository {
       telestratorDefaults: telestratorDefaults,
       decoderConfig: decoderConfig,
       mdkLogVerbosity: mdkLogVerbosity,
+      fvpLogVerbosity: fvpLogVerbosity,
       obsSceneSwitchConfig: obsConfig,
       webhookSceneSwitchConfigs: webhooks,
       ignoredFolders: ignoredFolders,
@@ -786,6 +788,19 @@ class MediaRepository {
 
   Future<void> saveMdkLogVerbosity(MdkLogVerbosity value) async {
     await _putWorkspaceSetting("mdk.logVerbosity", value.name);
+  }
+
+  Future<FvpLogVerbosity> _loadFvpLogVerbosity() async {
+    final String stored =
+        await _getWorkspaceSetting("fvp.logVerbosity") ?? "warning";
+    return FvpLogVerbosity.values.firstWhere(
+      (FvpLogVerbosity item) => item.name == stored,
+      orElse: () => FvpLogVerbosity.warning,
+    );
+  }
+
+  Future<void> saveFvpLogVerbosity(FvpLogVerbosity value) async {
+    await _putWorkspaceSetting("fvp.logVerbosity", value.name);
   }
 
   Future<ObsSceneSwitchConfig?> _loadObsSceneSwitchConfig() async {

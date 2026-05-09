@@ -604,6 +604,7 @@ void main() {
           ),
         );
         await repository.saveMdkLogVerbosity(MdkLogVerbosity.error);
+        await repository.saveFvpLogVerbosity(FvpLogVerbosity.info);
         await repository.saveObsSceneSwitchConfig(
           const ObsSceneSwitchConfig(
             enabled: true,
@@ -663,6 +664,7 @@ void main() {
           DecoderProfile.vdpau,
         );
         expect(settings.mdkLogVerbosity, MdkLogVerbosity.error);
+        expect(settings.fvpLogVerbosity, FvpLogVerbosity.info);
         expect(settings.obsSceneSwitchConfig, isNotNull);
         expect(settings.obsSceneSwitchConfig!.serverAddress, "10.0.0.30");
         expect(settings.obsSceneSwitchConfig!.enabled, isFalse);

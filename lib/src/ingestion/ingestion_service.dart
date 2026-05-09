@@ -37,6 +37,8 @@ class IngestionService {
   MediaRepository? _repository;
   String? _workspacePath;
   bool _disposed = false;
+  bool _playoutActive = false;
+  bool _previewPlaying = false;
   int _scanGeneration = 0;
   Timer? _snapshotDebounce;
   Set<String> _ignoredRelativeFolders = <String>{};
@@ -89,6 +91,27 @@ class IngestionService {
     }
   }
 
+  bool get _scanShouldPause => _playoutActive || _previewPlaying;
+
+  /// Pauses the background scan and thumbnail queue during playout so that
+  /// ffprobe and ffmpeg processes don't compete with the media player for
+  /// disk I/O on the same drive.
+  void setPlayoutActive(bool active) {
+    _playoutActive = active;
+    _thumbnailService.setScanPaused(active);
+    _logger.fine(
+      active
+          ? "Playout started — pausing ingestion scan and thumbnails."
+          : "Playout ended — resuming ingestion scan and thumbnails.",
+    );
+  }
+
+  /// Pauses only the scan loop (not thumbnails) while a preview video is
+  /// actively playing in the dashboard.
+  void setPreviewPlaying(bool playing) {
+    _previewPlaying = playing;
+  }
+
   Future<void> stop() async {
     _logger.info("Stopping ingestion service.");
     await _watchSubscription?.cancel();
@@ -125,6 +148,13 @@ class IngestionService {
 
   static const int _scanEmitBatchSize = 50;
 
+  /// Yields until neither playout nor preview playback is active.
+  Future<void> _awaitUnpaused() async {
+    while (_scanShouldPause && !_disposed) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+  }
+
   Future<int> _scanAllExistingFiles(int generation) async {
     final MediaRepository repository = _requireRepository();
     final String workspacePath = _requireWorkspacePath();
@@ -151,6 +181,10 @@ class IngestionService {
       }
       if (!isSupportedVideoPath(entity.path)) {
         continue;
+      }
+      await _awaitUnpaused();
+      if (_disposed || generation != _scanGeneration) {
+        break;
       }
       final bool changed = await _upsertFromPath(
         repository: repository,
@@ -221,10 +255,19 @@ class IngestionService {
     final String storedPath = _storedPathFromAbsolute(absolutePath);
     int? durationMs;
     if (stat.size > 0) {
-      final MediaDurationProbeResult probe =
-          await MediaDurationProbe.probeSeconds(absolutePath);
-      if (probe.ok) {
-        durationMs = probe.durationMs;
+      final MasterMediaFile? cached = _snapshotByPath[storedPath];
+      final bool statUnchanged =
+          cached != null &&
+          cached.fileSizeBytes == stat.size &&
+          cached.modifiedAtMs == stat.modified.millisecondsSinceEpoch;
+      if (statUnchanged && cached.durationMs != null) {
+        durationMs = cached.durationMs;
+      } else {
+        final MediaDurationProbeResult probe =
+            await MediaDurationProbe.probeSeconds(absolutePath);
+        if (probe.ok) {
+          durationMs = probe.durationMs;
+        }
       }
     }
     await repository.upsertMasterMedia(
