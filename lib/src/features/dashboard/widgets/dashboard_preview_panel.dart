@@ -9,6 +9,7 @@ import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_preview_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
+import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
@@ -40,6 +41,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
   @override
   Widget build(BuildContext context) {
     final DashboardViewModel viewModel = context.watch<DashboardViewModel>();
+    final String? workspaceRoot = viewModel.workspacePath;
     final MediaListItem? selectedItem = viewModel.selectedItem;
     final MasterMediaFile? selectedMedia = viewModel.selectedMedia;
     if (selectedItem?.stableKey != _lastLoggedSelectionKey) {
@@ -102,11 +104,17 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                 : viewModel.markOutAtCurrentPosition,
                             onSaveClipRequested: selectedMedia == null
                                 ? null
-                                : () =>
-                                      viewModel.saveClipFromCurrentMarks(context),
+                                : () => viewModel.saveClipFromCurrentMarks(
+                                    context,
+                                  ),
                             child: ClipPlayerView(
                               controller: _previewPlayerController,
-                              filePath: selectedItem.filePath,
+                              filePath: workspaceRoot == null
+                                  ? selectedItem.filePath
+                                  : WorkspaceMediaPaths.absoluteMasterPath(
+                                      workspaceRoot,
+                                      selectedItem.filePath,
+                                    ),
                               startTimeMs:
                                   selectedItem.type == MediaListItemType.clip
                                   ? selectedItem.clip!.inMs
@@ -247,30 +255,56 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                     child: const Text("+2.5s"),
                   ),
                 ],
-                OutlinedButton.icon(
-                  onPressed:
-                      selectedItem == null ||
-                          selectedItem.type != MediaListItemType.clip
-                      ? null
-                      : () async {
-                          final String? error = await viewModel
-                              .deleteSelectedClip();
-                          if (error != null && context.mounted) {
-                            ScaffoldMessenger.of(
+                if (isClipSelection)
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final bool ok = await _confirmDeleteClip(context);
+                      if (!ok || !context.mounted) {
+                        return;
+                      }
+                      final String? error = await viewModel
+                          .deleteSelectedClip();
+                      if (error != null && context.mounted) {
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text(error)));
+                      }
+                    },
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text("Delete Clip"),
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: selectedMedia == null
+                        ? null
+                        : () async {
+                            final bool ok = await _confirmTrashMasterFile(
                               context,
-                            ).showSnackBar(SnackBar(content: Text(error)));
-                          }
-                        },
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text("Delete Clip"),
-                ),
+                            );
+                            if (!ok || !context.mounted) {
+                              return;
+                            }
+                            final String? error = await viewModel
+                                .trashSelectedMasterFile();
+                            if (error != null && context.mounted) {
+                              ScaffoldMessenger.of(
+                                context,
+                              ).showSnackBar(SnackBar(content: Text(error)));
+                            }
+                          },
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text("Trash File"),
+                  ),
                 FilledButton.icon(
                   onPressed:
-                      selectedItem == null || previewIssue != MediaIssue.none
+                      selectedItem == null ||
+                          previewIssue != MediaIssue.none ||
+                          workspaceRoot == null
                       ? null
                       : () => widget.onPlayClip(
                           toPlayoutClip(
                             selectedItem,
+                            workspaceRoot: workspaceRoot,
                             initialOffsetMs: viewModel.previewPositionMs,
                           ),
                         ),
@@ -283,6 +317,57 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
         ),
       ),
     );
+  }
+
+  Future<bool> _confirmDeleteClip(BuildContext context) async {
+    final bool? result = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: const Text("Delete Clip"),
+          content: const Text(
+            "Remove this clip from the library? The source video file will not be deleted.",
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text("Delete"),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
+  }
+
+  Future<bool> _confirmTrashMasterFile(BuildContext context) async {
+    final bool? result = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: const Text("Move File To Trash"),
+          content: const Text(
+            "Move this video to the system trash and remove it from the library? "
+            "All clips that reference this file will be removed.",
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text("Move To Trash"),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
   }
 
   void _debugLog({

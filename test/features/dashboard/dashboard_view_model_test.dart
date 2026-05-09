@@ -24,7 +24,7 @@ void main() {
     return MediaListItem.master(
       MasterMediaFile(
         id: id,
-        filePath: "/tmp/$name.mp4",
+        filePath: "$name.mp4",
         fileName: "$name.mp4",
         fileSizeBytes: 1024,
         modifiedAtMs: 1000 + id,

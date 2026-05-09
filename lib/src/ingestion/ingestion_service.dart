@@ -10,13 +10,14 @@ import 'package:obs_clipshow/src/media/master_media_file.dart';
 import 'package:obs_clipshow/src/ingestion/media_duration_probe.dart';
 import 'package:obs_clipshow/src/ingestion/thumbnail_service.dart';
 import 'package:obs_clipshow/src/ingestion/workspace_watcher.dart';
+import 'package:obs_clipshow/src/workspace/workspace_media_paths.dart';
 
 class IngestionService {
   IngestionService({
     required WorkspaceWatcher workspaceWatcher,
     ThumbnailService? thumbnailService,
-  })  : _workspaceWatcher = workspaceWatcher,
-        _thumbnailService = thumbnailService ?? ThumbnailService();
+  }) : _workspaceWatcher = workspaceWatcher,
+       _thumbnailService = thumbnailService ?? ThumbnailService();
 
   static const Set<String> supportedVideoExtensions = <String>{
     ".mp4",
@@ -102,6 +103,16 @@ class IngestionService {
     await _refreshIgnoredFolders();
   }
 
+  /// After the DB row for a master file is removed (e.g. trash/move), drop it from
+  /// the live snapshot, remove the sidecar thumbnail, and notify listeners.
+  Future<void> removeMasterFromSnapshotAfterDbDelete(String storedMasterPath) async {
+    await _thumbnailService.deleteThumbnailForVideoPath(
+      _absoluteVideoPath(storedMasterPath),
+    );
+    _snapshotByPath.remove(storedMasterPath);
+    await _emitSnapshot();
+  }
+
   Future<void> dispose() async {
     _disposed = true;
     _snapshotDebounce?.cancel();
@@ -125,8 +136,10 @@ class IngestionService {
       return importedCount;
     }
 
-    await for (final FileSystemEntity entity
-        in root.list(recursive: true, followLinks: false)) {
+    await for (final FileSystemEntity entity in root.list(
+      recursive: true,
+      followLinks: false,
+    )) {
       if (_disposed || generation != _scanGeneration) {
         break;
       }
@@ -169,23 +182,25 @@ class IngestionService {
     _logger.fine("Watch event ${event.type} for path: ${event.path}");
 
     if (event.type == ChangeType.REMOVE) {
-      final String normalizedPath = _normalizedPath(event.path);
-      await _thumbnailService.deleteThumbnailForVideoPath(normalizedPath);
-      await repository.deleteByPath(normalizedPath);
-      _snapshotByPath.remove(normalizedPath);
-      _logger.info("Removed media record: ${_normalizedPath(event.path)}");
+      final String storedPath = _storedPathForEvent(event.path);
+      await _thumbnailService.deleteThumbnailForVideoPath(
+        _absoluteVideoPath(storedPath),
+      );
+      await repository.deleteByPath(storedPath);
+      _snapshotByPath.remove(storedPath);
+      _logger.info("Removed media record: $storedPath");
       await _emitSnapshot();
       return;
     }
 
     if (event.type == ChangeType.ADD || event.type == ChangeType.MODIFY) {
-      final String normalizedPath = _normalizedPath(event.path);
-      await repository.clearUnreadableIssue(normalizedPath);
+      final String storedPath = _storedPathForEvent(event.path);
+      await repository.clearUnreadableIssue(storedPath);
       final bool changed = await _upsertFromPath(
         repository: repository,
         filePath: event.path,
       );
-      _logger.info("Upserted media record: ${_normalizedPath(event.path)}");
+      _logger.info("Upserted media record: $storedPath");
       if (changed) {
         await _emitSnapshot();
       }
@@ -202,17 +217,18 @@ class IngestionService {
       return false;
     }
     final FileStat stat = await file.stat();
-    final String normalizedPath = _normalizedPath(file.path);
+    final String absolutePath = _normalizedAbsolutePath(file.path);
+    final String storedPath = _storedPathFromAbsolute(absolutePath);
     int? durationMs;
     if (stat.size > 0) {
       final MediaDurationProbeResult probe =
-          await MediaDurationProbe.probeSeconds(normalizedPath);
+          await MediaDurationProbe.probeSeconds(absolutePath);
       if (probe.ok) {
         durationMs = probe.durationMs;
       }
     }
     await repository.upsertMasterMedia(
-      filePath: normalizedPath,
+      filePath: storedPath,
       fileName: p.basename(file.path),
       fileSizeBytes: stat.size,
       modifiedAtMs: stat.modified.millisecondsSinceEpoch,
@@ -220,12 +236,12 @@ class IngestionService {
       durationMs: durationMs,
     );
     if (stat.size == 0) {
-      await repository.setMediaIssue(normalizedPath, MediaIssue.empty);
+      await repository.setMediaIssue(storedPath, MediaIssue.empty);
     } else {
-      await repository.clearEmptyIssue(normalizedPath);
+      await repository.clearEmptyIssue(storedPath);
     }
-    _thumbnailService.requestThumbnail(normalizedPath);
-    return _updateSnapshotEntryFromRepository(repository, normalizedPath);
+    _thumbnailService.requestThumbnail(absolutePath);
+    return _updateSnapshotEntryFromRepository(repository, storedPath);
   }
 
   Future<void> _emitSnapshot() async {
@@ -242,26 +258,27 @@ class IngestionService {
   }
 
   Future<void> _onThumbnailSettled(
-    String normalizedPath,
+    String absoluteVideoPath,
     String? failureDetail,
   ) async {
     if (_disposed) {
       return;
     }
     final MediaRepository repository = _requireRepository();
+    final String storedPath = _storedPathFromAbsolute(absoluteVideoPath);
     if (failureDetail != null) {
       await repository.setMediaIssue(
-        normalizedPath,
+        storedPath,
         MediaIssue.unreadable,
         detail: failureDetail,
       );
-      await _updateSnapshotEntryFromRepository(repository, normalizedPath);
+      await _updateSnapshotEntryFromRepository(repository, storedPath);
       _scheduleDebouncedSnapshot();
       return;
     }
-    final int cleared = await repository.clearUnreadableIssue(normalizedPath);
+    final int cleared = await repository.clearUnreadableIssue(storedPath);
     if (cleared > 0) {
-      await _updateSnapshotEntryFromRepository(repository, normalizedPath);
+      await _updateSnapshotEntryFromRepository(repository, storedPath);
       _scheduleDebouncedSnapshot();
     }
   }
@@ -297,7 +314,24 @@ class IngestionService {
     return supportedVideoExtensions.contains(extension);
   }
 
-  String _normalizedPath(String path) => p.normalize(p.absolute(path));
+  String _normalizedAbsolutePath(String path) => p.normalize(p.absolute(path));
+
+  String _storedPathFromAbsolute(String absolutePath) {
+    return WorkspaceMediaPaths.storedMasterPath(
+      _requireWorkspacePath(),
+      absolutePath,
+    );
+  }
+
+  String _storedPathForEvent(String path) =>
+      _storedPathFromAbsolute(_normalizedAbsolutePath(path));
+
+  String _absoluteVideoPath(String storedPath) {
+    return WorkspaceMediaPaths.absoluteMasterPath(
+      _requireWorkspacePath(),
+      storedPath,
+    );
+  }
 
   Future<void> _loadSnapshotFromRepository() async {
     final MediaRepository repository = _requireRepository();
@@ -306,10 +340,8 @@ class IngestionService {
       ..clear()
       ..addEntries(
         current.map(
-          (MasterMediaFile item) => MapEntry<String, MasterMediaFile>(
-            item.filePath,
-            item,
-          ),
+          (MasterMediaFile item) =>
+              MapEntry<String, MasterMediaFile>(item.filePath, item),
         ),
       );
   }
@@ -318,7 +350,9 @@ class IngestionService {
     MediaRepository repository,
     String normalizedPath,
   ) async {
-    final MasterMediaFile? latest = await repository.getMasterByPath(normalizedPath);
+    final MasterMediaFile? latest = await repository.getMasterByPath(
+      normalizedPath,
+    );
     final MasterMediaFile? previous = _snapshotByPath[normalizedPath];
     if (latest == null) {
       final bool removed = _snapshotByPath.remove(normalizedPath) != null;
@@ -352,11 +386,12 @@ class IngestionService {
 
   bool _isIgnoredPath(String path) {
     final String workspacePath = _requireWorkspacePath();
-    final String normalizedAbsolutePath = _normalizedPath(path).replaceAll("\\", "/");
-    final String normalizedWorkspace = _normalizedPath(workspacePath).replaceAll(
-      "\\",
-      "/",
-    );
+    final String normalizedAbsolutePath = _normalizedAbsolutePath(
+      path,
+    ).replaceAll("\\", "/");
+    final String normalizedWorkspace = _normalizedAbsolutePath(
+      workspacePath,
+    ).replaceAll("\\", "/");
     final String relativePath = p
         .relative(normalizedAbsolutePath, from: normalizedWorkspace)
         .replaceAll("\\", "/");

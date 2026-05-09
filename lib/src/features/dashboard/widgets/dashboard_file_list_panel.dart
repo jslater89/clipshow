@@ -1,7 +1,6 @@
 import "dart:io";
 
 import "package:flutter/material.dart";
-import "package:path/path.dart" as p;
 import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
@@ -10,6 +9,7 @@ import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 
 class DashboardFileListPanel extends StatelessWidget {
   const DashboardFileListPanel({
@@ -186,9 +186,10 @@ class DashboardFileListPanel extends StatelessWidget {
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (BuildContext context, int index) {
                 final MediaListItem item = mediaItems[index];
-                final String relativePath = p.relative(
+                final String relativePath =
+                    WorkspaceMediaPaths.displayRelativeToWorkspace(
+                  workspacePath,
                   item.filePath,
-                  from: workspacePath,
                 );
                 final bool isSelected =
                     viewModel.selectedItemKey == item.stableKey;
@@ -196,8 +197,9 @@ class DashboardFileListPanel extends StatelessWidget {
                 final List<String> tags = sortTags(
                   viewModel.tagsForItem(item).toList(),
                 );
-                final String? durationAboveThumb =
-                    _durationLabelAboveThumbnail(item);
+                final String? durationAboveThumb = _durationLabelAboveThumbnail(
+                  item,
+                );
 
                 final ThemeData theme = Theme.of(context);
                 return Material(
@@ -236,7 +238,11 @@ class DashboardFileListPanel extends StatelessWidget {
                                   const SizedBox(height: 4),
                                 ],
                                 _ThumbnailPreview(
-                                  videoPath: item.filePath,
+                                  videoPath:
+                                      WorkspaceMediaPaths.absoluteMasterPath(
+                                    workspacePath,
+                                    item.filePath,
+                                  ),
                                   issue: mediaIssue,
                                 ),
                               ],
@@ -252,7 +258,8 @@ class DashboardFileListPanel extends StatelessWidget {
                                     children: <InlineSpan>[
                                       TextSpan(
                                         text:
-                                            item.type == MediaListItemType.master
+                                            item.type ==
+                                                MediaListItemType.master
                                             ? item.displayName
                                             : "${item.displayName} (${clipRangeLabel(item.clip!)})",
                                       ),
@@ -293,10 +300,8 @@ class DashboardFileListPanel extends StatelessWidget {
                                                   context,
                                                   tag,
                                                 ),
-                                                onPressed: () =>
-                                                    viewModel.toggleTagFilter(
-                                                      tag,
-                                                    ),
+                                                onPressed: () => viewModel
+                                                    .toggleTagFilter(tag),
                                               ),
                                             )
                                             .toList(),
@@ -311,7 +316,12 @@ class DashboardFileListPanel extends StatelessWidget {
                                 ? "Empty file"
                                 : "Unreadable or corrupt file",
                             onPressed: mediaIssue == MediaIssue.none
-                                ? () => onPlayClip(toPlayoutClip(item))
+                                ? () => onPlayClip(
+                                    toPlayoutClip(
+                                      item,
+                                      workspaceRoot: workspacePath,
+                                    ),
+                                  )
                                 : null,
                             icon: Icon(
                               mediaIssue == MediaIssue.none

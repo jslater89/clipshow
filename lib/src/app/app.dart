@@ -464,16 +464,25 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
         await service.close();
       }
     }
-    for (final WebhookSceneSwitchConfig webhook in webhooks.where((WebhookSceneSwitchConfig item) => item.enabled)) {
+    for (final WebhookSceneSwitchConfig webhook in webhooks.where(
+      (WebhookSceneSwitchConfig item) => item.enabled,
+    )) {
       attempted = true;
       try {
-        await _sendSceneSwitchWebhook(webhook, enteringPlayout: enteringPlayout);
+        await _sendSceneSwitchWebhook(
+          webhook,
+          enteringPlayout: enteringPlayout,
+        );
       } catch (error) {
-        _logger.warning("Unable to call scene-switch webhook ${webhook.name}: $error");
+        _logger.warning(
+          "Unable to call scene-switch webhook ${webhook.name}: $error",
+        );
       }
     }
     if (!attempted) {
-      _logger.fine("No scene-switch profile configured; skipping scene switch.");
+      _logger.fine(
+        "No scene-switch profile configured; skipping scene switch.",
+      );
     }
   }
 
@@ -509,7 +518,9 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
           "x-www-form-urlencoded",
           charset: "utf-8",
         );
-        request.write(Uri(queryParameters: <String, String>{sceneKey: sceneName}).query);
+        request.write(
+          Uri(queryParameters: <String, String>{sceneKey: sceneName}).query,
+        );
       } else {
         request.headers.contentType = ContentType.json;
         request.write(jsonEncode(<String, String>{sceneKey: sceneName}));

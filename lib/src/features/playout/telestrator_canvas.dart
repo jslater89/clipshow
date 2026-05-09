@@ -3,10 +3,7 @@ import "package:flutter/material.dart";
 import 'package:obs_clipshow/src/features/playout/telestrator_model.dart';
 
 class TelestratorCanvas extends StatelessWidget {
-  const TelestratorCanvas({
-    super.key,
-    required this.controller,
-  });
+  const TelestratorCanvas({super.key, required this.controller});
 
   final TelestratorController controller;
 
@@ -63,7 +60,8 @@ class _TelestratorPainter extends CustomPainter {
         continue;
       }
 
-      final Path path = Path()..moveTo(stroke.points.first.dx, stroke.points.first.dy);
+      final Path path = Path()
+        ..moveTo(stroke.points.first.dx, stroke.points.first.dy);
       for (int index = 1; index < stroke.points.length; index++) {
         final Offset point = stroke.points[index];
         path.lineTo(point.dx, point.dy);

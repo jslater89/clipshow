@@ -24,8 +24,8 @@ class WorkspaceService {
   WorkspaceService({
     required AppDatabase appDatabase,
     required WorkspacePreferences workspacePreferences,
-  })  : _appDatabase = appDatabase,
-        _workspacePreferences = workspacePreferences;
+  }) : _appDatabase = appDatabase,
+       _workspacePreferences = workspacePreferences;
 
   final AppDatabase _appDatabase;
   final WorkspacePreferences _workspacePreferences;
@@ -56,6 +56,9 @@ class WorkspaceService {
     await _session?.database.close();
     final Database database = await _appDatabase.openForWorkspace(workspace);
     final MediaRepository mediaRepository = MediaRepository(database);
+    await mediaRepository.migrateMasterPathsToWorkspaceRelative(
+      workspace.rootPath,
+    );
     final WorkspaceSession next = WorkspaceSession(
       workspace: workspace,
       database: database,

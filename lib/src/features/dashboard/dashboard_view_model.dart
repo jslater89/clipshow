@@ -14,9 +14,17 @@ import "package:obs_clipshow/src/ingestion/thumbnail_service.dart";
 import "package:obs_clipshow/src/ingestion/workspace_watcher.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/obs/capture_path_utils.dart";
+import "package:obs_clipshow/src/obs/obs_capture_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 import "package:obs_clipshow/src/workspace/workspace_preferences.dart";
+import "package:obs_clipshow/src/util/system_trash.dart";
+import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/workspace/workspace_service.dart";
+import "package:obs_clipshow/src/workspace/workspace_trash.dart";
+
+/// Preview / tagging vs OBS Capture pane on the dashboard right column.
+enum DashboardMediaPaneTab { preview, capture }
 
 class DashboardViewModel extends ChangeNotifier {
   static const int _savedTagApplyBatchSize = 100;
@@ -68,6 +76,11 @@ class DashboardViewModel extends ChangeNotifier {
   String? _selectedItemKey;
   bool _showUntaggedOnly = false;
   WorkspaceSettingsBundle? _workspaceSettings;
+  DashboardMediaPaneTab _mediaPaneTab = DashboardMediaPaneTab.preview;
+  final List<String> _captureTags = <String>[];
+  bool _obsCaptureRecording = false;
+  ObsCaptureService? _obsCaptureSession;
+  String? _captureStatusMessage;
 
   bool get isLoading => _isLoading;
   String? get workspacePath => _workspacePath;
@@ -92,7 +105,7 @@ class DashboardViewModel extends ChangeNotifier {
   TelestratorDefaults get telestratorDefaults =>
       _workspaceSettings?.telestratorDefaults ?? TelestratorDefaults.fallback();
   DecoderConfig get decoderConfig =>
-      _workspaceSettings?.decoderConfig ?? const DecoderConfig.fallback();
+      _workspaceSettings?.decoderConfig ?? const DecoderConfig.fallbackLinux();
   MdkLogVerbosity get mdkLogVerbosity =>
       _workspaceSettings?.mdkLogVerbosity ?? MdkLogVerbosity.warning;
   ObsSceneSwitchConfig? get obsSceneSwitchConfig =>
@@ -102,6 +115,275 @@ class DashboardViewModel extends ChangeNotifier {
       <WebhookSceneSwitchConfig>[];
   List<String> get ignoredFolders =>
       _workspaceSettings?.ignoredFolders ?? <String>[];
+  DashboardMediaPaneTab get mediaPaneTab => _mediaPaneTab;
+  CapturePathsSettings get capturePathsSettings =>
+      _workspaceSettings?.capturePathsSettings ??
+      CapturePathsSettings.fallback();
+  List<String> get captureTags => List<String>.unmodifiable(_captureTags);
+  bool get obsCaptureRecording => _obsCaptureRecording;
+  String? get captureStatusMessage => _captureStatusMessage;
+
+  void setMediaPaneTab(DashboardMediaPaneTab tab) {
+    if (_mediaPaneTab == tab) {
+      return;
+    }
+    _mediaPaneTab = tab;
+    notifyListeners();
+  }
+
+  void setCaptureTags(List<String> tags) {
+    _captureTags
+      ..clear()
+      ..addAll(tags);
+    notifyListeners();
+  }
+
+  void addCaptureTag(String raw) {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    final String normalized = repository.normalizeTag(raw);
+    if (normalized.isEmpty) {
+      return;
+    }
+    if (_captureTags.any(
+      (String t) => t.toLowerCase() == normalized.toLowerCase(),
+    )) {
+      return;
+    }
+    _captureTags.add(normalized);
+    notifyListeners();
+  }
+
+  void removeCaptureTag(String tag) {
+    _captureTags.removeWhere(
+      (String t) => t.toLowerCase() == tag.toLowerCase(),
+    );
+    notifyListeners();
+  }
+
+  /// Items that would receive at least one saved tag via [applyAllSavedTagsToItems].
+  List<MediaListItem> _itemsNeedingSavedTagApply({
+    required bool filteredOnly,
+  }) {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null || _savedTags.isEmpty) {
+      return <MediaListItem>[];
+    }
+    final List<MediaListItem> targetItems = List<MediaListItem>.from(
+      filteredOnly ? _visibleItems : _allItems,
+    );
+    final List<String> savedTags = List<String>.from(_savedTags);
+    if (targetItems.isEmpty) {
+      return <MediaListItem>[];
+    }
+    final List<String> savedTagsLower = savedTags
+        .map((String tag) => tag.toLowerCase())
+        .toList();
+    final List<MediaListItem> itemsNeedingUpdate = <MediaListItem>[];
+    for (final MediaListItem item in targetItems) {
+      final Set<String> existingTagsLower =
+          (_tagsByItemKey[item.stableKey] ?? <String>{})
+              .map((String tag) => tag.toLowerCase())
+              .toSet();
+      final bool needsUpdate = savedTagsLower.any(
+        (String tag) => !existingTagsLower.contains(tag),
+      );
+      if (needsUpdate) {
+        itemsNeedingUpdate.add(item);
+      }
+    }
+    return itemsNeedingUpdate;
+  }
+
+  int countItemsNeedingSavedTagsApply({required bool filteredOnly}) =>
+      _itemsNeedingSavedTagApply(filteredOnly: filteredOnly).length;
+
+  void mergeSavedTagsIntoCapture() {
+    for (final String tag in _savedTags) {
+      addCaptureTag(tag);
+    }
+    setMediaPaneTab(DashboardMediaPaneTab.capture);
+  }
+
+  void mergeSelectedItemTagsIntoCapture() {
+    final MediaListItem? item = selectedItem;
+    if (item == null) {
+      return;
+    }
+    for (final String tag in tagsForItem(item)) {
+      if (!_isUserTag(tag)) {
+        continue;
+      }
+      addCaptureTag(tag);
+    }
+    setMediaPaneTab(DashboardMediaPaneTab.capture);
+  }
+
+  Future<void> saveCapturePathsSettings(CapturePathsSettings value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveCapturePathsSettings(value);
+    await _ingestionService.refreshIgnoredFolders();
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> startObsCapture() async {
+    final MediaRepository? repository = _mediaRepository;
+    final String? workspaceRoot = _workspacePath;
+    final ObsSceneSwitchConfig? obsCfg = obsSceneSwitchConfig;
+    if (repository == null || workspaceRoot == null) {
+      _captureStatusMessage = "No workspace.";
+      notifyListeners();
+      return;
+    }
+    if (_obsCaptureSession != null || _obsCaptureRecording) {
+      _captureStatusMessage = "A capture session is already active.";
+      notifyListeners();
+      return;
+    }
+    if (obsCfg == null || !obsCfg.enabled) {
+      _captureStatusMessage = "Enable OBS in Workspace Settings.";
+      notifyListeners();
+      return;
+    }
+    final CapturePathsSettings paths = capturePathsSettings;
+    final String recordingAbs = CapturePathUtils.normalizedRecordingDir(
+      workspaceAbsolute: workspaceRoot,
+      settings: paths,
+    );
+    final String outputAbs = CapturePathUtils.normalizedOutputDir(
+      workspaceAbsolute: workspaceRoot,
+      settings: paths,
+    );
+    if (CapturePathUtils.isOutputInsideRecordingTree(
+      recordingDirAbsolute: recordingAbs,
+      outputDirAbsolute: outputAbs,
+    )) {
+      _captureStatusMessage =
+          "Output folder cannot be inside the recording folder. Adjust Capture paths in settings.";
+      notifyListeners();
+      return;
+    }
+    _captureStatusMessage = null;
+    final ObsCaptureService service = ObsCaptureService(
+      url: "ws://${obsCfg.serverAddress}:${obsCfg.port}",
+      password: obsCfg.password.isEmpty ? null : obsCfg.password,
+    );
+    _obsCaptureSession = service;
+    _obsCaptureRecording = true;
+    notifyListeners();
+    try {
+      await service.startRecording(
+        workspaceAbsolute: workspaceRoot,
+        paths: paths,
+        captureSceneName: obsCfg.captureScene.trim().isEmpty
+            ? null
+            : obsCfg.captureScene,
+      );
+      _captureStatusMessage = "Recording…";
+    } catch (e, st) {
+      _logger.warning("startObsCapture failed: $e\n$st");
+      _captureStatusMessage = "Failed to start recording: $e";
+      await service.restoreObsRecordDirectoryAndClose();
+      _obsCaptureSession = null;
+    } finally {
+      _obsCaptureRecording = _obsCaptureSession != null;
+      notifyListeners();
+    }
+  }
+
+  Future<void> stopObsCaptureAndIngestTags() async {
+    final MediaRepository? repository = _mediaRepository;
+    final String? workspaceRoot = _workspacePath;
+    final ObsCaptureService? service = _obsCaptureSession;
+    if (repository == null || workspaceRoot == null || service == null) {
+      _captureStatusMessage = "Nothing to stop.";
+      notifyListeners();
+      return;
+    }
+    final List<String> tagSnapshot = List<String>.from(_captureTags);
+    final CapturePathsSettings paths = capturePathsSettings;
+    _captureStatusMessage = "Stopping…";
+    notifyListeners();
+    String? stagingPath;
+    String? destPath;
+    try {
+      stagingPath = await service.stopRecordingStagingPath();
+      if (stagingPath == null) {
+        _captureStatusMessage =
+            "Could not resolve recorded file path from OBS.";
+        return;
+      }
+      final String outputDirAbs = CapturePathUtils.normalizedOutputDir(
+        workspaceAbsolute: workspaceRoot,
+        settings: paths,
+      );
+      _captureStatusMessage = "Finalizing recording on disk…";
+      notifyListeners();
+      destPath = await copyCaptureToOutputDir(
+        stagingFileAbsolute: stagingPath,
+        outputDirAbsolute: outputDirAbs,
+      );
+      _captureStatusMessage = "Waiting for ingest…";
+      notifyListeners();
+      final MasterMediaFile? master = await _waitForMasterAtPath(
+        repository,
+        destPath,
+      );
+      if (master == null) {
+        _captureStatusMessage =
+            "Copied to ${p.basename(destPath)}, but ingest did not pick it up in time.";
+        return;
+      }
+      for (final String tag in tagSnapshot) {
+        await repository.addTagToMedia(
+          mediaType: MediaListItemType.master,
+          mediaId: master.id,
+          tag: tag,
+        );
+      }
+      await _reloadFromRepository();
+      _captureStatusMessage =
+          "Saved ${p.basename(destPath)} with ${tagSnapshot.length} tag(s).";
+    } catch (e, st) {
+      _logger.warning("stopObsCapture failed: $e\n$st");
+      _captureStatusMessage = "Capture failed: $e";
+    } finally {
+      await service.restoreObsRecordDirectoryAndClose();
+      _obsCaptureSession = null;
+      _obsCaptureRecording = false;
+      notifyListeners();
+    }
+  }
+
+  Future<MasterMediaFile?> _waitForMasterAtPath(
+    MediaRepository repository,
+    String absolutePath,
+  ) async {
+    final String? workspaceRoot = _workspacePath;
+    if (workspaceRoot == null) {
+      return null;
+    }
+    final String normalized = p.normalize(absolutePath);
+    const Duration step = Duration(milliseconds: 400);
+    for (int i = 0; i < 150; i++) {
+      final MasterMediaFile? master = await repository.getMasterByFilePath(
+        normalized,
+        workspaceRoot,
+      );
+      if (master != null) {
+        return master;
+      }
+      await Future<void>.delayed(step);
+    }
+    return null;
+  }
+
   MasterMediaFile? get selectedMedia {
     final MediaListItem? item = selectedItem;
     if (item == null || item.type != MediaListItemType.master) {
@@ -369,7 +651,10 @@ class DashboardViewModel extends ChangeNotifier {
     await _reloadFromRepository();
   }
 
-  Future<void> setDisplayNameOverride(MediaListItem item, String? override) async {
+  Future<void> setDisplayNameOverride(
+    MediaListItem item,
+    String? override,
+  ) async {
     final MediaRepository? repository = _mediaRepository;
     if (repository == null) {
       return;
@@ -407,33 +692,18 @@ class DashboardViewModel extends ChangeNotifier {
     if (repository == null || _savedTags.isEmpty) {
       return 0;
     }
-    final List<MediaListItem> targetItems = List<MediaListItem>.from(
-      filteredOnly ? _visibleItems : _allItems,
-    );
     final List<String> savedTags = List<String>.from(_savedTags);
-    if (targetItems.isEmpty) {
-      return 0;
-    }
-    final List<String> savedTagsLower = savedTags
-        .map((String tag) => tag.toLowerCase())
-        .toList();
-    final List<MediaListItem> itemsNeedingUpdate = <MediaListItem>[];
-    for (final MediaListItem item in targetItems) {
-      final Set<String> existingTagsLower =
-          (_tagsByItemKey[item.stableKey] ?? <String>{})
-              .map((String tag) => tag.toLowerCase())
-              .toSet();
-      final bool needsUpdate = savedTagsLower.any(
-        (String tag) => !existingTagsLower.contains(tag),
-      );
-      if (needsUpdate) {
-        itemsNeedingUpdate.add(item);
-      }
-    }
+    final List<MediaListItem> itemsNeedingUpdate = _itemsNeedingSavedTagApply(
+      filteredOnly: filteredOnly,
+    );
     if (itemsNeedingUpdate.isEmpty) {
       return 0;
     }
-    for (int i = 0; i < itemsNeedingUpdate.length; i += _savedTagApplyBatchSize) {
+    for (
+      int i = 0;
+      i < itemsNeedingUpdate.length;
+      i += _savedTagApplyBatchSize
+    ) {
       final int end = (i + _savedTagApplyBatchSize < itemsNeedingUpdate.length)
           ? i + _savedTagApplyBatchSize
           : itemsNeedingUpdate.length;
@@ -504,6 +774,50 @@ class DashboardViewModel extends ChangeNotifier {
       return "Select a clip first.";
     }
     await repository.deleteClipById(item.id);
+    await _reloadFromRepository();
+    return null;
+  }
+
+  /// Sends the master video to the **system** trash when possible; otherwise moves
+  /// it to [WorkspaceTrash.relativeFolder] under the workspace. Then removes its
+  /// DB row (clips referencing this master are removed via FK cascade and tag
+  /// cleanup in [MediaRepository.deleteByPath]) and syncs ingestion snapshot.
+  Future<String?> trashSelectedMasterFile() async {
+    final MediaRepository? repository = _mediaRepository;
+    final MasterMediaFile? master = selectedMedia;
+    final String? workspaceRoot = _workspacePath;
+    if (repository == null || master == null || workspaceRoot == null) {
+      return "Select a master file first.";
+    }
+    final String storedPath = master.filePath;
+    final String sourcePath = WorkspaceMediaPaths.absoluteMasterPath(
+      workspaceRoot,
+      storedPath,
+    );
+    final File sourceFile = File(sourcePath);
+    if (!await sourceFile.exists()) {
+      return "File not found on disk.";
+    }
+    try {
+      await moveFileToSystemTrash(sourcePath);
+    } catch (e, st) {
+      _logger.warning(
+        "System trash failed; falling back to workspace trash: $e\n$st",
+      );
+      try {
+        await repository.addIgnoredFolder(WorkspaceTrash.relativeFolder);
+        await _ingestionService.refreshIgnoredFolders();
+        await moveFileToWorkspaceTrash(
+          absoluteSourcePath: sourcePath,
+          workspaceRoot: workspaceRoot,
+        );
+      } catch (e2, st2) {
+        _logger.warning("Workspace trash fallback failed: $e2\n$st2");
+        return "Could not move file to trash: $e2";
+      }
+    }
+    await repository.deleteByPath(storedPath);
+    await _ingestionService.removeMasterFromSnapshotAfterDbDelete(storedPath);
     await _reloadFromRepository();
     return null;
   }
@@ -647,7 +961,9 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addWebhookSceneSwitchConfig(WebhookSceneSwitchConfig value) async {
+  Future<void> addWebhookSceneSwitchConfig(
+    WebhookSceneSwitchConfig value,
+  ) async {
     final MediaRepository? repository = _mediaRepository;
     if (repository == null) {
       return;
@@ -727,8 +1043,10 @@ class DashboardViewModel extends ChangeNotifier {
       return;
     }
     final List<MediaListItem> items = await repository.listMixedItems();
-    final Map<String, Set<String>> tagsByItem = await repository.listTagsForItems(items);
-    final WorkspaceSettingsBundle settings = await repository.loadWorkspaceSettings();
+    final Map<String, Set<String>> tagsByItem = await repository
+        .listTagsForItems(items);
+    final WorkspaceSettingsBundle settings = await repository
+        .loadWorkspaceSettings();
     final Map<String, Object?> payload = <String, Object?>{
       "workspacePath": workspaceRoot,
       "settings": <String, Object?>{
@@ -755,6 +1073,7 @@ class DashboardViewModel extends ChangeNotifier {
                   "password": settings.obsSceneSwitchConfig!.password,
                   "videoScene": settings.obsSceneSwitchConfig!.videoScene,
                   "faceScene": settings.obsSceneSwitchConfig!.faceScene,
+                  "captureScene": settings.obsSceneSwitchConfig!.captureScene,
                 },
           "webhooks": settings.webhookSceneSwitchConfigs
               .map(
@@ -770,6 +1089,11 @@ class DashboardViewModel extends ChangeNotifier {
               )
               .toList(),
         },
+        "capturePaths": <String, Object?>{
+          "recordingRelativeDir":
+              settings.capturePathsSettings.recordingRelativeDir,
+          "outputRelativeDir": settings.capturePathsSettings.outputRelativeDir,
+        },
         "ignoredFolders": settings.ignoredFolders,
       },
       "mediaItems": items.map((MediaListItem item) {
@@ -780,7 +1104,10 @@ class DashboardViewModel extends ChangeNotifier {
           "displayNameOverride": isClip
               ? item.clip!.displayNameOverride
               : item.master!.displayNameOverride,
-          "relativePath": p.relative(item.filePath, from: workspaceRoot),
+          "relativePath": WorkspaceMediaPaths.displayRelativeToWorkspace(
+            workspaceRoot,
+            item.filePath,
+          ),
           "tags": (tagsByItem[item.stableKey] ?? <String>{}).toList()..sort(),
           "clipRange": isClip
               ? <String, Object?>{
@@ -791,9 +1118,9 @@ class DashboardViewModel extends ChangeNotifier {
         };
       }).toList(),
     };
-    await File(outputPath).writeAsString(
-      const JsonEncoder.withIndent("  ").convert(payload),
-    );
+    await File(
+      outputPath,
+    ).writeAsString(const JsonEncoder.withIndent("  ").convert(payload));
   }
 
   Future<void> _refreshTagsForItems(
@@ -804,9 +1131,8 @@ class DashboardViewModel extends ChangeNotifier {
     if (repository == null || items.isEmpty) {
       return;
     }
-    final Map<String, Set<String>> tagsByItemKey = await repository.listTagsForItems(
-      items,
-    );
+    final Map<String, Set<String>> tagsByItemKey = await repository
+        .listTagsForItems(items);
     for (final MediaListItem item in items) {
       _tagsByItemKey[item.stableKey] =
           tagsByItemKey[item.stableKey] ?? <String>{};

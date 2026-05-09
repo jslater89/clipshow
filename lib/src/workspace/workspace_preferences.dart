@@ -30,11 +30,7 @@ class WorkspacePreferences {
     }
     await file.parent.create(recursive: true);
     await file.writeAsString(
-      jsonEncode(
-        <String, String>{
-          "workspacePath": workspacePath,
-        },
-      ),
+      jsonEncode(<String, String>{"workspacePath": workspacePath}),
     );
   }
 

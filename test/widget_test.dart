@@ -55,7 +55,7 @@ void main() {
       mediaFiles: const <MasterMediaFile>[
         MasterMediaFile(
           id: 1,
-          filePath: "/tmp/workspace/round1/highlight.mp4",
+          filePath: "round1/highlight.mp4",
           fileName: "highlight.mp4",
           fileSizeBytes: 1024,
           modifiedAtMs: 1000,

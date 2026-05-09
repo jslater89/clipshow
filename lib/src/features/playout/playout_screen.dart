@@ -81,9 +81,12 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
         onTelestratorToggleRequested: _telestratorController.toggleEnabled,
         onTelestratorClearRequested: _telestratorController.clear,
         onTelestratorUndoRequested: _telestratorController.undo,
-        onSetTelestratorColor1Requested: () => _telestratorController.setColor(_colorOne),
-        onSetTelestratorColor2Requested: () => _telestratorController.setColor(_colorTwo),
-        onSetTelestratorColor3Requested: () => _telestratorController.setColor(_colorThree),
+        onSetTelestratorColor1Requested: () =>
+            _telestratorController.setColor(_colorOne),
+        onSetTelestratorColor2Requested: () =>
+            _telestratorController.setColor(_colorTwo),
+        onSetTelestratorColor3Requested: () =>
+            _telestratorController.setColor(_colorThree),
         onDecreaseBrushRequested: _telestratorController.decreaseBrush,
         onIncreaseBrushRequested: _telestratorController.increaseBrush,
         child: Stack(
@@ -272,9 +275,14 @@ class _PlayoutHelpOverlay extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text("Playout Hotkeys", style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    "Playout Hotkeys",
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const SizedBox(height: 12),
-                  _hotkeySection("Playback", <String, String>{"Space": "Play/Pause"}),
+                  _hotkeySection("Playback", <String, String>{
+                    "Space": "Play/Pause",
+                  }),
                   const SizedBox(height: 10),
                   _hotkeySection("Seek", <String, String>{
                     "Left / Right": "Seek 1s",

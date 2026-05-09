@@ -26,7 +26,9 @@ class DashboardWorkspaceHeader extends StatelessWidget {
             canRequestFocus: false,
             skipTraversal: true,
             child: IconButton(
-              onPressed: viewModel.isLoading ? null : viewModel.pickAndSetWorkspace,
+              onPressed: viewModel.isLoading
+                  ? null
+                  : viewModel.pickAndSetWorkspace,
               icon: const Icon(Icons.folder_open),
             ),
           ),

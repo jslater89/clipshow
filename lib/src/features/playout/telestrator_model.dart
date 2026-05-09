@@ -29,7 +29,8 @@ class TelestratorController extends ChangeNotifier {
   bool get isEnabled => _isEnabled;
   Color get activeColor => _activeColor;
   double get brushSize => _brushSize;
-  List<TelestratorStroke> get strokes => List<TelestratorStroke>.unmodifiable(_strokes);
+  List<TelestratorStroke> get strokes =>
+      List<TelestratorStroke>.unmodifiable(_strokes);
 
   void toggleEnabled() {
     _isEnabled = !_isEnabled;

@@ -15,11 +15,15 @@ import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
-  final _StartupVideoSettings startupSettings = await _loadStartupVideoSettings();
+  final _StartupVideoSettings startupSettings =
+      await _loadStartupVideoSettings();
   fvp.registerWith(
     options: <String, Object>{
       "platforms": <String>["windows", "linux"],
-      if (Platform.isLinux) "video.decoders": <String>[startupSettings.decoderOption],
+      if (Platform.isLinux)
+        "video.decoders": <String>[startupSettings.decoderOption],
+      // MDK player buffer: min ms when low + max ms cap (reduces PulseAudio underruns).
+      "player": <String, String>{"buffer": "2000+60000"},
     },
   );
   _configureMdkLogging(startupSettings.logVerbosity);
@@ -130,12 +134,13 @@ bool _shouldEmitMdkLog(mdk.LogLevel level, MdkLogVerbosity threshold) {
   if (threshold == MdkLogVerbosity.all) {
     return true;
   }
-  final Map<MdkLogVerbosity, mdk.LogLevel> mapping = <MdkLogVerbosity, mdk.LogLevel>{
-    MdkLogVerbosity.error: mdk.LogLevel.error,
-    MdkLogVerbosity.warning: mdk.LogLevel.warning,
-    MdkLogVerbosity.info: mdk.LogLevel.info,
-    MdkLogVerbosity.debug: mdk.LogLevel.debug,
-  };
+  final Map<MdkLogVerbosity, mdk.LogLevel> mapping =
+      <MdkLogVerbosity, mdk.LogLevel>{
+        MdkLogVerbosity.error: mdk.LogLevel.error,
+        MdkLogVerbosity.warning: mdk.LogLevel.warning,
+        MdkLogVerbosity.info: mdk.LogLevel.info,
+        MdkLogVerbosity.debug: mdk.LogLevel.debug,
+      };
   final mdk.LogLevel target = mapping[threshold] ?? mdk.LogLevel.warning;
   return level.index <= target.index;
 }

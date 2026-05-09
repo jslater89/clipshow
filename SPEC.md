@@ -30,8 +30,18 @@ The application operates in two mutually exclusive UI states to prevent broadcas
 * **Layout Structure:**
     * **Workspace Explorer (Left):** Displays the active workspace directory and auto-ingested master files.
     * **Tag Filtering (Top):** Quick-filter buttons based on assigned tags (e.g., "Stage 4", "John Doe"). Must include a dedicated "Untagged" filter to quickly process newly ingested files.
-    * **Preview Window (Top Right):** Standard video player for reviewing master clips.
-    * **Tagging Interface (Bottom Right):** UI to log `startTime` and `endTime` markers, assign a descriptive title, and apply multiple string-based tags.
+    * **Preview Window (Top Right):** Standard video player for reviewing master clips (Preview tab).
+    * **Tagging Interface (Bottom Right):** UI to log `startTime` and `endTime` markers, assign a descriptive title, and apply multiple string-based tags (Preview tab).
+    * **Capture Tab (Right Column):** Optional **OBS Capture Mode** replacing Preview + Tags: start/stop OBS recording via WebSocket, configurable **recording folder** (under workspace, ignored by ingestion during writes) and **output folder** (empty = workspace root); after stop, the finished file is **copied** into the output folder so ingestion runs once; tags configured in the panel are applied to the new master at stop time.
+
+### Workspace Settings (Capture)
+* **OBS:** Existing Video/Face scenes plus optional **Capture Scene** (program scene before recording).
+* **Capture Paths:** **Recording folder** (relative, default `recordings`) is added to **ignored folders** while under the workspace so partial recordings do not spam ingest/UI reloads; **Output folder** (relative, empty = workspace root) receives the copy after recording stops. Output cannot be inside the recording folder tree.
+
+### Live OBS validation (Capture Mode)
+* Configure recording/output folders; confirm `recordings` (or chosen path) appears in ignored folders when applicable.
+* Start recording from Capture tab; verify OBS writes under the staging folder only.
+* Stop recording; verify file appears at output path, master row exists, tags applied, and OBS **recording directory** setting is restored to its prior value.
 
 ### State 2: Playout (Broadcast Mode)
 * **Purpose:** Live execution.
@@ -74,11 +84,15 @@ The local database will manage the metadata independently of the physical file s
 * **Phase 5: Configuration.** Add an application configuration UI for selecting and validating the target OBS scenes in an existing OBS project (e.g., pick Program Video Scene and Face Scene from current scene list, store preferences, and fail safely if scenes are missing/renamed).
 
 ## 9. Progress (Current)
+
+**Initial implementation status:** A first-pass implementation of the full scope described in this document—including every phased milestone in §8 (workspace through configuration-oriented workspace settings, OBS/webhook scene switching, export, metadata such as display-name overrides, and the refinements accumulated during development)—is **done** in the codebase. What follows is a snapshot of delivered capabilities; remaining effort is validation, automated tests, live OBS stress checks, and product polish—not missing core features.
+
 ### Completed
 * **Phase 1 Core Delivered:** Workspace selection and restore, SQLite database creation at workspace root, recursive ingestion scan, and live watcher updates for add/remove/modify.
 * **Ingestion Logging:** Added structured logging around workspace restore, ingestion startup, file event handling, and dashboard media updates.
 * **Thumbnail Pipeline:** Video thumbnails are generated using `ffprobe` + `ffmpeg`, stored as `<video>.thumb.jpg`, removed on file delete, and displayed in the left file list.
 * **Dashboard Restructure (Phase 3 Foundation):** Dashboard uses a three-panel layout: file list (left), preview panel (top right), and tag panel (bottom right), with file selection and playout actions.
+* **OBS Capture Mode:** Dashboard right column supports **Preview** vs **Capture** tab; Capture drives OBS `SetRecordDirectory`, optional capture scene switch, `StartRecord` / `StopRecord`, copies finished files from ignored staging to output path, and applies tags to the ingested master.
 * **Tagging and Organization Delivered:** Clips persist to SQLite with title, start/end range, and tags; saved clips list from the current workspace is rendered and updated; saved tags can be re-applied through the clipping flow.
 * **Filters, Search, and Autocomplete:** Tag filters include `All` and `Untagged`; search and tag autocomplete support faster clip discovery and consistent tagging.
 * **Preview/Playout Player Refactor:** Shared clip player and hotkey handling were refactored for reuse across dashboard preview and playout with cleaner separation of concerns.
@@ -87,6 +101,8 @@ The local database will manage the metadata independently of the physical file s
 * **Playout Window Behavior:** Playout defaults to windowed 16:9 with hidden title bar (fullscreen retained as a configurable code path), and window bounds restore on exit.
 * **Telestrator Overlay Delivered:** Playout includes a draw layer with clear/visibility hotkeys, HUD visibility behavior, and lifecycle handling so overlay state resets correctly on exit.
 * **Seek and Clamp Behavior Updated:** Seek mappings now include Alt micro-seek in addition to short/standard/long jumps, and clip-range seeking clamps correctly at segment bounds.
+* **Workspace Settings & Export:** Workspace-scoped settings (telestrator defaults, decoder preferences, MDK logging, OBS/webhook scene profiles with enable/disable, optional OBS capture scene, capture recording/output paths, ignored folders), JSON export of settings and media metadata, and related UI are implemented.
+* **Display Names & Clip UX:** Display-name overrides for masters and clips (UI + persistence), filename/workspace search matching display names, clip range nudging in preview, and related dashboard polish are implemented.
 
 ### Implemented Interaction Details
 * **Keyboard Controls:** `Space` play/pause, `Left/Right` standard seek, `Shift+Left/Right` short seek, `Ctrl+Left/Right` long seek, and `Alt+Left/Right` micro-seek.
@@ -94,9 +110,9 @@ The local database will manage the metadata independently of the physical file s
 * **Playout UX:** Temporary help/hotkey hint appears at playout start and auto-hides; HUD behavior aligns with telestrator interaction state.
 * **Dashboard UX:** Scroll position is preserved and restored after returning from playout.
 
-### Partially Complete / Next
-* **Deeper Validation:** Full end-to-end live OBS verification and stress testing are still required.
-* **Focused Test Coverage:** Additional automated tests are still needed for tag/save/search flows and seek/clamp boundaries, plus regression coverage around recently delivered playout and telestrator flows.
+### Partially Complete / Next (post–initial implementation)
+* **Deeper Validation:** Full end-to-end live OBS verification and stress testing remain the main gap before treating the build as production-hardened.
+* **Focused Test Coverage:** Expand automated tests for tag/save/search flows, seek/clamp boundaries, workspace settings/export, and regression coverage around playout and telestrator flows.
 * **Phase 2 Validation Checklist (Live OBS):**
   * Confirm OBS websocket authentication/connectivity using configured host/port/password.
   * Enter playout from dashboard and verify scene switches to configured Video Scene.

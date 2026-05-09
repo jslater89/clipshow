@@ -12,7 +12,7 @@ class AppDatabase {
     return databaseFactoryFfi.openDatabase(
       workspace.databasePath,
       options: OpenDatabaseOptions(
-        version: 6,
+        version: 7,
         onConfigure: (Database db) async {
           await db.execute("PRAGMA foreign_keys = ON;");
         },
@@ -37,6 +37,10 @@ class AppDatabase {
           """);
           await _createClipAndTagTables(db);
           await _createWorkspaceSettingsTables(db);
+          await db.rawInsert(
+            "INSERT OR IGNORE INTO ignored_folders (relative_path) VALUES (?)",
+            <Object?>["recordings"],
+          );
         },
         onUpgrade: (Database db, int oldVersion, int newVersion) async {
           if (oldVersion < 2) {
@@ -60,6 +64,13 @@ class AppDatabase {
           }
           if (oldVersion < 6) {
             await _addMasterDurationMsColumnIfMissing(db);
+          }
+          if (oldVersion < 7) {
+            await _addObsCaptureSceneColumnIfMissing(db);
+            await db.rawInsert(
+              "INSERT OR IGNORE INTO ignored_folders (relative_path) VALUES (?)",
+              <Object?>["recordings"],
+            );
           }
         },
       ),
@@ -128,6 +139,7 @@ class AppDatabase {
         obs_password TEXT,
         obs_video_scene TEXT,
         obs_face_scene TEXT,
+        obs_capture_scene TEXT,
         webhook_url TEXT,
         webhook_method TEXT CHECK(webhook_method IN ('GET', 'POST')),
         webhook_get_query_param TEXT,
@@ -171,6 +183,21 @@ class AppDatabase {
       await db.execute("""
         ALTER TABLE clips
         ADD COLUMN display_name_override TEXT;
+      """);
+    }
+  }
+
+  Future<void> _addObsCaptureSceneColumnIfMissing(Database db) async {
+    final List<Map<String, Object?>> columns = await db.rawQuery(
+      "PRAGMA table_info(scene_switch_profiles);",
+    );
+    final bool hasColumn = columns.any(
+      (Map<String, Object?> row) => row["name"] == "obs_capture_scene",
+    );
+    if (!hasColumn) {
+      await db.execute("""
+        ALTER TABLE scene_switch_profiles
+        ADD COLUMN obs_capture_scene TEXT;
       """);
     }
   }

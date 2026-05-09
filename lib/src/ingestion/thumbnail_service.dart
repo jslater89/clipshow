@@ -34,7 +34,8 @@ class ThumbnailService {
   bool _disposed = false;
 
   /// [failureDetail] is null on success (thumbnail present or written).
-  void Function(String normalizedPath, String? failureDetail)? onThumbnailSettled;
+  void Function(String normalizedPath, String? failureDetail)?
+  onThumbnailSettled;
 
   /// Emits the normalized video path when a thumbnail file has been written.
   Stream<String> get thumbnailReady => _readyController.stream;
@@ -124,27 +125,25 @@ class ThumbnailService {
       onThumbnailSettled?.call(videoPath, probe.stderr);
       return;
     }
-    final double seekSeconds =
-        probe.durationSeconds == null ? 0 : probe.durationSeconds! * 0.2;
+    final double seekSeconds = probe.durationSeconds == null
+        ? 0
+        : probe.durationSeconds! * 0.2;
 
     try {
-      final ProcessResult result = await Process.run(
-        "ffmpeg",
-        <String>[
-          "-y",
-          "-ss",
-          seekSeconds.toStringAsFixed(3),
-          "-i",
-          videoPath,
-          "-frames:v",
-          "1",
-          "-vf",
-          "scale=$maxThumbWidth:$maxThumbHeight:force_original_aspect_ratio=decrease",
-          "-q:v",
-          "2",
-          thumbnailPath,
-        ],
-      );
+      final ProcessResult result = await Process.run("ffmpeg", <String>[
+        "-y",
+        "-ss",
+        seekSeconds.toStringAsFixed(3),
+        "-i",
+        videoPath,
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=$maxThumbWidth:$maxThumbHeight:force_original_aspect_ratio=decrease",
+        "-q:v",
+        "2",
+        thumbnailPath,
+      ]);
       if (result.exitCode != 0) {
         onThumbnailSettled?.call(videoPath, "${result.stderr}");
       } else {

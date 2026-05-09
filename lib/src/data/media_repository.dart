@@ -1,20 +1,26 @@
+import "package:logging/logging.dart";
+import "package:path/path.dart" as p;
 import "package:sqflite/sqflite.dart";
 
 import 'package:obs_clipshow/src/media/master_media_file.dart';
 import 'package:obs_clipshow/src/media/media_clip.dart';
 import 'package:obs_clipshow/src/media/media_list_item.dart';
+import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 class MediaRepository {
   MediaRepository(this._database);
 
   final Database _database;
+  final Logger _logger = Logger("MediaRepository");
 
   static const int _maxIssueDetailLength = 500;
   static const String masterTag = "Master";
   static const String clipTag = "Clip";
 
   /// Inserts or updates file stats. Preserves [media_issue] / [media_issue_detail] on conflict.
+  ///
+  /// [filePath] must be workspace-relative (see [WorkspaceMediaPaths.storedMasterPath]).
   Future<void> upsertMasterMedia({
     required String filePath,
     required String fileName,
@@ -134,6 +140,85 @@ class MediaRepository {
     return rows.map(MasterMediaFile.fromMap).toList();
   }
 
+  /// Rewrites legacy absolute [master_media_files.file_path] values to paths
+  /// relative to [workspaceRoot] (forward slashes, portable across machines).
+  Future<void> migrateMasterPathsToWorkspaceRelative(String workspaceRoot) async {
+    final String ws = p.normalize(p.absolute(workspaceRoot));
+    final List<Map<String, Object?>> rows = await _database.query(
+      "master_media_files",
+      columns: <String>["id", "file_path"],
+    );
+    _logger.info(
+      "Migrating master_media_files.file_path rows to workspace-relative "
+      "(workspace: $ws, rows: ${rows.length}).",
+    );
+    int convertedFromAbsolute = 0;
+    int normalizedRelativeOnly = 0;
+    int skippedOutsideWorkspace = 0;
+    int skippedEmpty = 0;
+    int unchanged = 0;
+    for (final Map<String, Object?> row in rows) {
+      final int id = row["id"]! as int;
+      final String raw = row["file_path"]! as String;
+      final String trimmed = raw.trim();
+      if (trimmed.isEmpty) {
+        skippedEmpty++;
+        continue;
+      }
+      if (!p.isAbsolute(trimmed)) {
+        final String normalized = WorkspaceMediaPaths.normalizeStored(trimmed);
+        if (normalized != raw) {
+          _logger.fine(
+            "Master id=$id: normalize stored relative path "
+            "\"$raw\" → \"$normalized\"",
+          );
+          await _database.update(
+            "master_media_files",
+            <String, Object?>{"file_path": normalized},
+            where: "id = ?",
+            whereArgs: <Object?>[id],
+          );
+          normalizedRelativeOnly++;
+        } else {
+          unchanged++;
+        }
+        continue;
+      }
+      final String abs = p.normalize(trimmed);
+      final String rel = p.relative(abs, from: ws);
+      if (rel.startsWith("..")) {
+        skippedOutsideWorkspace++;
+        _logger.warning(
+          "Master id=$id: skip path outside workspace (file_path: \"$raw\").",
+        );
+        continue;
+      }
+      final String stored = WorkspaceMediaPaths.normalizeStored(rel);
+      if (stored == raw) {
+        unchanged++;
+        continue;
+      }
+      _logger.fine(
+        "Master id=$id: absolute → workspace-relative \"$raw\" → \"$stored\"",
+      );
+      await _database.update(
+        "master_media_files",
+        <String, Object?>{"file_path": stored},
+        where: "id = ?",
+        whereArgs: <Object?>[id],
+      );
+      convertedFromAbsolute++;
+    }
+    _logger.info(
+      "Master path migration finished: "
+      "$convertedFromAbsolute absolute→relative, "
+      "$normalizedRelativeOnly slash-normalized, "
+      "$unchanged already portable, "
+      "$skippedOutsideWorkspace skipped (outside workspace), "
+      "$skippedEmpty empty path.",
+    );
+  }
+
   Future<MasterMediaFile?> getMasterByPath(String filePath) async {
     final List<Map<String, Object?>> rows = await _database.query(
       "master_media_files",
@@ -213,11 +298,7 @@ class MediaRepository {
         where: "media_type = ? AND media_id = ?",
         whereArgs: <Object?>["clip", clipId],
       );
-      await txn.delete(
-        "clips",
-        where: "id = ?",
-        whereArgs: <Object?>[clipId],
-      );
+      await txn.delete("clips", where: "id = ?", whereArgs: <Object?>[clipId]);
       await _deleteOrphanTags(txn);
     });
   }
@@ -229,10 +310,7 @@ class MediaRepository {
   }) async {
     await _database.update(
       "clips",
-      <String, Object?>{
-        "in_ms": inMs,
-        "out_ms": outMs,
-      },
+      <String, Object?>{"in_ms": inMs, "out_ms": outMs},
       where: "id = ?",
       whereArgs: <Object?>[clipId],
     );
@@ -243,7 +321,9 @@ class MediaRepository {
     required int mediaId,
     required String? displayNameOverride,
   }) async {
-    final String? normalized = _normalizeDisplayNameOverride(displayNameOverride);
+    final String? normalized = _normalizeDisplayNameOverride(
+      displayNameOverride,
+    );
     if (mediaType == MediaListItemType.master) {
       await _database.update(
         "master_media_files",
@@ -518,6 +598,7 @@ class MediaRepository {
     final List<WebhookSceneSwitchConfig> webhooks =
         await _loadWebhookSceneSwitchConfigs();
     final List<String> ignoredFolders = await listIgnoredFolders();
+    final CapturePathsSettings capturePaths = await _loadCapturePathsSettings();
     return WorkspaceSettingsBundle(
       telestratorDefaults: telestratorDefaults,
       decoderConfig: decoderConfig,
@@ -525,27 +606,95 @@ class MediaRepository {
       obsSceneSwitchConfig: obsConfig,
       webhookSceneSwitchConfigs: webhooks,
       ignoredFolders: ignoredFolders,
+      capturePathsSettings: capturePaths,
     );
+  }
+
+  Future<CapturePathsSettings> _loadCapturePathsSettings() async {
+    final String recording =
+        (await _getWorkspaceSetting("capture.recordingRelativeDir"))?.trim() ??
+        CapturePathsSettings.defaultRecordingRelativeDir;
+    final String output =
+        (await _getWorkspaceSetting("capture.outputRelativeDir"))?.trim() ?? "";
+    return CapturePathsSettings(
+      recordingRelativeDir: recording.isEmpty
+          ? CapturePathsSettings.defaultRecordingRelativeDir
+          : recording,
+      outputRelativeDir: output,
+    );
+  }
+
+  Future<void> saveCapturePathsSettings(CapturePathsSettings value) async {
+    final String recording = value.recordingRelativeDir.trim().isEmpty
+        ? CapturePathsSettings.defaultRecordingRelativeDir
+        : value.recordingRelativeDir.trim();
+    await _putWorkspaceSetting("capture.recordingRelativeDir", recording);
+    await _putWorkspaceSetting(
+      "capture.outputRelativeDir",
+      value.outputRelativeDir.trim(),
+    );
+    await ensureRecordingRelativeDirIgnored(recording);
+  }
+
+  /// Ensures [relativePath] is listed under ignored folders when non-empty (workspace-relative).
+  Future<void> ensureRecordingRelativeDirIgnored(String relativePath) async {
+    final String normalized = _normalizeRelativeDir(relativePath);
+    if (normalized.isEmpty) {
+      return;
+    }
+    await addIgnoredFolder(normalized);
+  }
+
+  String _normalizeRelativeDir(String raw) {
+    String path = raw.trim().replaceAll("\\", "/");
+    while (path.startsWith("/")) {
+      path = path.substring(1);
+    }
+    return path;
+  }
+
+  Future<MasterMediaFile?> getMasterByFilePath(
+    String path,
+    String workspaceRoot,
+  ) async {
+    final String stored = WorkspaceMediaPaths.storedMasterPath(
+      workspaceRoot,
+      p.normalize(p.absolute(path)),
+    );
+    final List<Map<String, Object?>> rows = await _database.query(
+      "master_media_files",
+      where: "file_path = ?",
+      whereArgs: <Object?>[stored],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return MasterMediaFile.fromMap(rows.single);
   }
 
   Future<TelestratorDefaults> _loadTelestratorDefaults() async {
     final TelestratorDefaults fallback = TelestratorDefaults.fallback();
-    final int colorOneArgb = int.tryParse(
+    final int colorOneArgb =
+        int.tryParse(
           await _getWorkspaceSetting("telestrator.color1") ??
               fallback.colorOneArgb.toString(),
         ) ??
         fallback.colorOneArgb;
-    final int colorTwoArgb = int.tryParse(
+    final int colorTwoArgb =
+        int.tryParse(
           await _getWorkspaceSetting("telestrator.color2") ??
               fallback.colorTwoArgb.toString(),
         ) ??
         fallback.colorTwoArgb;
-    final int colorThreeArgb = int.tryParse(
+    final int colorThreeArgb =
+        int.tryParse(
           await _getWorkspaceSetting("telestrator.color3") ??
               fallback.colorThreeArgb.toString(),
         ) ??
         fallback.colorThreeArgb;
-    final double brushSize = double.tryParse(
+    final double brushSize =
+        double.tryParse(
           await _getWorkspaceSetting("telestrator.brushSize") ??
               fallback.brushSize.toString(),
         ) ??
@@ -564,10 +713,22 @@ class MediaRepository {
   }
 
   Future<void> saveTelestratorDefaults(TelestratorDefaults value) async {
-    await _putWorkspaceSetting("telestrator.color1", value.colorOneArgb.toString());
-    await _putWorkspaceSetting("telestrator.color2", value.colorTwoArgb.toString());
-    await _putWorkspaceSetting("telestrator.color3", value.colorThreeArgb.toString());
-    await _putWorkspaceSetting("telestrator.brushSize", value.brushSize.toString());
+    await _putWorkspaceSetting(
+      "telestrator.color1",
+      value.colorOneArgb.toString(),
+    );
+    await _putWorkspaceSetting(
+      "telestrator.color2",
+      value.colorTwoArgb.toString(),
+    );
+    await _putWorkspaceSetting(
+      "telestrator.color3",
+      value.colorThreeArgb.toString(),
+    );
+    await _putWorkspaceSetting(
+      "telestrator.brushSize",
+      value.brushSize.toString(),
+    );
     await _putWorkspaceSetting(
       "telestrator.enabledByDefault",
       value.enabledByDefault.toString(),
@@ -575,7 +736,9 @@ class MediaRepository {
   }
 
   Future<DecoderConfig> _loadDecoderConfig() async {
-    final String? storedList = await _getWorkspaceSetting("decoder.enabledProfiles");
+    final String? storedList = await _getWorkspaceSetting(
+      "decoder.enabledProfiles",
+    );
     if (storedList != null && storedList.trim().isNotEmpty) {
       final List<DecoderProfile> parsed = storedList
           .split(",")
@@ -592,7 +755,8 @@ class MediaRepository {
         return DecoderConfig(enabledProfiles: parsed);
       }
     }
-    final String stored = await _getWorkspaceSetting("decoder.profile") ?? "vaapi";
+    final String stored =
+        await _getWorkspaceSetting("decoder.profile") ?? "vaapi";
     final DecoderProfile profile = DecoderProfile.values.firstWhere(
       (DecoderProfile item) => item.name == stored,
       orElse: () => DecoderProfile.vaapi,
@@ -612,7 +776,8 @@ class MediaRepository {
   }
 
   Future<MdkLogVerbosity> _loadMdkLogVerbosity() async {
-    final String stored = await _getWorkspaceSetting("mdk.logVerbosity") ?? "warning";
+    final String stored =
+        await _getWorkspaceSetting("mdk.logVerbosity") ?? "warning";
     return MdkLogVerbosity.values.firstWhere(
       (MdkLogVerbosity item) => item.name == stored,
       orElse: () => MdkLogVerbosity.warning,
@@ -642,6 +807,7 @@ class MediaRepository {
       password: (row["obs_password"] as String?) ?? "",
       videoScene: (row["obs_video_scene"] as String?) ?? "Video Scene",
       faceScene: (row["obs_face_scene"] as String?) ?? "Face Scene",
+      captureScene: (row["obs_capture_scene"] as String?) ?? "",
     );
   }
 
@@ -671,6 +837,7 @@ class MediaRepository {
         "obs_password": value.password,
         "obs_video_scene": value.videoScene,
         "obs_face_scene": value.faceScene,
+        "obs_capture_scene": value.captureScene,
       };
       if (existing.isEmpty) {
         await txn.insert("scene_switch_profiles", payload);
@@ -685,7 +852,8 @@ class MediaRepository {
     });
   }
 
-  Future<List<WebhookSceneSwitchConfig>> _loadWebhookSceneSwitchConfigs() async {
+  Future<List<WebhookSceneSwitchConfig>>
+  _loadWebhookSceneSwitchConfigs() async {
     final List<Map<String, Object?>> rows = await _database.query(
       "scene_switch_profiles",
       where: "profile_type = ?",
@@ -698,12 +866,16 @@ class MediaRepository {
         name: (row["name"] as String?) ?? "Webhook",
         enabled: (row["enabled"] as int? ?? 1) == 1,
         url: (row["webhook_url"] as String?) ?? "",
-        method: ((row["webhook_method"] as String?) ?? "POST").toUpperCase() == "GET"
+        method:
+            ((row["webhook_method"] as String?) ?? "POST").toUpperCase() ==
+                "GET"
             ? WebhookMethod.get
             : WebhookMethod.post,
-        getQueryParamName: (row["webhook_get_query_param"] as String?) ?? "scene",
+        getQueryParamName:
+            (row["webhook_get_query_param"] as String?) ?? "scene",
         postBodyType:
-            ((row["webhook_post_body_type"] as String?) ?? "json").toLowerCase() ==
+            ((row["webhook_post_body_type"] as String?) ?? "json")
+                    .toLowerCase() ==
                 "form"
             ? WebhookPostBodyType.form
             : WebhookPostBodyType.json,
@@ -712,7 +884,9 @@ class MediaRepository {
     }).toList();
   }
 
-  Future<int> addWebhookSceneSwitchConfig(WebhookSceneSwitchConfig value) async {
+  Future<int> addWebhookSceneSwitchConfig(
+    WebhookSceneSwitchConfig value,
+  ) async {
     return _database.insert("scene_switch_profiles", <String, Object?>{
       "profile_type": "webhook",
       "name": value.name,
@@ -720,13 +894,16 @@ class MediaRepository {
       "webhook_url": value.url,
       "webhook_method": value.method == WebhookMethod.get ? "GET" : "POST",
       "webhook_get_query_param": value.getQueryParamName,
-      "webhook_post_body_type":
-          value.postBodyType == WebhookPostBodyType.form ? "form" : "json",
+      "webhook_post_body_type": value.postBodyType == WebhookPostBodyType.form
+          ? "form"
+          : "json",
       "webhook_scene_key": value.sceneKey,
     });
   }
 
-  Future<void> updateWebhookSceneSwitchConfig(WebhookSceneSwitchConfig value) async {
+  Future<void> updateWebhookSceneSwitchConfig(
+    WebhookSceneSwitchConfig value,
+  ) async {
     await _database.update(
       "scene_switch_profiles",
       <String, Object?>{
@@ -735,8 +912,9 @@ class MediaRepository {
         "webhook_url": value.url,
         "webhook_method": value.method == WebhookMethod.get ? "GET" : "POST",
         "webhook_get_query_param": value.getQueryParamName,
-        "webhook_post_body_type":
-            value.postBodyType == WebhookPostBodyType.form ? "form" : "json",
+        "webhook_post_body_type": value.postBodyType == WebhookPostBodyType.form
+            ? "form"
+            : "json",
         "webhook_scene_key": value.sceneKey,
       },
       where: "id = ? AND profile_type = ?",

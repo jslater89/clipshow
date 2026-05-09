@@ -19,9 +19,8 @@ class MediaDurationProbeResult {
       MediaDurationProbeResult._(ok: false, stderr: stderr);
 
   /// Whole milliseconds, suitable for storing next to clip [in_ms] / [out_ms].
-  int? get durationMs => durationSeconds == null
-      ? null
-      : (durationSeconds! * 1000).round();
+  int? get durationMs =>
+      durationSeconds == null ? null : (durationSeconds! * 1000).round();
 }
 
 class MediaDurationProbe {
@@ -29,18 +28,15 @@ class MediaDurationProbe {
 
   static Future<MediaDurationProbeResult> probeSeconds(String videoPath) async {
     try {
-      final ProcessResult result = await Process.run(
-        "ffprobe",
-        <String>[
-          "-v",
-          "error",
-          "-show_entries",
-          "format=duration",
-          "-of",
-          "default=noprint_wrappers=1:nokey=1",
-          videoPath,
-        ],
-      );
+      final ProcessResult result = await Process.run("ffprobe", <String>[
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        videoPath,
+      ]);
       final String stderr = "${result.stderr}";
       if (result.exitCode != 0) {
         return MediaDurationProbeResult.fail(stderr);

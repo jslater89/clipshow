@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 
 List<String> sortTags(List<String> tags) {
   tags.sort((String a, String b) {
@@ -45,11 +46,23 @@ String formatMs(int value) {
   return "${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
 }
 
-PlayoutClip toPlayoutClip(MediaListItem item, {int? initialOffsetMs}) {
+PlayoutClip toPlayoutClip(
+  MediaListItem item, {
+  required String workspaceRoot,
+  int? initialOffsetMs,
+}) {
+  final String absolute = WorkspaceMediaPaths.absoluteMasterPath(
+    workspaceRoot,
+    item.filePath,
+  );
   if (item.type == MediaListItemType.master) {
-    final int startTimeMs = initialOffsetMs == null ? 0 : initialOffsetMs < 0 ? 0 : initialOffsetMs;
+    final int startTimeMs = initialOffsetMs == null
+        ? 0
+        : initialOffsetMs < 0
+        ? 0
+        : initialOffsetMs;
     return PlayoutClip(
-      filePath: item.filePath,
+      filePath: absolute,
       startTimeMs: startTimeMs,
       endTimeMs: null,
     );
@@ -65,7 +78,7 @@ PlayoutClip toPlayoutClip(MediaListItem item, {int? initialOffsetMs}) {
     startTimeMs = initialOffsetMs;
   }
   return PlayoutClip(
-    filePath: item.filePath,
+    filePath: absolute,
     startTimeMs: startTimeMs,
     endTimeMs: clipOutMs,
   );

@@ -10,24 +10,31 @@ class WorkspaceSettingsDialog extends StatefulWidget {
   const WorkspaceSettingsDialog({super.key});
 
   @override
-  State<WorkspaceSettingsDialog> createState() => _WorkspaceSettingsDialogState();
+  State<WorkspaceSettingsDialog> createState() =>
+      _WorkspaceSettingsDialogState();
 }
 
 class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
   final TextEditingController _obsAddressController = TextEditingController();
   final TextEditingController _obsPortController = TextEditingController();
   final TextEditingController _obsPasswordController = TextEditingController();
-  final TextEditingController _obsVideoSceneController = TextEditingController();
+  final TextEditingController _obsVideoSceneController =
+      TextEditingController();
   final TextEditingController _obsFaceSceneController = TextEditingController();
-  final TextEditingController _ignoredFolderController = TextEditingController();
+  final TextEditingController _obsCaptureSceneController =
+      TextEditingController();
+  final TextEditingController _captureRecordingDirController =
+      TextEditingController();
+  final TextEditingController _captureOutputDirController =
+      TextEditingController();
+  final TextEditingController _ignoredFolderController =
+      TextEditingController();
   final TextEditingController _webhookNameController = TextEditingController();
   final TextEditingController _webhookUrlController = TextEditingController();
-  final TextEditingController _webhookQueryParamController = TextEditingController(
-    text: "scene",
-  );
-  final TextEditingController _webhookSceneKeyController = TextEditingController(
-    text: "scene",
-  );
+  final TextEditingController _webhookQueryParamController =
+      TextEditingController(text: "scene");
+  final TextEditingController _webhookSceneKeyController =
+      TextEditingController(text: "scene");
 
   bool _initialized = false;
   late TelestratorDefaults _draftTelestratorDefaults;
@@ -42,6 +49,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     _obsPasswordController.dispose();
     _obsVideoSceneController.dispose();
     _obsFaceSceneController.dispose();
+    _obsCaptureSceneController.dispose();
+    _captureRecordingDirController.dispose();
+    _captureOutputDirController.dispose();
     _ignoredFolderController.dispose();
     _webhookNameController.dispose();
     _webhookUrlController.dispose();
@@ -66,6 +76,10 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       _obsPasswordController.text = obsConfig.password;
       _obsVideoSceneController.text = obsConfig.videoScene;
       _obsFaceSceneController.text = obsConfig.faceScene;
+      _obsCaptureSceneController.text = obsConfig.captureScene;
+      final CapturePathsSettings capturePaths = viewModel.capturePathsSettings;
+      _captureRecordingDirController.text = capturePaths.recordingRelativeDir;
+      _captureOutputDirController.text = capturePaths.outputRelativeDir;
       _draftTelestratorDefaults = viewModel.telestratorDefaults;
       _enabledDecoders = List<DecoderProfile>.from(
         viewModel.decoderConfig.enabledProfiles,
@@ -97,7 +111,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                         _draftTelestratorDefaults = TelestratorDefaults(
                           colorOneArgb: value,
                           colorTwoArgb: _draftTelestratorDefaults.colorTwoArgb,
-                          colorThreeArgb: _draftTelestratorDefaults.colorThreeArgb,
+                          colorThreeArgb:
+                              _draftTelestratorDefaults.colorThreeArgb,
                           brushSize: _draftTelestratorDefaults.brushSize,
                           enabledByDefault:
                               _draftTelestratorDefaults.enabledByDefault,
@@ -114,7 +129,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                         _draftTelestratorDefaults = TelestratorDefaults(
                           colorOneArgb: _draftTelestratorDefaults.colorOneArgb,
                           colorTwoArgb: value,
-                          colorThreeArgb: _draftTelestratorDefaults.colorThreeArgb,
+                          colorThreeArgb:
+                              _draftTelestratorDefaults.colorThreeArgb,
                           brushSize: _draftTelestratorDefaults.brushSize,
                           enabledByDefault:
                               _draftTelestratorDefaults.enabledByDefault,
@@ -150,12 +166,14 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       min: 2,
                       max: 24,
                       divisions: 22,
-                      label: _draftTelestratorDefaults.brushSize.toStringAsFixed(0),
+                      label: _draftTelestratorDefaults.brushSize
+                          .toStringAsFixed(0),
                       onChanged: (double value) => setState(() {
                         _draftTelestratorDefaults = TelestratorDefaults(
                           colorOneArgb: _draftTelestratorDefaults.colorOneArgb,
                           colorTwoArgb: _draftTelestratorDefaults.colorTwoArgb,
-                          colorThreeArgb: _draftTelestratorDefaults.colorThreeArgb,
+                          colorThreeArgb:
+                              _draftTelestratorDefaults.colorThreeArgb,
                           brushSize: value,
                           enabledByDefault:
                               _draftTelestratorDefaults.enabledByDefault,
@@ -175,9 +193,12 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                         value: _draftTelestratorDefaults.enabledByDefault,
                         onChanged: (bool value) => setState(() {
                           _draftTelestratorDefaults = TelestratorDefaults(
-                            colorOneArgb: _draftTelestratorDefaults.colorOneArgb,
-                            colorTwoArgb: _draftTelestratorDefaults.colorTwoArgb,
-                            colorThreeArgb: _draftTelestratorDefaults.colorThreeArgb,
+                            colorOneArgb:
+                                _draftTelestratorDefaults.colorOneArgb,
+                            colorTwoArgb:
+                                _draftTelestratorDefaults.colorTwoArgb,
+                            colorThreeArgb:
+                                _draftTelestratorDefaults.colorThreeArgb,
                             brushSize: _draftTelestratorDefaults.brushSize,
                             enabledByDefault: value,
                           );
@@ -191,7 +212,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
               _AsyncFilledButton(
                 label: "Apply Telestrator Defaults",
                 onPressed: () async {
-                  await viewModel.saveTelestratorDefaults(_draftTelestratorDefaults);
+                  await viewModel.saveTelestratorDefaults(
+                    _draftTelestratorDefaults,
+                  );
                 },
               ),
               const Divider(height: 24),
@@ -207,10 +230,11 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                   items: MdkLogVerbosity.values
                       .map(
-                        (MdkLogVerbosity value) => DropdownMenuItem<MdkLogVerbosity>(
-                          value: value,
-                          child: Text(value.name),
-                        ),
+                        (MdkLogVerbosity value) =>
+                            DropdownMenuItem<MdkLogVerbosity>(
+                              value: value,
+                              child: Text(value.name),
+                            ),
                       )
                       .toList(),
                   onChanged: (MdkLogVerbosity? value) {
@@ -235,17 +259,19 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                             if (newIndex > oldIndex) {
                               newIndex -= 1;
                             }
-                            final DecoderProfile moved =
-                                _enabledDecoders.removeAt(oldIndex);
+                            final DecoderProfile moved = _enabledDecoders
+                                .removeAt(oldIndex);
                             _enabledDecoders.insert(newIndex, moved);
                           });
                         },
                         children: _enabledDecoders
                             .map(
                               (DecoderProfile profile) => ListTile(
-                                key: ValueKey<String>("decoder-${profile.name}"),
+                                key: ValueKey<String>(
+                                  "decoder-${profile.name}",
+                                ),
                                 dense: true,
-                                title: Text(profile.name),
+                                title: Text(profile.label),
                                 trailing: IconButton(
                                   icon: const Icon(Icons.arrow_forward),
                                   tooltip: "Disable",
@@ -268,7 +294,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                             .map(
                               (DecoderProfile profile) => ListTile(
                                 dense: true,
-                                title: Text(profile.name),
+                                title: Text(profile.label),
                                 trailing: IconButton(
                                   icon: const Icon(Icons.arrow_back),
                                   tooltip: "Enable",
@@ -323,14 +349,16 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                           children: <Widget>[
                             Switch(
                               value: viewModel.obsSceneSwitchConfig!.enabled,
-                              onChanged: (bool value) =>
-                                  unawaited(viewModel.setObsSceneSwitchEnabled(value)),
+                              onChanged: (bool value) => unawaited(
+                                viewModel.setObsSceneSwitchEnabled(value),
+                              ),
                             ),
                             IconButton(
                               tooltip: "Remove OBS",
                               icon: const Icon(Icons.delete_outline),
-                              onPressed: () =>
-                                  unawaited(viewModel.saveObsSceneSwitchConfig(null)),
+                              onPressed: () => unawaited(
+                                viewModel.saveObsSceneSwitchConfig(null),
+                              ),
                             ),
                           ],
                         ),
@@ -347,14 +375,19 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                             Switch(
                               value: item.enabled,
                               onChanged: (bool value) => unawaited(
-                                viewModel.setWebhookSceneSwitchEnabled(item.id, value),
+                                viewModel.setWebhookSceneSwitchEnabled(
+                                  item.id,
+                                  value,
+                                ),
                               ),
                             ),
                             IconButton(
                               tooltip: "Remove webhook",
                               icon: const Icon(Icons.delete_outline),
                               onPressed: () => unawaited(
-                                viewModel.deleteWebhookSceneSwitchConfig(item.id),
+                                viewModel.deleteWebhookSceneSwitchConfig(
+                                  item.id,
+                                ),
                               ),
                             ),
                           ],
@@ -364,7 +397,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ],
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
               Text("OBS", style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               Row(
@@ -427,10 +460,21 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 ],
               ),
               const SizedBox(height: 8),
+              TextField(
+                controller: _obsCaptureSceneController,
+                decoration: const InputDecoration(
+                  labelText: "Capture Scene (optional)",
+                  helperText:
+                      "Program scene switched before recording when set.",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
               _AsyncFilledButton(
                 label: "Save OBS",
                 onPressed: () async {
-                  final int port = int.tryParse(_obsPortController.text.trim()) ?? 4455;
+                  final int port =
+                      int.tryParse(_obsPortController.text.trim()) ?? 4455;
                   await viewModel.saveObsSceneSwitchConfig(
                     ObsSceneSwitchConfig(
                       enabled: viewModel.obsSceneSwitchConfig?.enabled ?? true,
@@ -439,11 +483,56 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       password: _obsPasswordController.text.trim(),
                       videoScene: _obsVideoSceneController.text.trim(),
                       faceScene: _obsFaceSceneController.text.trim(),
+                      captureScene: _obsCaptureSceneController.text.trim(),
                     ),
                   );
                 },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 24),
+              Text("OBS Capture Paths", style: theme.textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: TextField(
+                      controller: _captureRecordingDirController,
+                      decoration: const InputDecoration(
+                        labelText: "Recording Folder (relative)",
+                        helperText:
+                            "OBS writes here; ignored by ingest while recording.",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _captureOutputDirController,
+                      decoration: const InputDecoration(
+                        labelText: "Output Folder (relative)",
+                        helperText:
+                            "Empty = workspace root. Finished files are copied here.",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _AsyncFilledButton(
+                label: "Save Capture Paths",
+                onPressed: () async {
+                  await viewModel.saveCapturePathsSettings(
+                    CapturePathsSettings(
+                      recordingRelativeDir: _captureRecordingDirController.text
+                          .trim(),
+                      outputRelativeDir: _captureOutputDirController.text
+                          .trim(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 24),
               Text("Webhooks", style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               Row(
@@ -478,10 +567,11 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       initialValue: _newWebhookMethod,
                       items: WebhookMethod.values
                           .map(
-                            (WebhookMethod value) => DropdownMenuItem<WebhookMethod>(
-                              value: value,
-                              child: Text(value.name.toUpperCase()),
-                            ),
+                            (WebhookMethod value) =>
+                                DropdownMenuItem<WebhookMethod>(
+                                  value: value,
+                                  child: Text(value.name.toUpperCase()),
+                                ),
                           )
                           .toList(),
                       onChanged: (WebhookMethod? value) {
@@ -562,7 +652,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       enabled: true,
                       url: _webhookUrlController.text.trim(),
                       method: _newWebhookMethod,
-                      getQueryParamName: _webhookQueryParamController.text.trim(),
+                      getQueryParamName: _webhookQueryParamController.text
+                          .trim(),
                       postBodyType: _newWebhookPostBodyType,
                       sceneKey: _newWebhookMethod == WebhookMethod.get
                           ? ""
@@ -609,9 +700,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                     .map(
                       (String folder) => InputChip(
                         label: Text(folder),
-                        onDeleted: () => unawaited(
-                          viewModel.removeIgnoredFolder(folder),
-                        ),
+                        onDeleted: () =>
+                            unawaited(viewModel.removeIgnoredFolder(folder)),
                       ),
                     )
                     .toList(),
@@ -646,11 +736,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
         padding: const EdgeInsets.all(8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(title),
-            const SizedBox(height: 8),
-            child,
-          ],
+          children: <Widget>[Text(title), const SizedBox(height: 8), child],
         ),
       ),
     );
@@ -820,7 +906,9 @@ class _AsyncFilledButtonState extends State<_AsyncFilledButton> {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         FilledButton(
-          onPressed: _state == _AsyncButtonVisualState.loading ? null : _runAction,
+          onPressed: _state == _AsyncButtonVisualState.loading
+              ? null
+              : _runAction,
           child: _buildLabelChild(),
         ),
         const SizedBox(width: 8),

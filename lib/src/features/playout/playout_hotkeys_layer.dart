@@ -284,18 +284,20 @@ class PlayoutHotkeysLayer extends StatelessWidget {
                   return null;
                 },
               ),
-          PlayoutDecreaseBrushIntent: CallbackAction<PlayoutDecreaseBrushIntent>(
-            onInvoke: (_) {
-              onDecreaseBrushRequested?.call();
-              return null;
-            },
-          ),
-          PlayoutIncreaseBrushIntent: CallbackAction<PlayoutIncreaseBrushIntent>(
-            onInvoke: (_) {
-              onIncreaseBrushRequested?.call();
-              return null;
-            },
-          ),
+          PlayoutDecreaseBrushIntent:
+              CallbackAction<PlayoutDecreaseBrushIntent>(
+                onInvoke: (_) {
+                  onDecreaseBrushRequested?.call();
+                  return null;
+                },
+              ),
+          PlayoutIncreaseBrushIntent:
+              CallbackAction<PlayoutIncreaseBrushIntent>(
+                onInvoke: (_) {
+                  onIncreaseBrushRequested?.call();
+                  return null;
+                },
+              ),
           DismissIntent: CallbackAction<DismissIntent>(
             onInvoke: (_) {
               onExitRequested();

@@ -1,9 +1,5 @@
 /// Persisted issue state for a row in [master_media_files] (and in-memory model).
-enum MediaIssue {
-  none,
-  empty,
-  unreadable,
-}
+enum MediaIssue { none, empty, unreadable }
 
 class MasterMediaFile {
   const MasterMediaFile({
@@ -20,6 +16,8 @@ class MasterMediaFile {
   });
 
   final int id;
+
+  /// Workspace-root-relative path (forward slashes), as stored in SQLite.
   final String filePath;
   final String fileName;
   final String? displayNameOverride;

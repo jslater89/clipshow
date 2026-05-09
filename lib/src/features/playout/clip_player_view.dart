@@ -75,15 +75,23 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
 
   /// The position the user most recently explicitly seeked to.
   ///
-  /// `video_player` fires a `completed` event that asynchronously calls
-  /// `pause().then((_) => seekTo(duration))`. That chain can land *after* a
-  /// user-initiated backward seek, quietly resetting position back to the end.
-  /// By remembering the user's intended position here we can re-apply it just
-  /// before [play], regardless of what the completion handler did.
-  ///
-  /// Cleared to `null` after it is consumed in [_togglePlayPause], or when the
-  /// user explicitly seeks to the clip end (no need to override in that case).
+  /// Cleared after it is consumed in [_togglePlayPause], or when the user
+  /// explicitly seeks to the clip end.
   Duration? _targetSeekPosition;
+
+  /// Whether the video reached end-of-file since the last play.
+  ///
+  /// On Linux (and some other platforms) the media engine enters a hard
+  /// EOS/stopped state on completion. In that state, [VideoPlayerController.seekTo]
+  /// updates the Dart-side position but the platform ignores the seek. When
+  /// [VideoPlayerController.play] is subsequently called the engine restarts
+  /// from position 0 regardless of any pre-play seek.
+  ///
+  /// The fix is to call [play] first (which exits EOS), then issue a seek while
+  /// the engine is actively playing — a flushing seek that is always honoured.
+  /// We track this flag so we still know to do that even after [_seekBy] has
+  /// already cleared [VideoPlayerValue.isCompleted] by moving the position.
+  bool _reachedEnd = false;
 
   @override
   void initState() {
@@ -111,6 +119,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   Future<void> _reinitializeController({required String reason}) async {
     _logger.info("Reinitializing controller due to $reason");
     _targetSeekPosition = null;
+    _reachedEnd = false;
     await _disposeController();
     await _initializeController();
   }
@@ -160,6 +169,10 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       return;
     }
 
+    if (controller.value.isCompleted) {
+      _reachedEnd = true;
+    }
+
     final int? endMs = widget.endTimeMs;
     if (endMs != null) {
       final int currentMs = controller.value.position.inMilliseconds;
@@ -183,26 +196,60 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     }
     if (controller.value.isPlaying) {
       await controller.pause();
-    } else {
-      // Drain any in-flight seek operations first.
-      await _enqueueSeek(() async {});
+      return;
+    }
 
-      // Consume the tracked seek target if one exists. The video_player package
-      // fires `pause().then(seekTo(duration))` on completion, and that async
-      // chain can land *after* the user's backward seek, quietly resetting
-      // position back to the end. Seeking explicitly here—based on what the
-      // user asked for rather than the (possibly stale) controller position—
-      // corrects that. When there is no tracked target and we are at EOF we
-      // fall back to clip start so `VideoPlayerController.play` does not jump
-      // to file position 0.
-      final Duration? target = _targetSeekPosition;
-      _targetSeekPosition = null;
-      if (target != null) {
-        await controller.seekTo(target);
-      } else if (controller.value.position == controller.value.duration) {
-        await controller.seekTo(Duration(milliseconds: widget.startTimeMs));
-      }
+    await _enqueueSeek(() async {});
+
+    final bool hadReachedEnd = _reachedEnd;
+    _reachedEnd = false;
+    final Duration? target = _targetSeekPosition;
+    _targetSeekPosition = null;
+
+    if (hadReachedEnd) {
+      // After EOS the underlying engine (fvp/mpv) is in a stopped state where
+      // seeks are unreliable and play() restarts from the beginning regardless
+      // of the Dart-side position. The only reliable fix is to create a fresh
+      // controller at the desired position. We initialise it while the old one
+      // is still active so there is no black-screen gap.
+      final Duration playFrom =
+          target ?? Duration(milliseconds: widget.startTimeMs);
+      await _restartPlaybackFrom(playFrom);
+    } else {
       await controller.play();
+    }
+  }
+
+  /// Initialises a new [VideoPlayerController] for the same file at [position],
+  /// swaps it in while the old controller is still displaying (no black flash),
+  /// then starts playback.
+  Future<void> _restartPlaybackFrom(Duration position) async {
+    final VideoPlayerController newController = VideoPlayerController.file(
+      File(widget.filePath),
+    );
+    try {
+      await newController.initialize();
+      if (!mounted) {
+        await newController.dispose();
+        return;
+      }
+      await newController.seekTo(position);
+      if (!mounted) {
+        await newController.dispose();
+        return;
+      }
+      // Swap: detach the old listener before reassigning _controller so that
+      // _handlePlaybackProgress never sees a mismatched controller.
+      final VideoPlayerController? old = _controller;
+      old?.removeListener(_handlePlaybackProgress);
+      _controller = newController;
+      newController.addListener(_handlePlaybackProgress);
+      await newController.play();
+      if (mounted) setState(() {});
+      if (old != null) await old.dispose();
+    } catch (error) {
+      _logger.severe("Failed to restart playback from $position: $error");
+      await newController.dispose();
     }
   }
 
@@ -218,10 +265,9 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       return;
     }
 
-    final Duration position = controller.value.position;
     final Duration duration = controller.value.duration;
     final Duration clipStart = Duration(milliseconds: widget.startTimeMs);
-    Duration next = position + offset;
+    Duration next = controller.value.position + offset;
     if (next < clipStart) {
       next = clipStart;
     }
@@ -280,7 +326,6 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     }
     _controller = null;
   }
-
 
   @override
   Widget build(BuildContext context) {

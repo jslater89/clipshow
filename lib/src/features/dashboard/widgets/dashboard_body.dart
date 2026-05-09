@@ -3,6 +3,7 @@ import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_file_list_panel.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_capture_panel.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_preview_panel.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_tag_panel.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
@@ -29,7 +30,9 @@ class _DashboardBodyState extends State<DashboardBody> {
   static const double _resizeHandleHeight = 20.0;
 
   final GlobalKey _splitPaneKey = GlobalKey();
-  final FocusNode _previewFocusNode = FocusNode(debugLabel: "DashboardPreviewFocus");
+  final FocusNode _previewFocusNode = FocusNode(
+    debugLabel: "DashboardPreviewFocus",
+  );
   double _previewToTagRatio = 2.0;
 
   @override
@@ -50,11 +53,6 @@ class _DashboardBodyState extends State<DashboardBody> {
       );
     }
     final List<MediaListItem> visibleMediaItems = viewModel.visibleItems;
-    if (viewModel.mediaFiles.isEmpty) {
-      return const Center(
-        child: Text("No supported media files found in this workspace."),
-      );
-    }
     final int previewFlex = (_previewToTagRatio * _tagFlexBase).round();
     final int tagFlex = _tagFlexBase;
 
@@ -69,6 +67,7 @@ class _DashboardBodyState extends State<DashboardBody> {
             onPlayClip: widget.onPlayClip,
             onPreviewFocusRequested: _previewFocusNode.requestFocus,
             onMediaItemSelected: (MediaListItem item) {
+              viewModel.setMediaPaneTab(DashboardMediaPaneTab.preview);
               viewModel.selectItem(item);
               _previewFocusNode.requestFocus();
             },
@@ -81,20 +80,56 @@ class _DashboardBodyState extends State<DashboardBody> {
             builder: (BuildContext context, BoxConstraints constraints) {
               return Column(
                 key: _splitPaneKey,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  Expanded(
-                    flex: previewFlex,
-                    child: DashboardPreviewPanel(
-                      onPlayClip: widget.onPlayClip,
-                      focusNode: _previewFocusNode,
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: SegmentedButton<DashboardMediaPaneTab>(
+                      segments: const <ButtonSegment<DashboardMediaPaneTab>>[
+                        ButtonSegment<DashboardMediaPaneTab>(
+                          value: DashboardMediaPaneTab.preview,
+                          label: Text("Preview"),
+                          icon: Icon(Icons.movie_outlined),
+                        ),
+                        ButtonSegment<DashboardMediaPaneTab>(
+                          value: DashboardMediaPaneTab.capture,
+                          label: Text("Capture"),
+                          icon: Icon(Icons.videocam_outlined),
+                        ),
+                      ],
+                      selected: <DashboardMediaPaneTab>{viewModel.mediaPaneTab},
+                      onSelectionChanged:
+                          (Set<DashboardMediaPaneTab> selected) {
+                            if (selected.isEmpty) {
+                              return;
+                            }
+                            viewModel.setMediaPaneTab(selected.first);
+                          },
                     ),
                   ),
-                  _buildResizeHandle(context),
                   Expanded(
-                    flex: tagFlex,
-                    child: DashboardTagPanel(
-                      onPreviewFocusRequested: _previewFocusNode.requestFocus,
-                    ),
+                    child:
+                        viewModel.mediaPaneTab == DashboardMediaPaneTab.capture
+                        ? const DashboardCapturePanel()
+                        : Column(
+                            children: <Widget>[
+                              Expanded(
+                                flex: previewFlex,
+                                child: DashboardPreviewPanel(
+                                  onPlayClip: widget.onPlayClip,
+                                  focusNode: _previewFocusNode,
+                                ),
+                              ),
+                              _buildResizeHandle(context),
+                              Expanded(
+                                flex: tagFlex,
+                                child: DashboardTagPanel(
+                                  onPreviewFocusRequested:
+                                      _previewFocusNode.requestFocus,
+                                ),
+                              ),
+                            ],
+                          ),
                   ),
                 ],
               );
@@ -116,7 +151,8 @@ class _DashboardBodyState extends State<DashboardBody> {
           if (splitPaneContext == null) {
             return;
           }
-          final RenderObject? renderObject = splitPaneContext.findRenderObject();
+          final RenderObject? renderObject = splitPaneContext
+              .findRenderObject();
           if (renderObject is! RenderBox) {
             return;
           }
@@ -125,8 +161,9 @@ class _DashboardBodyState extends State<DashboardBody> {
           if (availableHeight <= 1) {
             return;
           }
-          final double localY =
-              renderObject.globalToLocal(details.globalPosition).dy;
+          final double localY = renderObject
+              .globalToLocal(details.globalPosition)
+              .dy;
           final double nextPreviewHeight = (localY - (_resizeHandleHeight / 2))
               .clamp(0.0, availableHeight);
           final double nextTagHeight = (availableHeight - nextPreviewHeight)

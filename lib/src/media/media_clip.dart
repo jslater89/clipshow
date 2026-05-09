@@ -12,6 +12,8 @@ class MediaClip {
 
   final int id;
   final int masterMediaId;
+
+  /// Same workspace-relative master path as [MasterMediaFile.filePath].
   final String filePath;
   final String fileName;
   final String? displayNameOverride;

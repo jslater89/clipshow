@@ -5,7 +5,22 @@ enum DecoderProfile {
   vaapiVpp,
   vdpau,
   ffmpegThreads0,
-  dav1d,
+  dav1d;
+
+  String get label {
+    switch (this) {
+      case DecoderProfile.vaapi:
+        return "VAAPI";
+      case DecoderProfile.vaapiVpp:
+        return "VAAPI:vpp=1";
+      case DecoderProfile.vdpau:
+        return "VDPAU (nvidia only)";
+      case DecoderProfile.ffmpegThreads0:
+        return "FFmpeg:threads=0";
+      case DecoderProfile.dav1d:
+        return "dav1d";
+    }
+  }
 }
 
 enum MdkLogVerbosity { off, error, warning, info, debug, all }
@@ -21,8 +36,8 @@ class TelestratorDefaults {
 
   factory TelestratorDefaults.fallback() {
     return const TelestratorDefaults(
-      colorOneArgb: 0xFFFF3B30,
-      colorTwoArgb: 0xFFFFCC00,
+      colorOneArgb: 0xFFFFCC00,
+      colorTwoArgb: 0xFFFF3B30,
       colorThreeArgb: 0xFF34C759,
       brushSize: 6,
       enabledByDefault: false,
@@ -43,7 +58,13 @@ class TelestratorDefaults {
 class DecoderConfig {
   const DecoderConfig({required this.enabledProfiles});
 
-  const DecoderConfig.fallback() : enabledProfiles = const <DecoderProfile>[DecoderProfile.vaapi];
+  const DecoderConfig.fallbackLinux()
+    : enabledProfiles = const <DecoderProfile>[
+      DecoderProfile.vaapi,
+      DecoderProfile.vaapiVpp,
+      DecoderProfile.ffmpegThreads0,
+      DecoderProfile.dav1d,
+    ];
 
   final List<DecoderProfile> enabledProfiles;
 }
@@ -56,6 +77,7 @@ class ObsSceneSwitchConfig {
     required this.password,
     required this.videoScene,
     required this.faceScene,
+    required this.captureScene,
   });
 
   factory ObsSceneSwitchConfig.fallback() {
@@ -66,6 +88,7 @@ class ObsSceneSwitchConfig {
       password: "",
       videoScene: "Video Scene",
       faceScene: "Face Scene",
+      captureScene: "",
     );
   }
 
@@ -75,9 +98,36 @@ class ObsSceneSwitchConfig {
   final String password;
   final String videoScene;
   final String faceScene;
+
+  /// Empty string disables switching before capture.
+  final String captureScene;
+}
+
+/// Paths relative to workspace root (POSIX-style segments). Used for OBS staging copy workflow.
+class CapturePathsSettings {
+  static const String defaultRecordingRelativeDir = "recordings";
+
+  const CapturePathsSettings({
+    required this.recordingRelativeDir,
+    required this.outputRelativeDir,
+  });
+
+  factory CapturePathsSettings.fallback() {
+    return const CapturePathsSettings(
+      recordingRelativeDir: defaultRecordingRelativeDir,
+      outputRelativeDir: "",
+    );
+  }
+
+  /// Where OBS writes growing files (ignored by ingest when under workspace).
+  final String recordingRelativeDir;
+
+  /// Empty = copy finished recordings to workspace root for ingest.
+  final String outputRelativeDir;
 }
 
 enum WebhookMethod { get, post }
+
 enum WebhookPostBodyType { form, json }
 
 class WebhookSceneSwitchConfig {
@@ -110,6 +160,7 @@ class WorkspaceSettingsBundle {
     required this.obsSceneSwitchConfig,
     required this.webhookSceneSwitchConfigs,
     required this.ignoredFolders,
+    required this.capturePathsSettings,
   });
 
   final TelestratorDefaults telestratorDefaults;
@@ -118,4 +169,5 @@ class WorkspaceSettingsBundle {
   final ObsSceneSwitchConfig? obsSceneSwitchConfig;
   final List<WebhookSceneSwitchConfig> webhookSceneSwitchConfigs;
   final List<String> ignoredFolders;
+  final CapturePathsSettings capturePathsSettings;
 }

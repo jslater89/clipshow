@@ -9,10 +9,7 @@ import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_hel
 import "package:obs_clipshow/src/media/media_list_item.dart";
 
 class DashboardTagPanel extends StatefulWidget {
-  const DashboardTagPanel({
-    super.key,
-    required this.onPreviewFocusRequested,
-  });
+  const DashboardTagPanel({super.key, required this.onPreviewFocusRequested});
 
   final VoidCallback onPreviewFocusRequested;
 
@@ -33,6 +30,8 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
     final List<String> selectedTags = selectedItem == null
         ? <String>[]
         : sortTags(viewModel.tagsForItem(selectedItem).toList());
+    final bool selectedHasUserTags =
+        selectedTags.any((String t) => !isSystemTag(t));
 
     return Card(
       child: Padding(
@@ -64,10 +63,11 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                     const SizedBox(width: 8),
                     TextButton.icon(
                       onPressed: () async {
-                        final String? updated = await _showRenameDisplayNameDialog(
-                          context,
-                          initialValue: selectedItem.displayName,
-                        );
+                        final String? updated =
+                            await _showRenameDisplayNameDialog(
+                              context,
+                              initialValue: selectedItem.displayName,
+                            );
                         if (updated == null) {
                           return;
                         }
@@ -85,10 +85,14 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                       label: const Text("Edit"),
                     ),
                     TextButton(
-                      onPressed: selectedItem.displayName == selectedItem.fileName
+                      onPressed:
+                          selectedItem.displayName == selectedItem.fileName
                           ? null
                           : () => unawaited(
-                              viewModel.setDisplayNameOverride(selectedItem, null),
+                              viewModel.setDisplayNameOverride(
+                                selectedItem,
+                                null,
+                              ),
                             ),
                       child: const Text("Clear"),
                     ),
@@ -110,25 +114,21 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: selectedTags
-                      .map(
-                        (String tag) {
-                          final bool isSystemTag =
-                              tag == MediaRepository.masterTag ||
-                              tag == MediaRepository.clipTag;
-                          return InputChip(
-                            label: Text(tag),
-                            backgroundColor: tagChipColor(context, tag),
-                            onDeleted: isSystemTag
-                                ? null
-                                : () => unawaited(
-                                    viewModel.removeTagFromSelectedMedia(tag),
-                                  ),
-                            onPressed: () => viewModel.toggleTagFilter(tag),
-                          );
-                        },
-                      )
-                      .toList(),
+                  children: selectedTags.map((String tag) {
+                    final bool isSystemTag =
+                        tag == MediaRepository.masterTag ||
+                        tag == MediaRepository.clipTag;
+                    return InputChip(
+                      label: Text(tag),
+                      backgroundColor: tagChipColor(context, tag),
+                      onDeleted: isSystemTag
+                          ? null
+                          : () => unawaited(
+                              viewModel.removeTagFromSelectedMedia(tag),
+                            ),
+                      onPressed: () => viewModel.toggleTagFilter(tag),
+                    );
+                  }).toList(),
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -189,15 +189,19 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                       },
                       child: const Text("Add"),
                     ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: !selectedHasUserTags
+                          ? null
+                          : () => viewModel.mergeSelectedItemTagsIntoCapture(),
+                      icon: const Icon(Icons.arrow_forward),
+                      label: const Text("capture"),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
                 const Divider(),
-                Row(
-                  children: <Widget>[
-                    const Text("Saved Tags"),
-                  ],
-                ),
+                Row(children: <Widget>[const Text("Saved Tags")]),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
@@ -279,21 +283,11 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                     OutlinedButton.icon(
                       onPressed: viewModel.savedTags.isEmpty
                           ? null
-                          : () => unawaited(
-                              viewModel.applyAllSavedTagsToSelectedMedia(),
-                            ),
-                      icon: const Icon(Icons.arrow_upward),
-                      label: const Text("to current"),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: viewModel.savedTags.isEmpty
-                          ? null
                           : () async {
                               final bool filteredOnly =
                                   viewModel.hasActiveItemFilters;
-                              final int changedItems = await viewModel
-                                  .applyAllSavedTagsToItems(
+                              final int count = viewModel
+                                  .countItemsNeedingSavedTagsApply(
                                     filteredOnly: filteredOnly,
                                   );
                               if (!context.mounted) {
@@ -302,6 +296,32 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                               final String targetLabel = filteredOnly
                                   ? "filtered"
                                   : "all";
+                              if (count == 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      "No $targetLabel items changed.",
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              final bool? confirmed =
+                                  await _showApplySavedTagsToManyConfirmDialog(
+                                    context,
+                                    fileCount: count,
+                                    tags: viewModel.savedTags,
+                                  );
+                              if (confirmed != true || !context.mounted) {
+                                return;
+                              }
+                              final int changedItems = await viewModel
+                                  .applyAllSavedTagsToItems(
+                                    filteredOnly: filteredOnly,
+                                  );
+                              if (!context.mounted) {
+                                return;
+                              }
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
@@ -314,8 +334,26 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                             },
                       icon: const Icon(Icons.arrow_back),
                       label: Text(
-                        "to ${viewModel.hasActiveItemFilters ? "filtered" : "all"}",
+                        viewModel.hasActiveItemFilters ? "filtered" : "all",
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: viewModel.savedTags.isEmpty
+                          ? null
+                          : () => unawaited(
+                              viewModel.applyAllSavedTagsToSelectedMedia(),
+                            ),
+                      icon: const Icon(Icons.arrow_upward),
+                      label: const Text("current"),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: viewModel.savedTags.isEmpty
+                          ? null
+                          : () => viewModel.mergeSavedTagsIntoCapture(),
+                      icon: const Icon(Icons.arrow_forward),
+                      label: const Text("capture"),
                     ),
                   ],
                 ),
@@ -350,7 +388,56 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
     unawaited(viewModel.addSavedTag(tag));
     controller.clear();
   }
+}
 
+Future<bool?> _showApplySavedTagsToManyConfirmDialog(
+  BuildContext context, {
+  required int fileCount,
+  required List<String> tags,
+}) async {
+  final List<String> sorted = sortTags(List<String>.from(tags));
+  return showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: const Text("Apply saved tags"),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                "Add tags to $fileCount file${fileCount == 1 ? "" : "s"}?",
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: sorted
+                    .map(
+                      (String tag) => Chip(
+                        label: Text(tag),
+                        backgroundColor: tagChipColor(context, tag),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text("Cancel"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text("Apply"),
+          ),
+        ],
+      );
+    },
+  );
 }
 
 Future<String?> _showRenameDisplayNameDialog(

@@ -1,9 +1,7 @@
 import "package:path/path.dart" as p;
 
 class Workspace {
-  const Workspace({
-    required this.rootPath,
-  });
+  const Workspace({required this.rootPath});
 
   final String rootPath;
 

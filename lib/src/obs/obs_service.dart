@@ -23,10 +23,7 @@ class ObsService {
       return;
     }
     _logger.info("Connecting to OBS at $url");
-    _client = await ObsWebSocket.connect(
-      url,
-      password: password,
-    );
+    _client = await ObsWebSocket.connect(url, password: password);
     _logger.info("Connected to OBS websocket.");
   }
 
