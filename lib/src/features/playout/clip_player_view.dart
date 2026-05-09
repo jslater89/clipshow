@@ -45,6 +45,7 @@ class ClipPlayerView extends StatefulWidget {
     this.autoPlay = false,
     this.showControls = false,
     this.seekStep = const Duration(seconds: 5),
+    this.clickTogglesPlayback = false,
     this.overlay,
     this.onPositionChanged,
     this.onPlayingChanged,
@@ -58,6 +59,7 @@ class ClipPlayerView extends StatefulWidget {
   final bool autoPlay;
   final bool showControls;
   final Duration seekStep;
+  final bool clickTogglesPlayback;
   final Widget? overlay;
   final ValueChanged<int>? onPositionChanged;
   final ValueChanged<bool>? onPlayingChanged;
@@ -382,7 +384,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: _togglePlayPause,
+                onTap: widget.clickTogglesPlayback ? _togglePlayPause : null,
                 child: FittedBox(
                   fit: BoxFit.contain,
                   child: SizedBox(

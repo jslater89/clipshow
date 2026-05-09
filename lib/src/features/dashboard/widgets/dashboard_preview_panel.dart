@@ -115,6 +115,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                               fit: StackFit.expand,
                               children: <Widget>[
                                 ClipPlayerView(
+                                  clickTogglesPlayback: true,
                                   controller: _previewPlayerController,
                                   filePath: workspaceRoot == null
                                       ? selectedItem.filePath
