@@ -169,6 +169,8 @@ You need a **workspace** open and an **enabled** OBS profile in Workspace settin
 
 While **Start Recording** is active, Clipshow tells OBS to use a **recording** directory **inside your workspace**—the path configured under Capture paths (§9), often a folder such as `recordings/`. OBS’s global “recording path” is temporarily pointed there so the growing file lands under your project. That folder is normally **ignored** by the library scanner so half-written takes do not show up as masters. When you **Stop And Save**, Clipshow stops the encoder, waits for the file on disk to settle, then **copies** the result into your **output** folder (§9—commonly the workspace root or another non-ignored location). Ingestion only indexes the copy; partial files stay quarantined in the recording tree. Afterward Clipshow **restores OBS’s recording directory** to whatever it was before this session and closes the capture WebSocket client, so your everyday OBS layout is not permanently changed.
 
+Capture also supports keyboard triggers: press **R** to start recording and **S** to stop and save.
+
 If you set an optional **capture** program scene name in settings, Clipshow switches OBS to that scene before starting the encoder so your sources and layout match how you want to record.
 
 ### 7.2 Tags and timing
