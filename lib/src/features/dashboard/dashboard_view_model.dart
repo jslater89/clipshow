@@ -23,8 +23,8 @@ import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/workspace/workspace_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_trash.dart";
 
-/// Preview / tagging vs OBS Capture pane on the dashboard right column.
-enum DashboardMediaPaneTab { preview, capture }
+/// Manage (library prep) vs OBS Capture pane on the dashboard right column.
+enum DashboardMediaPaneTab { manage, capture }
 
 class DashboardViewModel extends ChangeNotifier {
   static const int _savedTagApplyBatchSize = 100;
@@ -79,7 +79,7 @@ class DashboardViewModel extends ChangeNotifier {
   int? _clipsOfMasterFilterMediaId;
   WorkspaceSettingsBundle? _workspaceSettings;
   bool _dashboardPreviewPlaybackActive = false;
-  DashboardMediaPaneTab _mediaPaneTab = DashboardMediaPaneTab.preview;
+  DashboardMediaPaneTab _mediaPaneTab = DashboardMediaPaneTab.manage;
   final List<String> _captureTags = <String>[];
   bool _obsCaptureRecording = false;
   ObsCaptureService? _obsCaptureSession;

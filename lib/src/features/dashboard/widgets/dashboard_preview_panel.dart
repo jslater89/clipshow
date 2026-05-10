@@ -74,7 +74,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Text("Preview"),
+            const Text("Manage"),
             const SizedBox(height: 12),
             Expanded(
               child: GestureDetector(
@@ -420,7 +420,7 @@ class _PreviewHelpOverlay extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    "Preview Hotkeys",
+                    "Manage Hotkeys",
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 12),
@@ -452,7 +452,7 @@ class _PreviewHelpOverlay extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       "Nudge start and end with the -2.5s / -0.5s / +0.5s / "
-                      "+2.5s buttons below the preview (no keyboard shortcuts).",
+                      "+2.5s buttons below the player (no keyboard shortcuts).",
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                   ],

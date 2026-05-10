@@ -35,6 +35,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   double _lastDashboardScrollOffset = 0;
   Rect? _prePlayoutBounds;
+  bool _wasMaximizedBeforePlayout = false;
   PlayoutClip? _activeClip;
   Timer? _obsPingTimer;
   String? _obsConfigKey;
@@ -200,6 +201,16 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
         );
       }
     }
+    if (_wasMaximizedBeforePlayout) {
+      try {
+        await windowManager.maximize();
+      } catch (error) {
+        _logger.warning(
+          "Unable to re-maximize window after playout: $error",
+        );
+      }
+      _wasMaximizedBeforePlayout = false;
+    }
     setState(() {
       _activeClip = null;
     });
@@ -216,6 +227,18 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   }
 
   Future<void> _applyPlayoutWindowMode(String videoPath) async {
+    _wasMaximizedBeforePlayout = false;
+    try {
+      if (await windowManager.isMaximized()) {
+        _wasMaximizedBeforePlayout = true;
+        await windowManager.unmaximize();
+      }
+    } catch (error) {
+      _logger.warning(
+        "Unable to query or leave maximized state before playout sizing: $error",
+      );
+    }
+
     await windowManager.setAspectRatio(16 / 9);
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
 
@@ -386,7 +409,8 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     WebhookSceneSwitchConfig webhook, {
     required bool enteringPlayout,
   }) async {
-    final String sceneName = enteringPlayout ? "Video Scene" : "Face Scene";
+    // Fixed tokens for receivers; not tied to OBS Video/Face scene strings.
+    final String sceneToken = enteringPlayout ? "video" : "face";
     final Uri uri = Uri.parse(webhook.url);
     final HttpClient client = HttpClient();
     try {
@@ -397,7 +421,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
         final Uri requestUri = uri.replace(
           queryParameters: <String, String>{
             ...uri.queryParameters,
-            paramKey: sceneName,
+            paramKey: sceneToken,
           },
         );
         final HttpClientRequest request = await client.getUrl(requestUri);
@@ -415,11 +439,11 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
           charset: "utf-8",
         );
         request.write(
-          Uri(queryParameters: <String, String>{sceneKey: sceneName}).query,
+          Uri(queryParameters: <String, String>{sceneKey: sceneToken}).query,
         );
       } else {
         request.headers.contentType = ContentType.json;
-        request.write(jsonEncode(<String, String>{sceneKey: sceneName}));
+        request.write(jsonEncode(<String, String>{sceneKey: sceneToken}));
       }
       await request.close();
     } finally {

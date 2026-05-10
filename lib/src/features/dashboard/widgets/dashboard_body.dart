@@ -67,7 +67,7 @@ class _DashboardBodyState extends State<DashboardBody> {
             onPlayClip: widget.onPlayClip,
             onPreviewFocusRequested: _previewFocusNode.requestFocus,
             onMediaItemSelected: (MediaListItem item) {
-              viewModel.setMediaPaneTab(DashboardMediaPaneTab.preview);
+              viewModel.setMediaPaneTab(DashboardMediaPaneTab.manage);
               viewModel.selectItem(item);
               _previewFocusNode.requestFocus();
             },
@@ -87,8 +87,8 @@ class _DashboardBodyState extends State<DashboardBody> {
                     child: SegmentedButton<DashboardMediaPaneTab>(
                       segments: const <ButtonSegment<DashboardMediaPaneTab>>[
                         ButtonSegment<DashboardMediaPaneTab>(
-                          value: DashboardMediaPaneTab.preview,
-                          label: Text("Preview"),
+                          value: DashboardMediaPaneTab.manage,
+                          label: Text("Manage"),
                           icon: Icon(Icons.movie_outlined),
                         ),
                         ButtonSegment<DashboardMediaPaneTab>(

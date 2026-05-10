@@ -100,6 +100,13 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   /// already cleared [VideoPlayerValue.isCompleted] by moving the position.
   bool _reachedEnd = false;
 
+  /// Paused on the last frame of the file (no clip end mark) so we avoid the
+  /// platform EOS/stopped state where seeks are ignored until the controller is
+  /// recreated ([_restartPlaybackFrom]).
+  bool _naturalEndPauseApplied = false;
+
+  static const Duration _naturalEndPauseLead = Duration(milliseconds: 100);
+
   @override
   void initState() {
     super.initState();
@@ -128,6 +135,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     _logger.info("Reinitializing controller due to $reason");
     _targetSeekPosition = null;
     _reachedEnd = false;
+    _naturalEndPauseApplied = false;
     await _disposeController();
     await _initializeController();
   }
@@ -204,12 +212,54 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         }
         controller.seekTo(Duration(milliseconds: endMs));
       }
+    } else {
+      // Full file or open-ended clip: pause on the last frame *before* the
+      // decoder latches to EOS, same idea as marking out on a bounded clip.
+      final Duration duration = controller.value.duration;
+      if (duration > Duration.zero && !_naturalEndPauseApplied) {
+        final Duration position = controller.value.position;
+        Duration lead = _naturalEndPauseLead;
+        if (duration <= lead) {
+          lead = Duration.zero;
+        }
+        final Duration threshold = duration - lead;
+        final bool shouldFreeze =
+            controller.value.isCompleted ||
+            (controller.value.isPlaying && position >= threshold);
+        if (shouldFreeze) {
+          _naturalEndPauseApplied = true;
+          unawaited(_freezeOnNaturalEnd(duration));
+        }
+      }
     }
     widget.onPositionChanged?.call(controller.value.position.inMilliseconds);
     final bool isPlaying = controller.value.isPlaying;
     if (isPlaying != _lastIsPlaying) {
       _lastIsPlaying = isPlaying;
       widget.onPlayingChanged?.call(isPlaying);
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _freezeOnNaturalEnd(Duration duration) async {
+    final VideoPlayerController? controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+    try {
+      if (controller.value.isPlaying) {
+        await controller.pause();
+      }
+      await controller.seekTo(duration);
+      _reachedEnd = true;
+    } catch (error, stackTrace) {
+      _logger.warning(
+        "freezeOnNaturalEnd failed: $error",
+        error,
+        stackTrace,
+      );
     }
     if (mounted) {
       setState(() {});
@@ -265,6 +315,8 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         await newController.dispose();
         return;
       }
+      _naturalEndPauseApplied = false;
+      _reachedEnd = false;
       // Swap: detach the old listener before reassigning _controller so that
       // _handlePlaybackProgress never sees a mismatched controller.
       final VideoPlayerController? old = _controller;
@@ -291,6 +343,8 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     if (controller == null || !controller.value.isInitialized) {
       return;
     }
+    _naturalEndPauseApplied = false;
+    _reachedEnd = false;
 
     final Duration duration = controller.value.duration;
     final Duration clipStart = Duration(milliseconds: widget.startTimeMs);
@@ -317,6 +371,8 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     if (controller == null || !controller.value.isInitialized) {
       return;
     }
+    _naturalEndPauseApplied = false;
+    _reachedEnd = false;
     final Duration target = Duration(milliseconds: widget.startTimeMs);
     await controller.seekTo(target);
     _targetSeekPosition = target;
@@ -327,6 +383,8 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     if (controller == null || !controller.value.isInitialized) {
       return;
     }
+    _naturalEndPauseApplied = false;
+    _reachedEnd = false;
     final int? clipEndMs = widget.endTimeMs;
     if (clipEndMs != null) {
       await controller.seekTo(Duration(milliseconds: clipEndMs));
