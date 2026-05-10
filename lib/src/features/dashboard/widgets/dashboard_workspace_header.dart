@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
+import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 
 class DashboardWorkspaceHeader extends StatelessWidget {
@@ -18,6 +19,9 @@ class DashboardWorkspaceHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final DashboardViewModel viewModel = context.watch<DashboardViewModel>();
+    final double gap8 = scaleDimension(context, 8);
+    final double gap12 = scaleDimension(context, 12);
+    final double antennaIconSize = scaleDimension(context, 20);
     return Row(
       children: <Widget>[
         Tooltip(
@@ -33,7 +37,7 @@ class DashboardWorkspaceHeader extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        SizedBox(width: gap8),
         Expanded(
           child: Text(
             viewModel.workspacePath == null
@@ -43,7 +47,7 @@ class DashboardWorkspaceHeader extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        const SizedBox(width: 12),
+        SizedBox(width: gap12),
         if (obsConnectionHealthy != null)
           Tooltip(
             message: obsConnectionHealthy!
@@ -51,11 +55,11 @@ class DashboardWorkspaceHeader extends StatelessWidget {
                 : "OBS: disconnected (retrying)${obsLastSuccessfulPingHms == null ? "" : " (last success ${obsLastSuccessfulPingHms!})"}",
             child: Icon(
               Icons.settings_input_antenna,
-              size: 20,
+              size: antennaIconSize,
               color: obsConnectionHealthy! ? Colors.green : Colors.red,
             ),
           ),
-        if (obsConnectionHealthy != null) const SizedBox(width: 8),
+        if (obsConnectionHealthy != null) SizedBox(width: gap8),
         Tooltip(
           message: "Workspace settings",
           child: Focus(

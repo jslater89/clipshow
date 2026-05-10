@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
+import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_file_list_panel.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_capture_panel.dart";
@@ -26,14 +27,43 @@ class DashboardBody extends StatefulWidget {
 class _DashboardBodyState extends State<DashboardBody> {
   static const double _minPreviewToTagRatio = 0.5; // 1:2
   static const double _maxPreviewToTagRatio = 2.0; // 2:1
-  static const int _tagFlexBase = 100;
-  static const double _resizeHandleHeight = 20.0;
+  /// Default preview:tags proportion before the user drags (preview height ratio).
+  static const double _initialPreviewToTagRatio = 2.0;
+  static const double _resizeHandleLogicalHeight = 20;
+  static const double _resizeHandleIconLogicalSize = 18;
 
   final GlobalKey _splitPaneKey = GlobalKey();
   final FocusNode _previewFocusNode = FocusNode(
     debugLabel: "DashboardPreviewFocus",
   );
-  double _previewToTagRatio = 2.0;
+  /// Drag-set preview pane height; null means use [_defaultPreviewHeight].
+  double? _previewPanelHeightPx;
+  double? _splitDragStartGlobalY;
+  double? _splitDragStartPreviewHeight;
+
+  double _previewHeightMin(double panelBudget) =>
+      panelBudget *
+      _minPreviewToTagRatio /
+      (_minPreviewToTagRatio + 1);
+
+  double _previewHeightMax(double panelBudget) =>
+      panelBudget *
+      _maxPreviewToTagRatio /
+      (_maxPreviewToTagRatio + 1);
+
+  double _defaultPreviewHeight(double panelBudget) =>
+      panelBudget *
+      _initialPreviewToTagRatio /
+      (_initialPreviewToTagRatio + 1);
+
+  double _resolvedPreviewHeight(double panelBudget) {
+    final double raw =
+        _previewPanelHeightPx ?? _defaultPreviewHeight(panelBudget);
+    return raw.clamp(
+      _previewHeightMin(panelBudget),
+      _previewHeightMax(panelBudget),
+    );
+  }
 
   @override
   void dispose() {
@@ -53,8 +83,8 @@ class _DashboardBodyState extends State<DashboardBody> {
       );
     }
     final List<MediaListItem> visibleMediaItems = viewModel.visibleItems;
-    final int previewFlex = (_previewToTagRatio * _tagFlexBase).round();
-    final int tagFlex = _tagFlexBase;
+    final double paneGap = scaleDimension(context, 16);
+    final double tabBarBottomPad = scaleDimension(context, 8);
 
     return Row(
       children: <Widget>[
@@ -73,48 +103,68 @@ class _DashboardBodyState extends State<DashboardBody> {
             },
           ),
         ),
-        const SizedBox(width: 16),
+        SizedBox(width: paneGap),
         Expanded(
           flex: 6,
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              return Column(
-                key: _splitPaneKey,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: SegmentedButton<DashboardMediaPaneTab>(
-                      segments: const <ButtonSegment<DashboardMediaPaneTab>>[
-                        ButtonSegment<DashboardMediaPaneTab>(
-                          value: DashboardMediaPaneTab.manage,
-                          label: Text("Manage"),
-                          icon: Icon(Icons.movie_outlined),
-                        ),
-                        ButtonSegment<DashboardMediaPaneTab>(
-                          value: DashboardMediaPaneTab.capture,
-                          label: Text("Capture"),
-                          icon: Icon(Icons.videocam_outlined),
-                        ),
-                      ],
-                      selected: <DashboardMediaPaneTab>{viewModel.mediaPaneTab},
-                      onSelectionChanged:
-                          (Set<DashboardMediaPaneTab> selected) {
-                            if (selected.isEmpty) {
-                              return;
-                            }
-                            viewModel.setMediaPaneTab(selected.first);
-                          },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Padding(
+                padding: EdgeInsets.only(bottom: tabBarBottomPad),
+                child: SegmentedButton<DashboardMediaPaneTab>(
+                  segments: const <ButtonSegment<DashboardMediaPaneTab>>[
+                    ButtonSegment<DashboardMediaPaneTab>(
+                      value: DashboardMediaPaneTab.manage,
+                      label: Text("Manage"),
+                      icon: Icon(Icons.movie_outlined),
                     ),
-                  ),
-                  Expanded(
-                    child:
-                        viewModel.mediaPaneTab == DashboardMediaPaneTab.capture
-                        ? const DashboardCapturePanel()
-                        : Column(
+                    ButtonSegment<DashboardMediaPaneTab>(
+                      value: DashboardMediaPaneTab.capture,
+                      label: Text("Capture"),
+                      icon: Icon(Icons.videocam_outlined),
+                    ),
+                  ],
+                  selected: <DashboardMediaPaneTab>{viewModel.mediaPaneTab},
+                  onSelectionChanged: (Set<DashboardMediaPaneTab> selected) {
+                    if (selected.isEmpty) {
+                      return;
+                    }
+                    viewModel.setMediaPaneTab(selected.first);
+                  },
+                ),
+              ),
+              Expanded(
+                child:
+                    viewModel.mediaPaneTab == DashboardMediaPaneTab.capture
+                    ? const DashboardCapturePanel()
+                    : LayoutBuilder(
+                        builder:
+                            (BuildContext context, BoxConstraints constraints) {
+                          final double handleH = scaleDimension(
+                            context,
+                            _resizeHandleLogicalHeight,
+                          );
+                          final double panelBudget =
+                              constraints.maxHeight - handleH;
+                          if (panelBudget <= 1) {
+                            return Column(
+                              key: _splitPaneKey,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: <Widget>[
+                                const SizedBox.shrink(),
+                                _buildResizeHandle(context),
+                                const Expanded(child: SizedBox.shrink()),
+                              ],
+                            );
+                          }
+                          final double previewHeight =
+                              _resolvedPreviewHeight(panelBudget);
+                          return Column(
+                            key: _splitPaneKey,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: <Widget>[
-                              Expanded(
-                                flex: previewFlex,
+                              SizedBox(
+                                height: previewHeight,
                                 child: DashboardPreviewPanel(
                                   onPlayClip: widget.onPlayClip,
                                   focusNode: _previewFocusNode,
@@ -122,18 +172,17 @@ class _DashboardBodyState extends State<DashboardBody> {
                               ),
                               _buildResizeHandle(context),
                               Expanded(
-                                flex: tagFlex,
                                 child: DashboardTagPanel(
                                   onPreviewFocusRequested:
                                       _previewFocusNode.requestFocus,
                                 ),
                               ),
                             ],
-                          ),
-                  ),
-                ],
-              );
-            },
+                          );
+                        },
+                      ),
+              ),
+            ],
           ),
         ),
       ],
@@ -142,11 +191,15 @@ class _DashboardBodyState extends State<DashboardBody> {
 
   Widget _buildResizeHandle(BuildContext context) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
+    final double handleHeight =
+        scaleDimension(context, _resizeHandleLogicalHeight);
+    final double iconSize =
+        scaleDimension(context, _resizeHandleIconLogicalSize);
     return MouseRegion(
       cursor: SystemMouseCursors.resizeUpDown,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onVerticalDragUpdate: (DragUpdateDetails details) {
+        onVerticalDragStart: (DragStartDetails details) {
           final BuildContext? splitPaneContext = _splitPaneKey.currentContext;
           if (splitPaneContext == null) {
             return;
@@ -156,31 +209,65 @@ class _DashboardBodyState extends State<DashboardBody> {
           if (renderObject is! RenderBox) {
             return;
           }
-          final double availableHeight =
-              renderObject.size.height - _resizeHandleHeight;
+          final double handle =
+              scaleDimension(splitPaneContext, _resizeHandleLogicalHeight);
+          final double availableHeight = renderObject.size.height - handle;
           if (availableHeight <= 1) {
             return;
           }
-          final double localY = renderObject
-              .globalToLocal(details.globalPosition)
-              .dy;
-          final double nextPreviewHeight = (localY - (_resizeHandleHeight / 2))
-              .clamp(0.0, availableHeight);
-          final double nextTagHeight = (availableHeight - nextPreviewHeight)
-              .clamp(1.0, availableHeight);
+          _splitDragStartGlobalY = details.globalPosition.dy;
+          _splitDragStartPreviewHeight =
+              _resolvedPreviewHeight(availableHeight);
+        },
+        onVerticalDragUpdate: (DragUpdateDetails details) {
+          if (_splitDragStartGlobalY == null ||
+              _splitDragStartPreviewHeight == null) {
+            return;
+          }
+          final BuildContext? splitPaneContext = _splitPaneKey.currentContext;
+          if (splitPaneContext == null) {
+            return;
+          }
+          final RenderObject? renderObject = splitPaneContext
+              .findRenderObject();
+          if (renderObject is! RenderBox) {
+            return;
+          }
+          final double handle =
+              scaleDimension(splitPaneContext, _resizeHandleLogicalHeight);
+          final double availableHeight = renderObject.size.height - handle;
+          if (availableHeight <= 1) {
+            return;
+          }
+          final double deltaY =
+              details.globalPosition.dy - _splitDragStartGlobalY!;
+          final double previewMin =
+              _previewHeightMin(availableHeight);
+          final double previewMax =
+              _previewHeightMax(availableHeight);
+          final double nextPreviewHeight =
+              (_splitDragStartPreviewHeight! + deltaY).clamp(
+            previewMin,
+            previewMax,
+          );
           setState(() {
-            _previewToTagRatio = (nextPreviewHeight / nextTagHeight).clamp(
-              _minPreviewToTagRatio,
-              _maxPreviewToTagRatio,
-            );
+            _previewPanelHeightPx = nextPreviewHeight;
           });
         },
+        onVerticalDragEnd: (_) {
+          _splitDragStartGlobalY = null;
+          _splitDragStartPreviewHeight = null;
+        },
+        onVerticalDragCancel: () {
+          _splitDragStartGlobalY = null;
+          _splitDragStartPreviewHeight = null;
+        },
         child: SizedBox(
-          height: _resizeHandleHeight,
+          height: handleHeight,
           child: Center(
             child: Icon(
               Icons.drag_handle,
-              size: 18,
+              size: iconSize,
               color: colorScheme.onSurfaceVariant,
             ),
           ),

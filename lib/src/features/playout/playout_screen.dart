@@ -3,6 +3,7 @@ import "dart:async";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 
+import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/features/playout/playout_hotkeys_layer.dart";
@@ -72,6 +73,7 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final double edgeInset = scaleDimension(context, 16);
     return Scaffold(
       backgroundColor: Colors.black,
       body: PlayoutHotkeysLayer(
@@ -103,15 +105,15 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
               child: TelestratorCanvas(controller: _telestratorController),
             ),
             Positioned(
-              left: 16,
-              bottom: 16,
+              left: edgeInset,
+              bottom: edgeInset,
               child: _TelestratorStatusHud(controller: _telestratorController),
             ),
             if (_showEscapeHint && !_showHelpOverlay)
-              const Positioned(
-                right: 16,
-                bottom: 16,
-                child: Text(
+              Positioned(
+                right: edgeInset,
+                bottom: edgeInset,
+                child: const Text(
                   "Press Escape to return",
                   style: TextStyle(color: Colors.white70),
                 ),
@@ -217,16 +219,21 @@ class _TelestratorStatusHudState extends State<_TelestratorStatusHud> {
 
   @override
   Widget build(BuildContext context) {
+    final double hudPadH = scaleDimension(context, 10);
+    final double hudPadV = scaleDimension(context, 8);
+    final double hudRadius = scaleDimension(context, 8);
+    final double hudGap = scaleDimension(context, 8);
+    final double swatchSize = scaleDimension(context, 12);
     return AnimatedOpacity(
       opacity: _isVisible ? 1 : 0,
       duration: _fadeDuration,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(hudRadius),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: EdgeInsets.symmetric(horizontal: hudPadH, vertical: hudPadV),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -234,16 +241,16 @@ class _TelestratorStatusHudState extends State<_TelestratorStatusHud> {
                 "Telestrator ${widget.controller.isEnabled ? "On" : "Off"}",
                 style: const TextStyle(color: Colors.white70),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: hudGap),
               Container(
-                width: 12,
-                height: 12,
+                width: swatchSize,
+                height: swatchSize,
                 decoration: BoxDecoration(
                   color: widget.controller.activeColor,
                   shape: BoxShape.circle,
                 ),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: hudGap),
               Text(
                 "Brush ${widget.controller.brushSize.toStringAsFixed(0)}",
                 style: const TextStyle(color: Colors.white70),
@@ -262,16 +269,20 @@ class _PlayoutHelpOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
+    final double pad20 = scaleDimension(context, 20);
+    final double gap12 = scaleDimension(context, 12);
+    final double gap10 = scaleDimension(context, 10);
+    final double maxHelpWidth = scaleDimension(context, 720);
     return Positioned.fill(
       child: Container(
         color: Colors.black.withValues(alpha: 0.65),
         alignment: Alignment.center,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
+          constraints: BoxConstraints(maxWidth: maxHelpWidth),
           child: Card(
             color: colorScheme.surface.withValues(alpha: 0.95),
             child: Padding(
-              padding: const EdgeInsets.all(20),
+              padding: EdgeInsets.all(pad20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -280,18 +291,18 @@ class _PlayoutHelpOverlay extends StatelessWidget {
                     "Playout Hotkeys",
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: gap12),
                   _hotkeySection("Playback", <String, String>{
                     "Space": "Play/Pause",
                   }),
-                  const SizedBox(height: 10),
+                  SizedBox(height: gap10),
                   _hotkeySection("Seek", <String, String>{
                     "Left / Right": "Seek 1s",
                     "Ctrl + Left / Right": "Seek 5s",
                     "Shift + Left / Right": "Seek 15s",
                     "Alt + Left / Right": "Seek 0.1s",
                   }),
-                  const SizedBox(height: 10),
+                  SizedBox(height: gap10),
                   _hotkeySection("Telestrator", <String, String>{
                     "T": "Toggle Telestrator",
                     "C": "Clear",
@@ -299,7 +310,7 @@ class _PlayoutHelpOverlay extends StatelessWidget {
                     "1 / 2 / 3": "Set Color",
                     "[ / ]": "Brush Size Down/Up",
                   }),
-                  const SizedBox(height: 10),
+                  SizedBox(height: gap10),
                   _hotkeySection("Exit and Help", <String, String>{
                     "Esc": "Exit Playout",
                     "H": "Toggle This Help",
@@ -316,18 +327,21 @@ class _PlayoutHelpOverlay extends StatelessWidget {
   Widget _hotkeySection(String title, Map<String, String> entries) {
     return Builder(
       builder: (BuildContext context) {
+        final double gap6 = scaleDimension(context, 6);
+        final double rowVertPad = scaleDimension(context, 2);
+        final double keyColWidth = scaleDimension(context, 210);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(title, style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 6),
+            SizedBox(height: gap6),
             ...entries.entries.map(
               (MapEntry<String, String> item) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
+                padding: EdgeInsets.symmetric(vertical: rowVertPad),
                 child: Row(
                   children: <Widget>[
                     SizedBox(
-                      width: 210,
+                      width: keyColWidth,
                       child: Text(
                         item.key,
                         style: TextStyle(

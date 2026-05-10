@@ -3,6 +3,7 @@ import "dart:async";
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
+import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_preview_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
@@ -30,10 +31,6 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
   final ClipPlayerController _previewPlayerController = ClipPlayerController();
   DashboardViewModel? _viewModel;
   bool _showPreviewHelp = false;
-  static const EdgeInsets _nudgeButtonPadding = EdgeInsets.symmetric(
-    horizontal: 8,
-    vertical: 4,
-  );
 
   void _togglePreviewHelp() {
     setState(() {
@@ -68,20 +65,28 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
         : selectedItem.mediaIssue;
     final bool isClipSelection =
         selectedItem != null && selectedItem.type == MediaListItemType.clip;
+    final double pad12 = scaleDimension(context, 12);
+    final double gap12 = scaleDimension(context, 12);
+    final double gap8 = scaleDimension(context, 8);
+    final double radius8 = scaleDimension(context, 8);
+    final EdgeInsets nudgeButtonPadding = EdgeInsets.symmetric(
+      horizontal: scaleDimension(context, 8),
+      vertical: scaleDimension(context, 4),
+    );
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: EdgeInsets.all(pad12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             const Text("Manage"),
-            const SizedBox(height: 12),
+            SizedBox(height: gap12),
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onTap: () => widget.focusNode.requestFocus(),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(radius8),
                   child: Container(
                     color: Colors.black,
                     child: selectedItem == null
@@ -153,9 +158,9 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: gap12),
             Wrap(
-              spacing: 8,
+              spacing: gap8,
               children: <Widget>[
                 if (!isClipSelection) ...<Widget>[
                   OutlinedButton(
@@ -186,13 +191,15 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   ),
                 ],
                 if (isClipSelection) ...<Widget>[
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
-                    child: Text("Nudge Start:"),
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: scaleDimension(context, 6),
+                    ),
+                    child: const Text("Nudge Start:"),
                   ),
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(
-                      padding: _nudgeButtonPadding,
+                      padding: nudgeButtonPadding,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                     ),
@@ -202,7 +209,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   ),
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(
-                      padding: _nudgeButtonPadding,
+                      padding: nudgeButtonPadding,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                     ),
@@ -212,7 +219,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   ),
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(
-                      padding: _nudgeButtonPadding,
+                      padding: nudgeButtonPadding,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                     ),
@@ -222,7 +229,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   ),
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(
-                      padding: _nudgeButtonPadding,
+                      padding: nudgeButtonPadding,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                     ),
@@ -230,14 +237,16 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                         unawaited(viewModel.nudgeSelectedClipStart(2500)),
                     child: const Text("+2.5s"),
                   ),
-                  const SizedBox(width: 12),
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
-                    child: Text("End:"),
+                  SizedBox(width: pad12),
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: scaleDimension(context, 6),
+                    ),
+                    child: const Text("End:"),
                   ),
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(
-                      padding: _nudgeButtonPadding,
+                      padding: nudgeButtonPadding,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                     ),
@@ -247,7 +256,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   ),
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(
-                      padding: _nudgeButtonPadding,
+                      padding: nudgeButtonPadding,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                     ),
@@ -257,7 +266,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   ),
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(
-                      padding: _nudgeButtonPadding,
+                      padding: nudgeButtonPadding,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                     ),
@@ -267,7 +276,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   ),
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(
-                      padding: _nudgeButtonPadding,
+                      padding: nudgeButtonPadding,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                     ),
@@ -405,16 +414,21 @@ class _PreviewHelpOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
+    final double pad20 = scaleDimension(context, 20);
+    final double gap12 = scaleDimension(context, 12);
+    final double gap10 = scaleDimension(context, 10);
+    final double gap6 = scaleDimension(context, 6);
+    final double maxHelpWidth = scaleDimension(context, 560);
     return Positioned.fill(
       child: Container(
         color: Colors.black.withValues(alpha: 0.65),
         alignment: Alignment.center,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
+          constraints: BoxConstraints(maxWidth: maxHelpWidth),
           child: Card(
             color: colorScheme.surface.withValues(alpha: 0.96),
             child: Padding(
-              padding: const EdgeInsets.all(20),
+              padding: EdgeInsets.all(pad20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -423,11 +437,11 @@ class _PreviewHelpOverlay extends StatelessWidget {
                     "Manage Hotkeys",
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: gap12),
                   _previewHotkeySection("Playback", <String, String>{
                     "Space": "Play/Pause",
                   }),
-                  const SizedBox(height: 10),
+                  SizedBox(height: gap10),
                   _previewHotkeySection("Seek", <String, String>{
                     "Left / Right": "Seek 1s",
                     "Ctrl + Left / Right": "Seek 5s",
@@ -436,7 +450,7 @@ class _PreviewHelpOverlay extends StatelessWidget {
                     "Home / End": "Jump To Start / End",
                   }),
                   if (showMarkHotkeys) ...<Widget>[
-                    const SizedBox(height: 10),
+                    SizedBox(height: gap10),
                     _previewHotkeySection("Mark Clip", <String, String>{
                       "I": "Mark In",
                       "O": "Mark Out",
@@ -444,19 +458,19 @@ class _PreviewHelpOverlay extends StatelessWidget {
                     }),
                   ],
                   if (isClipPreview) ...<Widget>[
-                    const SizedBox(height: 10),
+                    SizedBox(height: gap10),
                     Text(
                       "Clip Range",
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
-                    const SizedBox(height: 6),
+                    SizedBox(height: gap6),
                     Text(
                       "Nudge start and end with the -2.5s / -0.5s / +0.5s / "
                       "+2.5s buttons below the player (no keyboard shortcuts).",
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                   ],
-                  const SizedBox(height: 10),
+                  SizedBox(height: gap10),
                   _previewHotkeySection("Help", <String, String>{
                     "H": "Toggle This Help",
                   }),
@@ -472,18 +486,21 @@ class _PreviewHelpOverlay extends StatelessWidget {
   Widget _previewHotkeySection(String title, Map<String, String> entries) {
     return Builder(
       builder: (BuildContext context) {
+        final double gap6 = scaleDimension(context, 6);
+        final double rowVertPad = scaleDimension(context, 2);
+        final double keyColWidth = scaleDimension(context, 200);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(title, style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 6),
+            SizedBox(height: gap6),
             ...entries.entries.map(
               (MapEntry<String, String> item) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
+                padding: EdgeInsets.symmetric(vertical: rowVertPad),
                 child: Row(
                   children: <Widget>[
                     SizedBox(
-                      width: 200,
+                      width: keyColWidth,
                       child: Text(
                         item.key,
                         style: TextStyle(
@@ -512,6 +529,9 @@ class _PreviewIssueMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final double pad24 = scaleDimension(context, 24);
+    final double gap16 = scaleDimension(context, 16);
+    final double issueIconSize = scaleDimension(context, 48);
     final IconData icon = issue == MediaIssue.empty
         ? Icons.insert_drive_file_outlined
         : Icons.close;
@@ -521,12 +541,12 @@ class _PreviewIssueMessage extends StatelessWidget {
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(pad24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(icon, color: Colors.white54, size: 48),
-            const SizedBox(height: 16),
+            Icon(icon, color: Colors.white54, size: issueIconSize),
+            SizedBox(height: gap16),
             Text(
               message,
               textAlign: TextAlign.center,
@@ -535,7 +555,7 @@ class _PreviewIssueMessage extends StatelessWidget {
             if (issue == MediaIssue.unreadable &&
                 detail != null &&
                 detail!.trim().isNotEmpty) ...<Widget>[
-              const SizedBox(height: 16),
+              SizedBox(height: gap16),
               SelectableText(
                 detail!.trim(),
                 style: const TextStyle(
