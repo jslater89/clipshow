@@ -3,6 +3,7 @@ import "dart:async";
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
+import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
@@ -32,20 +33,29 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
         : sortTags(viewModel.tagsForItem(selectedItem).toList());
     final bool selectedHasUserTags =
         selectedTags.any((String t) => !isSystemTag(t));
+    final double pad12 = scaleDimension(context, 12);
+    final double gap12 = scaleDimension(context, 12);
+    final double gap10 = scaleDimension(context, 10);
+    final double gap8 = scaleDimension(context, 8);
+    final double emptyStateVertPad = scaleDimension(context, 24);
+    final double editIconSize = scaleDimension(context, 16);
+    final double fieldMaxWidth = scaleDimension(context, 400);
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: EdgeInsets.all(pad12),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               const Text("Tags"),
-              const SizedBox(height: 12),
+              SizedBox(height: gap12),
               if (selectedItem == null)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: Text("Select a file to manage tags.")),
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: emptyStateVertPad),
+                  child: const Center(
+                    child: Text("Select a file to manage tags."),
+                  ),
                 )
               else ...<Widget>[
                 Row(
@@ -60,7 +70,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: gap8),
                     TextButton.icon(
                       onPressed: () async {
                         final String? updated =
@@ -81,7 +91,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                           override,
                         );
                       },
-                      icon: const Icon(Icons.edit, size: 16),
+                      icon: Icon(Icons.edit, size: editIconSize),
                       label: const Text("Edit"),
                     ),
                     TextButton(
@@ -98,7 +108,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
+                SizedBox(height: gap10),
                 if (selectedItem.type == MediaListItemType.clip)
                   Align(
                     alignment: Alignment.centerLeft,
@@ -137,10 +147,10 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                               selectedItem.master!.id,
                             ) >
                             0))
-                  const SizedBox(height: 10),
+                  SizedBox(height: gap10),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: gap8,
+                  runSpacing: gap8,
                   children: selectedTags.map((String tag) {
                     final bool isSystemTag =
                         tag == MediaRepository.masterTag ||
@@ -157,11 +167,11 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                     );
                   }).toList(),
                 ),
-                const SizedBox(height: 10),
+                SizedBox(height: gap10),
                 Row(
                   children: <Widget>[
                     ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 400),
+                      constraints: BoxConstraints(maxWidth: fieldMaxWidth),
                       child: AdaptiveAutocomplete<String>(
                         optionsBuilder: (TextEditingValue textEditingValue) {
                           return viewModel.tagSuggestionsFor(
@@ -204,7 +214,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                             },
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: gap8),
                     FilledButton(
                       onPressed: () {
                         final TextEditingController? controller =
@@ -216,7 +226,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                       },
                       child: const Text("Add"),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: gap8),
                     OutlinedButton.icon(
                       onPressed: !selectedHasUserTags
                           ? null
@@ -226,13 +236,13 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                SizedBox(height: gap12),
                 const Divider(),
                 Row(children: <Widget>[const Text("Saved Tags")]),
-                const SizedBox(height: 8),
+                SizedBox(height: gap8),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: gap8,
+                  runSpacing: gap8,
                   children: viewModel.savedTags
                       .map(
                         (String tag) => InputChip(
@@ -243,11 +253,11 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                       )
                       .toList(),
                 ),
-                const SizedBox(height: 10),
+                SizedBox(height: gap10),
                 Row(
                   children: <Widget>[
                     ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 400),
+                      constraints: BoxConstraints(maxWidth: fieldMaxWidth),
                       child: AdaptiveAutocomplete<String>(
                         optionsBuilder: (TextEditingValue textEditingValue) {
                           return viewModel.tagSuggestionsFor(
@@ -294,7 +304,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                             },
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: gap8),
                     FilledButton(
                       onPressed: () {
                         final TextEditingController? controller =
@@ -306,7 +316,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                       },
                       child: const Text("Add"),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: gap8),
                     OutlinedButton.icon(
                       onPressed: viewModel.savedTags.isEmpty
                           ? null
@@ -364,7 +374,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                         viewModel.hasActiveItemFilters ? "filtered" : "all",
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: gap8),
                     OutlinedButton.icon(
                       onPressed: viewModel.savedTags.isEmpty
                           ? null
@@ -374,7 +384,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                       icon: const Icon(Icons.arrow_upward),
                       label: const Text("current"),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: gap8),
                     OutlinedButton.icon(
                       onPressed: viewModel.savedTags.isEmpty
                           ? null
@@ -436,10 +446,10 @@ Future<bool?> _showApplySavedTagsToManyConfirmDialog(
               Text(
                 "Add tags to $fileCount file${fileCount == 1 ? "" : "s"}?",
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: scaleDimension(context, 12)),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: scaleDimension(context, 8),
+                runSpacing: scaleDimension(context, 8),
                 children: sorted
                     .map(
                       (String tag) => Chip(

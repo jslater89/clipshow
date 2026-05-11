@@ -3,6 +3,7 @@ import "dart:async";
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
+import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
@@ -94,13 +95,13 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     return AlertDialog(
       title: const Text("Workspace Settings"),
       content: SizedBox(
-        width: 900,
+        width: scaleDimension(context, 900),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               _SectionTitle("Telestrator defaults", theme),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -120,7 +121,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       }),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   Expanded(
                     child: _colorPickerButton(
                       label: "Color 2",
@@ -138,7 +139,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       }),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   Expanded(
                     child: _colorPickerButton(
                       label: "Color 3",
@@ -157,7 +158,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -181,11 +182,11 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       }),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   Text(
                     "Brush ${_draftTelestratorDefaults.brushSize.toStringAsFixed(0)}",
                   ),
-                  const SizedBox(width: 16),
+                  SizedBox(width: scaleDimension(context, 16)),
                   Row(
                     children: <Widget>[
                       const Text("Default On"),
@@ -208,7 +209,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               _AsyncFilledButton(
                 label: "Apply Telestrator Defaults",
                 onPressed: () async {
@@ -217,9 +218,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   );
                 },
               ),
-              const Divider(height: 24),
+              Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Decoder config", theme),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -247,7 +248,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       },
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: scaleDimension(context, 12)),
                   Expanded(
                     child: DropdownButtonFormField<FvpLogVerbosity>(
                       initialValue: viewModel.fvpLogVerbosity,
@@ -274,7 +275,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -314,7 +315,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   Expanded(
                     child: _cardWithTitle(
                       title: "Available",
@@ -339,7 +340,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               _AsyncFilledButton(
                 label: "Apply Decoder Settings",
                 onPressed: () async {
@@ -348,14 +349,14 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   );
                 },
               ),
-              const SizedBox(height: 6),
+              SizedBox(height: scaleDimension(context, 6)),
               Text(
                 "Future: decoder options list should be populated by platform/capability.",
                 style: theme.textTheme.bodySmall,
               ),
-              const Divider(height: 24),
+              Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Ingestion & preview", theme),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               SwitchListTile(
                 title: const Text("Pause Background Ingest During Manage Playback"),
                 subtitle: Text(
@@ -366,17 +367,19 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 onChanged: (bool value) =>
                     unawaited(viewModel.savePauseIngestScanDuringPreview(value)),
               ),
-              const Divider(height: 24),
+              Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Scene switch settings", theme),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               _cardWithTitle(
                 title: "Profiles",
                 child: Column(
                   children: <Widget>[
                     if (!hasAnySceneSwitchProfile)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Center(child: Text("None configured")),
+                      Padding(
+                        padding: EdgeInsets.symmetric(
+                          vertical: scaleDimension(context, 16),
+                        ),
+                        child: const Center(child: Text("None configured")),
                       ),
                     if (viewModel.obsSceneSwitchConfig != null)
                       ListTile(
@@ -439,9 +442,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: scaleDimension(context, 16)),
               Text("OBS", style: theme.textTheme.titleMedium),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -453,9 +456,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   SizedBox(
-                    width: 120,
+                    width: scaleDimension(context, 120),
                     child: TextField(
                       controller: _obsPortController,
                       keyboardType: TextInputType.number,
@@ -467,7 +470,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -479,7 +482,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   Expanded(
                     child: TextField(
                       controller: _obsVideoSceneController,
@@ -489,7 +492,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   Expanded(
                     child: TextField(
                       controller: _obsFaceSceneController,
@@ -501,7 +504,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               TextField(
                 controller: _obsCaptureSceneController,
                 decoration: const InputDecoration(
@@ -511,7 +514,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   border: OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               _AsyncFilledButton(
                 label: "Save OBS",
                 onPressed: () async {
@@ -530,9 +533,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   );
                 },
               ),
-              const SizedBox(height: 24),
+              SizedBox(height: scaleDimension(context, 24)),
               Text("OBS Capture Paths", style: theme.textTheme.titleMedium),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -546,7 +549,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   Expanded(
                     child: TextField(
                       controller: _captureOutputDirController,
@@ -560,7 +563,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               _AsyncFilledButton(
                 label: "Save Capture Paths",
                 onPressed: () async {
@@ -574,9 +577,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   );
                 },
               ),
-              const SizedBox(height: 24),
+              SizedBox(height: scaleDimension(context, 24)),
               Text("Webhooks", style: theme.textTheme.titleMedium),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -588,7 +591,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   Expanded(
                     flex: 2,
                     child: TextField(
@@ -601,7 +604,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -630,7 +633,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   if (_newWebhookMethod == WebhookMethod.get)
                     Expanded(
                       child: TextField(
@@ -668,7 +671,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: scaleDimension(context, 8)),
                     Expanded(
                       child: TextField(
                         controller: _webhookSceneKeyController,
@@ -681,7 +684,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ],
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               _AsyncFilledButton(
                 label: "Add Webhook",
                 onPressed: () async {
@@ -706,9 +709,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   _webhookUrlController.clear();
                 },
               ),
-              const Divider(height: 24),
+              Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Ignored folders", theme),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -720,7 +723,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: scaleDimension(context, 8)),
                   _AsyncFilledButton(
                     label: "Add",
                     onPressed: () async {
@@ -734,10 +737,10 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: scaleDimension(context, 8),
+                runSpacing: scaleDimension(context, 8),
                 children: viewModel.ignoredFolders
                     .map(
                       (String folder) => InputChip(
@@ -748,9 +751,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                     )
                     .toList(),
               ),
-              const Divider(height: 24),
+              Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Export workspace", theme),
-              const SizedBox(height: 8),
+              SizedBox(height: scaleDimension(context, 8)),
               _AsyncFilledButton(
                 label: "Export JSON",
                 icon: Icons.download,
@@ -775,10 +778,14 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: EdgeInsets.all(scaleDimension(context, 8)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[Text(title), const SizedBox(height: 8), child],
+          children: <Widget>[
+            Text(title),
+            SizedBox(height: scaleDimension(context, 8)),
+            child,
+          ],
         ),
       ),
     );
@@ -798,8 +805,12 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       },
       child: Row(
         children: <Widget>[
-          Container(width: 16, height: 16, color: Color(value)),
-          const SizedBox(width: 8),
+          Container(
+            width: scaleDimension(context, 16),
+            height: scaleDimension(context, 16),
+            color: Color(value),
+          ),
+          SizedBox(width: scaleDimension(context, 8)),
           Text(label),
         ],
       ),
@@ -829,11 +840,11 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
                       Container(
-                        width: 64,
-                        height: 64,
+                        width: scaleDimension(context, 64),
+                        height: scaleDimension(context, 64),
                         color: Color.fromARGB(255, r, g, b),
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: scaleDimension(context, 8)),
                       TextField(
                         controller: hexController,
                         decoration: const InputDecoration(
@@ -953,10 +964,10 @@ class _AsyncFilledButtonState extends State<_AsyncFilledButton> {
               : _runAction,
           child: _buildLabelChild(),
         ),
-        const SizedBox(width: 8),
+        SizedBox(width: scaleDimension(context, 8)),
         SizedBox(
-          width: 18,
-          height: 18,
+          width: scaleDimension(context, 18),
+          height: scaleDimension(context, 18),
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 180),
             child: _buildStatusChild(),
@@ -974,7 +985,7 @@ class _AsyncFilledButtonState extends State<_AsyncFilledButton> {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Icon(widget.icon),
-        const SizedBox(width: 8),
+        SizedBox(width: scaleDimension(context, 8)),
         Text(widget.label),
       ],
     );
@@ -982,11 +993,13 @@ class _AsyncFilledButtonState extends State<_AsyncFilledButton> {
 
   Widget _buildStatusChild() {
     if (_state == _AsyncButtonVisualState.loading) {
-      return const SizedBox(
-        key: ValueKey<String>("loading"),
-        width: 16,
-        height: 16,
-        child: CircularProgressIndicator(strokeWidth: 2),
+      final double indicatorBox = scaleDimension(context, 16);
+      final double stroke = scaleDimension(context, 2);
+      return SizedBox(
+        key: const ValueKey<String>("loading"),
+        width: indicatorBox,
+        height: indicatorBox,
+        child: CircularProgressIndicator(strokeWidth: stroke),
       );
     }
     if (_state == _AsyncButtonVisualState.done) {

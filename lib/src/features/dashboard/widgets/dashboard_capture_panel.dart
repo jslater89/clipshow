@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:provider/provider.dart";
 
+import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 
@@ -26,6 +27,10 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
 
   @override
   Widget build(BuildContext context) {
+    final double pad12 = scaleDimension(context, 12);
+    final double gap8 = scaleDimension(context, 8);
+    final double gap10 = scaleDimension(context, 10);
+    final double gap16 = scaleDimension(context, 16);
     final DashboardViewModel viewModel = context.watch<DashboardViewModel>();
     final ThemeData theme = Theme.of(context);
     final bool obsReady =
@@ -68,13 +73,13 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
           autofocus: true,
           child: Card(
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.all(pad12),
               child: SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     Text("OBS Capture", style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 8),
+                    SizedBox(height: gap8),
                     Text(
                       obsReady
                           ? "Tags are applied when you stop recording."
@@ -83,10 +88,10 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    SizedBox(height: gap16),
                     Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                      spacing: gap8,
+                      runSpacing: gap8,
                       children: <Widget>[
                         for (final String tag in sortedCaptureTags)
                           InputChip(
@@ -96,12 +101,14 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                           ),
                       ],
                     ),
-                    const SizedBox(height: 10),
+                    SizedBox(height: gap10),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: <Widget>[
                         ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 400),
+                          constraints: BoxConstraints(
+                            maxWidth: scaleDimension(context, 400),
+                          ),
                           child: AdaptiveAutocomplete<String>(
                             optionsBuilder: (TextEditingValue textEditingValue) {
                               return viewModel.tagSuggestionsFor(
@@ -143,7 +150,7 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                             },
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        SizedBox(width: gap8),
                         FilledButton(
                           onPressed: () {
                             final TextEditingController? controller =
@@ -157,7 +164,7 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    SizedBox(height: gap16),
                     Row(
                       children: <Widget>[
                         FilledButton.icon(
@@ -167,7 +174,7 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                           icon: const Icon(Icons.fiber_manual_record),
                           label: const Text("(r) Start Recording"),
                         ),
-                        const SizedBox(width: 12),
+                        SizedBox(width: pad12),
                         FilledButton.tonalIcon(
                           onPressed: canStop
                               ? () => viewModel.stopObsCaptureAndIngestTags()
@@ -177,7 +184,7 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    SizedBox(height: gap16),
                     if (viewModel.captureStatusMessage != null)
                       Text(
                         viewModel.captureStatusMessage!,

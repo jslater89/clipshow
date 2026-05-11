@@ -5,6 +5,8 @@ import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 import "package:video_player/video_player.dart";
 
+import "package:obs_clipshow/src/app/ui_scale.dart";
+
 class ClipPlayerController {
   _ClipPlayerViewState? _state;
 
@@ -462,16 +464,25 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   }
 
   Widget _buildControls(VideoPlayerController controller) {
+    final double horizontalPad = scaleDimension(context, 10);
+    final double verticalPad = scaleDimension(context, 8);
+    final double progressVerticalPad = scaleDimension(context, 4);
+    final double controlsGap = scaleDimension(context, 8);
     return Container(
       color: Colors.black.withValues(alpha: 0.65),
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      padding: EdgeInsets.fromLTRB(
+        horizontalPad,
+        verticalPad,
+        horizontalPad,
+        verticalPad,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           VideoProgressIndicator(
             controller,
             allowScrubbing: true,
-            padding: const EdgeInsets.symmetric(vertical: 4),
+            padding: EdgeInsets.symmetric(vertical: progressVerticalPad),
           ),
           Row(
             children: <Widget>[
@@ -495,7 +506,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
                 icon: const Icon(Icons.forward_5),
                 color: Colors.white,
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: controlsGap),
               Expanded(
                 child: Text(
                   "${_formatDuration(controller.value.position)} / ${_formatDuration(controller.value.duration)}",

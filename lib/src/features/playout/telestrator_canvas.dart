@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 
-import 'package:obs_clipshow/src/features/playout/telestrator_model.dart';
+import "package:obs_clipshow/src/app/ui_scale.dart";
+import "package:obs_clipshow/src/features/playout/telestrator_model.dart";
 
 class TelestratorCanvas extends StatelessWidget {
   const TelestratorCanvas({super.key, required this.controller});
@@ -12,6 +13,7 @@ class TelestratorCanvas extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (BuildContext context, Widget? child) {
+        final double lineScale = uiScaleFactor(context);
         return IgnorePointer(
           ignoring: !controller.isEnabled,
           child: GestureDetector(
@@ -27,7 +29,10 @@ class TelestratorCanvas extends StatelessWidget {
             },
             onPanCancel: controller.endStroke,
             child: CustomPaint(
-              painter: _TelestratorPainter(strokes: controller.strokes),
+              painter: _TelestratorPainter(
+                strokes: controller.strokes,
+                lineScale: lineScale,
+              ),
               child: const SizedBox.expand(),
             ),
           ),
@@ -38,9 +43,10 @@ class TelestratorCanvas extends StatelessWidget {
 }
 
 class _TelestratorPainter extends CustomPainter {
-  _TelestratorPainter({required this.strokes});
+  _TelestratorPainter({required this.strokes, required this.lineScale});
 
   final List<TelestratorStroke> strokes;
+  final double lineScale;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -48,15 +54,16 @@ class _TelestratorPainter extends CustomPainter {
       if (stroke.points.isEmpty) {
         continue;
       }
+      final double strokeWidth = stroke.width * lineScale;
       final Paint paint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
-        ..strokeWidth = stroke.width
+        ..strokeWidth = strokeWidth
         ..color = stroke.color;
 
       if (stroke.points.length == 1) {
-        canvas.drawCircle(stroke.points.single, stroke.width / 2, paint);
+        canvas.drawCircle(stroke.points.single, strokeWidth / 2, paint);
         continue;
       }
 
@@ -72,6 +79,7 @@ class _TelestratorPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _TelestratorPainter oldDelegate) {
-    return oldDelegate.strokes != strokes;
+    return oldDelegate.strokes != strokes ||
+        oldDelegate.lineScale != lineScale;
   }
 }

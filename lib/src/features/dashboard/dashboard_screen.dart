@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
+import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_widgets.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
@@ -25,11 +26,13 @@ class DashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final double shellPad = scaleDimension(context, 16);
+    final double headerBodyGap = scaleDimension(context, 16);
     return ChangeNotifierProvider<DashboardViewModel>.value(
       value: viewModel,
       child: Scaffold(
         body: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(shellPad),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -38,7 +41,7 @@ class DashboardScreen extends StatelessWidget {
                 obsConnectionHealthy: obsConnectionHealthy,
                 obsLastSuccessfulPingHms: obsLastSuccessfulPingHms,
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: headerBodyGap),
               Expanded(
                 child: DashboardBody(
                   onPlayClip: onPlayClip,

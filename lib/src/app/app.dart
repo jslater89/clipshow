@@ -1,18 +1,21 @@
 import "dart:io";
 import "dart:convert";
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 import "package:logging/logging.dart";
 import "package:provider/provider.dart";
 import "package:screen_retriever/screen_retriever.dart";
 import "package:window_manager/window_manager.dart";
 import "dart:async";
 
-import 'package:obs_clipshow/src/features/dashboard/dashboard_screen.dart';
-import 'package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart';
-import 'package:obs_clipshow/src/features/playout/playout_clip.dart';
-import 'package:obs_clipshow/src/features/playout/playout_screen.dart';
+import "package:obs_clipshow/src/app/ui_scale.dart";
+import "package:obs_clipshow/src/features/dashboard/dashboard_screen.dart";
+import "package:obs_clipshow/src/workspace/workspace_preferences.dart";
+import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/playout/playout_clip.dart";
+import "package:obs_clipshow/src/features/playout/playout_screen.dart";
 import "package:obs_clipshow/src/features/workspace_settings/workspace_settings_dialog.dart";
-import 'package:obs_clipshow/src/obs/obs_service.dart';
+import "package:obs_clipshow/src/obs/obs_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 enum PlayoutWindowMode { windowed, fullscreen }
@@ -24,8 +27,17 @@ class ObsClipshowApp extends StatefulWidget {
   State<ObsClipshowApp> createState() => _ObsClipshowAppState();
 }
 
+class _IncreaseUiScaleIntent extends Intent {
+  const _IncreaseUiScaleIntent();
+}
+
+class _DecreaseUiScaleIntent extends Intent {
+  const _DecreaseUiScaleIntent();
+}
+
 class _ObsClipshowAppState extends State<ObsClipshowApp> {
   final Logger _logger = Logger("ObsClipshowApp");
+  final WorkspacePreferences _appPreferences = WorkspacePreferences();
   static const PlayoutWindowMode _playoutWindowMode =
       PlayoutWindowMode.windowed;
   static const Size _fallbackPlayoutSize = Size(1280, 720);
@@ -42,6 +54,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   bool _obsPingInFlight = false;
   bool? _obsConnectionHealthy;
   DateTime? _lastSuccessfulObsPingAt;
+  double _uiScale = 1;
 
   @override
   void initState() {
@@ -51,6 +64,22 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     _viewModel.addListener(_handleViewModelChanged);
     _unlockAspectRatio();
     _viewModel.initialize();
+    unawaited(_restoreUiScale());
+  }
+
+  Future<void> _restoreUiScale() async {
+    final double? saved = await _appPreferences.loadUiScale();
+    if (!mounted || saved == null) {
+      return;
+    }
+    final double clamped = saved.clamp(kMinUiScale, kMaxUiScale);
+    setState(() {
+      _uiScale = clamped;
+    });
+  }
+
+  void _persistUiScale() {
+    unawaited(_appPreferences.saveUiScale(_uiScale));
   }
 
   @override
@@ -451,6 +480,22 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     }
   }
 
+  void _increaseUiScale() {
+    setState(() {
+      final double next = _uiScale + kUiScaleStep;
+      _uiScale = next > kMaxUiScale ? kMaxUiScale : next;
+    });
+    _persistUiScale();
+  }
+
+  void _decreaseUiScale() {
+    setState(() {
+      final double next = _uiScale - kUiScaleStep;
+      _uiScale = next < kMinUiScale ? kMinUiScale : next;
+    });
+    _persistUiScale();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -463,6 +508,48 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
         ),
         brightness: Brightness.dark,
       ),
+      builder: (BuildContext context, Widget? child) {
+        final MediaQueryData mediaQueryData = MediaQuery.of(context);
+        return UiScaleScope(
+          scale: _uiScale,
+          increaseScale: _increaseUiScale,
+          decreaseScale: _decreaseUiScale,
+          child: Shortcuts(
+            shortcuts: const <ShortcutActivator, Intent>{
+              SingleActivator(
+                LogicalKeyboardKey.equal,
+                control: true,
+              ): _IncreaseUiScaleIntent(),
+              SingleActivator(
+                LogicalKeyboardKey.minus,
+                control: true,
+              ): _DecreaseUiScaleIntent(),
+            },
+            child: Actions(
+              actions: <Type, Action<Intent>>{
+                _IncreaseUiScaleIntent: CallbackAction<_IncreaseUiScaleIntent>(
+                  onInvoke: (_) {
+                    _increaseUiScale();
+                    return null;
+                  },
+                ),
+                _DecreaseUiScaleIntent: CallbackAction<_DecreaseUiScaleIntent>(
+                  onInvoke: (_) {
+                    _decreaseUiScale();
+                    return null;
+                  },
+                ),
+              },
+              child: MediaQuery(
+                data: mediaQueryData.copyWith(
+                  textScaler: TextScaler.linear(_uiScale),
+                ),
+                child: child ?? const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        );
+      },
       home: _activeClip == null
           ? DashboardScreen(
               viewModel: _viewModel,
