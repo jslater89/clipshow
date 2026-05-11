@@ -1,3 +1,4 @@
+import "dart:async";
 import "dart:io";
 
 import "package:flutter/material.dart";
@@ -5,7 +6,9 @@ import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_media_tag_menu.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
@@ -185,8 +188,7 @@ class DashboardFileListPanel extends StatelessWidget {
                             viewModel.activeTagFilters.map(
                               (String tag) => InputChip(
                                 label: Text("Filter: $tag"),
-                                onDeleted: () =>
-                                    viewModel.toggleTagFilter(tag),
+                                onDeleted: () => viewModel.toggleTagFilter(tag),
                               ),
                             ),
                           );
@@ -220,15 +222,16 @@ class DashboardFileListPanel extends StatelessWidget {
                 final MediaListItem item = mediaItems[index];
                 final String relativePath =
                     WorkspaceMediaPaths.displayRelativeToWorkspace(
-                  workspacePath,
-                  item.filePath,
-                );
+                      workspacePath,
+                      item.filePath,
+                    );
                 final bool isSelected =
                     viewModel.selectedItemKey == item.stableKey;
                 final MediaIssue mediaIssue = item.mediaIssue;
-                final List<String> tags = sortTags(
-                  viewModel.tagsForItem(item).toList(),
-                );
+                final List<MediaTagAttachment> tagAttachments =
+                    sortMediaTagAttachments(
+                      viewModel.tagAttachmentsForItem(item),
+                    );
                 final String? durationAboveThumb = _durationLabelAboveThumbnail(
                   item,
                 );
@@ -272,9 +275,9 @@ class DashboardFileListPanel extends StatelessWidget {
                                 _ThumbnailPreview(
                                   videoPath:
                                       WorkspaceMediaPaths.absoluteMasterPath(
-                                    workspacePath,
-                                    item.filePath,
-                                  ),
+                                        workspacePath,
+                                        item.filePath,
+                                      ),
                                   issue: mediaIssue,
                                   width: thumbWidth,
                                   height: thumbHeight,
@@ -329,18 +332,39 @@ class DashboardFileListPanel extends StatelessWidget {
                                 Wrap(
                                   spacing: chipSpacing,
                                   runSpacing: chipRunSpacing,
-                                  children: tags.isEmpty
+                                  children: tagAttachments.isEmpty
                                       ? <Widget>[const Text("No tags")]
-                                      : tags
+                                      : tagAttachments
                                             .map(
-                                              (String tag) => ActionChip(
-                                                label: Text(tag),
-                                                backgroundColor: tagChipColor(
-                                                  context,
-                                                  tag,
+                                              (
+                                                MediaTagAttachment att,
+                                              ) => GestureDetector(
+                                                onSecondaryTapUp:
+                                                    (TapUpDetails d) {
+                                                      unawaited(
+                                                        showMediaTagContextMenu(
+                                                          context: context,
+                                                          viewModel: viewModel,
+                                                          attachment: att,
+                                                          globalPosition:
+                                                              d.globalPosition,
+                                                        ),
+                                                      );
+                                                    },
+                                                child: ActionChip(
+                                                  label:
+                                                      mediaTagAttachmentChipLabel(
+                                                        att,
+                                                      ),
+                                                  backgroundColor: tagChipColor(
+                                                    context,
+                                                    att.tagName,
+                                                  ),
+                                                  onPressed: () =>
+                                                      viewModel.toggleTagFilter(
+                                                        att.tagName,
+                                                      ),
                                                 ),
-                                                onPressed: () => viewModel
-                                                    .toggleTagFilter(tag),
                                               ),
                                             )
                                             .toList(),
@@ -359,6 +383,13 @@ class DashboardFileListPanel extends StatelessWidget {
                                     toPlayoutClip(
                                       item,
                                       workspaceRoot: workspacePath,
+                                      osgPresetVisibleInitial: List<bool>.from(
+                                        viewModel.previewOsgPresetVisible,
+                                      ),
+                                      semanticTagSnapshotVersion: viewModel
+                                          .semanticTagSnapshotForItem(item),
+                                      semanticTypeIdsOnMedia: viewModel
+                                          .semanticTypeIdsOnMedia(item),
                                     ),
                                   )
                                 : null,

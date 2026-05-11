@@ -79,6 +79,18 @@ class PlayoutIncreaseBrushIntent extends Intent {
   const PlayoutIncreaseBrushIntent();
 }
 
+class PlayoutOsgPresetDigit8Intent extends Intent {
+  const PlayoutOsgPresetDigit8Intent();
+}
+
+class PlayoutOsgPresetDigit9Intent extends Intent {
+  const PlayoutOsgPresetDigit9Intent();
+}
+
+class PlayoutOsgPresetDigit0Intent extends Intent {
+  const PlayoutOsgPresetDigit0Intent();
+}
+
 class PlayoutHotkeysLayer extends StatelessWidget {
   const PlayoutHotkeysLayer({
     super.key,
@@ -94,6 +106,9 @@ class PlayoutHotkeysLayer extends StatelessWidget {
     this.onSetTelestratorColor3Requested,
     this.onDecreaseBrushRequested,
     this.onIncreaseBrushRequested,
+    this.onOsgPresetDigit8Requested,
+    this.onOsgPresetDigit9Requested,
+    this.onOsgPresetDigit0Requested,
   });
 
   final ClipPlayerController controller;
@@ -108,6 +123,9 @@ class PlayoutHotkeysLayer extends StatelessWidget {
   final VoidCallback? onSetTelestratorColor3Requested;
   final VoidCallback? onDecreaseBrushRequested;
   final VoidCallback? onIncreaseBrushRequested;
+  final VoidCallback? onOsgPresetDigit8Requested;
+  final VoidCallback? onOsgPresetDigit9Requested;
+  final VoidCallback? onOsgPresetDigit0Requested;
 
   @override
   Widget build(BuildContext context) {
@@ -160,6 +178,15 @@ class PlayoutHotkeysLayer extends StatelessWidget {
         if (onIncreaseBrushRequested != null)
           const SingleActivator(LogicalKeyboardKey.bracketRight):
               const PlayoutIncreaseBrushIntent(),
+        if (onOsgPresetDigit8Requested != null)
+          const SingleActivator(LogicalKeyboardKey.digit8):
+              const PlayoutOsgPresetDigit8Intent(),
+        if (onOsgPresetDigit9Requested != null)
+          const SingleActivator(LogicalKeyboardKey.digit9):
+              const PlayoutOsgPresetDigit9Intent(),
+        if (onOsgPresetDigit0Requested != null)
+          const SingleActivator(LogicalKeyboardKey.digit0):
+              const PlayoutOsgPresetDigit0Intent(),
         const SingleActivator(LogicalKeyboardKey.escape): const DismissIntent(),
       },
       child: Actions(
@@ -295,6 +322,27 @@ class PlayoutHotkeysLayer extends StatelessWidget {
               CallbackAction<PlayoutIncreaseBrushIntent>(
                 onInvoke: (_) {
                   onIncreaseBrushRequested?.call();
+                  return null;
+                },
+              ),
+          PlayoutOsgPresetDigit8Intent:
+              CallbackAction<PlayoutOsgPresetDigit8Intent>(
+                onInvoke: (_) {
+                  onOsgPresetDigit8Requested?.call();
+                  return null;
+                },
+              ),
+          PlayoutOsgPresetDigit9Intent:
+              CallbackAction<PlayoutOsgPresetDigit9Intent>(
+                onInvoke: (_) {
+                  onOsgPresetDigit9Requested?.call();
+                  return null;
+                },
+              ),
+          PlayoutOsgPresetDigit0Intent:
+              CallbackAction<PlayoutOsgPresetDigit0Intent>(
+                onInvoke: (_) {
+                  onOsgPresetDigit0Requested?.call();
                   return null;
                 },
               ),

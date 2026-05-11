@@ -6,7 +6,9 @@ import "package:provider/provider.dart";
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_media_tag_menu.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 
 class DashboardTagPanel extends StatefulWidget {
@@ -23,16 +25,43 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
   TextEditingController? _activeSavedTagInputController;
   bool _handledAutocompleteSelection = false;
   bool _handledSavedAutocompleteSelection = false;
+  final TextEditingController _annotationsController = TextEditingController();
+  final FocusNode _annotationsFocus = FocusNode();
+  String? _lastAnnotationsItemKey;
+
+  @override
+  void dispose() {
+    _annotationsController.dispose();
+    _annotationsFocus.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final DashboardViewModel viewModel = context.watch<DashboardViewModel>();
     final MediaListItem? selectedItem = viewModel.selectedItem;
-    final List<String> selectedTags = selectedItem == null
-        ? <String>[]
-        : sortTags(viewModel.tagsForItem(selectedItem).toList());
-    final bool selectedHasUserTags =
-        selectedTags.any((String t) => !isSystemTag(t));
+    final String? selectedKey = selectedItem?.stableKey;
+    if (selectedKey != null && _lastAnnotationsItemKey != selectedKey) {
+      _lastAnnotationsItemKey = selectedKey;
+      final String next = selectedItem?.annotations ?? "";
+      _annotationsController.text = next;
+    } else if (selectedItem == null && _lastAnnotationsItemKey != null) {
+      _lastAnnotationsItemKey = null;
+      _annotationsController.text = "";
+    } else if (selectedItem != null && !_annotationsFocus.hasFocus) {
+      final String next = selectedItem.annotations ?? "";
+      if (next != _annotationsController.text) {
+        _annotationsController.text = next;
+      }
+    }
+    final List<MediaTagAttachment> selectedTagAttachments = selectedItem == null
+        ? <MediaTagAttachment>[]
+        : sortMediaTagAttachments(
+            viewModel.tagAttachmentsForItem(selectedItem),
+          );
+    final bool selectedHasUserTags = selectedTagAttachments.any(
+      (MediaTagAttachment a) => !isSystemTag(a.tagName),
+    );
     final double pad12 = scaleDimension(context, 12);
     final double gap12 = scaleDimension(context, 12);
     final double gap10 = scaleDimension(context, 10);
@@ -40,6 +69,9 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
     final double emptyStateVertPad = scaleDimension(context, 24);
     final double editIconSize = scaleDimension(context, 16);
     final double fieldMaxWidth = scaleDimension(context, 400);
+    final String storedAnnotations = selectedItem?.annotations ?? "";
+    final bool annotationsDirty =
+        selectedItem != null && _annotationsController.text != storedAnnotations;
 
     return Card(
       child: Padding(
@@ -143,27 +175,41 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                   ),
                 if (selectedItem.type == MediaListItemType.clip ||
                     (selectedItem.type == MediaListItemType.master &&
-                        viewModel.clipCountForMaster(
-                              selectedItem.master!.id,
-                            ) >
+                        viewModel.clipCountForMaster(selectedItem.master!.id) >
                             0))
                   SizedBox(height: gap10),
                 Wrap(
                   spacing: gap8,
                   runSpacing: gap8,
-                  children: selectedTags.map((String tag) {
+                  children: selectedTagAttachments.map((
+                    MediaTagAttachment att,
+                  ) {
                     final bool isSystemTag =
-                        tag == MediaRepository.masterTag ||
-                        tag == MediaRepository.clipTag;
-                    return InputChip(
-                      label: Text(tag),
-                      backgroundColor: tagChipColor(context, tag),
-                      onDeleted: isSystemTag
-                          ? null
-                          : () => unawaited(
-                              viewModel.removeTagFromSelectedMedia(tag),
-                            ),
-                      onPressed: () => viewModel.toggleTagFilter(tag),
+                        att.tagName == MediaRepository.masterTag ||
+                        att.tagName == MediaRepository.clipTag;
+                    return GestureDetector(
+                      onSecondaryTapUp: (TapUpDetails d) {
+                        unawaited(
+                          showMediaTagContextMenu(
+                            context: context,
+                            viewModel: viewModel,
+                            attachment: att,
+                            globalPosition: d.globalPosition,
+                          ),
+                        );
+                      },
+                      child: InputChip(
+                        label: mediaTagAttachmentChipLabel(att),
+                        backgroundColor: tagChipColor(context, att.tagName),
+                        onDeleted: isSystemTag
+                            ? null
+                            : () => unawaited(
+                                viewModel.removeTagFromSelectedMedia(
+                                  att.tagName,
+                                ),
+                              ),
+                        onPressed: () => viewModel.toggleTagFilter(att.tagName),
+                      ),
                     );
                   }).toList(),
                 ),
@@ -243,12 +289,29 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                 Wrap(
                   spacing: gap8,
                   runSpacing: gap8,
-                  children: viewModel.savedTags
+                  children: sortShelfTagEntries(viewModel.savedTags)
                       .map(
-                        (String tag) => InputChip(
-                          label: Text(tag),
-                          onDeleted: () =>
-                              unawaited(viewModel.removeSavedTag(tag)),
+                        (ShelfTagEntry e) => GestureDetector(
+                          onSecondaryTapUp: (TapUpDetails d) {
+                            unawaited(
+                              showShelfTagContextMenu(
+                                context: context,
+                                viewModel: viewModel,
+                                entry: e,
+                                target: DashboardShelfTagMenuTarget.saved,
+                                globalPosition: d.globalPosition,
+                              ),
+                            );
+                          },
+                          child: InputChip(
+                            label: shelfTagChipLabel(
+                              e,
+                              viewModel.tagSemanticTypes,
+                            ),
+                            backgroundColor: tagChipColor(context, e.name),
+                            onDeleted: () =>
+                                unawaited(viewModel.removeSavedTag(e.name)),
+                          ),
                         ),
                       )
                       .toList(),
@@ -347,7 +410,10 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                                   await _showApplySavedTagsToManyConfirmDialog(
                                     context,
                                     fileCount: count,
-                                    tags: viewModel.savedTags,
+                                    tags: sortShelfTagEntries(
+                                      viewModel.savedTags,
+                                    ),
+                                    semanticTypes: viewModel.tagSemanticTypes,
                                   );
                               if (confirmed != true || !context.mounted) {
                                 return;
@@ -394,6 +460,71 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                     ),
                   ],
                 ),
+                SizedBox(height: gap10),
+                const Divider(),
+                Text(
+                  "Annotations",
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                SizedBox(height: scaleDimension(context, 6)),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: fieldMaxWidth),
+                  child: TextField(
+                    controller: _annotationsController,
+                    focusNode: _annotationsFocus,
+                    minLines: 3,
+                    maxLines: 8,
+                    decoration: const InputDecoration(
+                      labelText: "Notes for this item (not searchable)",
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                    onTapOutside: (_) {
+                      widget.onPreviewFocusRequested();
+                      _annotationsFocus.unfocus();
+                    },
+                  ),
+                ),
+                SizedBox(height: scaleDimension(context, 8)),
+                Wrap(
+                  spacing: gap8,
+                  runSpacing: gap8,
+                  children: <Widget>[
+                    FilledButton.icon(
+                      onPressed: !annotationsDirty
+                          ? null
+                          : () async {
+                              final MediaListItem? item =
+                                  viewModel.selectedItem;
+                              if (item == null) {
+                                return;
+                              }
+                              final String text =
+                                  _annotationsController.text;
+                              await viewModel.setAnnotations(item, text);
+                              if (!mounted) {
+                                return;
+                              }
+                              setState(() {});
+                              _annotationsFocus.unfocus();
+                            },
+                      icon: const Icon(Icons.save),
+                      label: const Text("Save"),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: !annotationsDirty
+                          ? null
+                          : () {
+                              _annotationsController.text =
+                                  storedAnnotations;
+                              _annotationsFocus.unfocus();
+                              setState(() {});
+                            },
+                      icon: const Icon(Icons.undo),
+                      label: const Text("Revert"),
+                    ),
+                  ],
+                ),
               ],
             ],
           ),
@@ -430,9 +561,9 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
 Future<bool?> _showApplySavedTagsToManyConfirmDialog(
   BuildContext context, {
   required int fileCount,
-  required List<String> tags,
+  required List<ShelfTagEntry> tags,
+  required List<TagSemanticType> semanticTypes,
 }) async {
-  final List<String> sorted = sortTags(List<String>.from(tags));
   return showDialog<bool>(
     context: context,
     builder: (BuildContext context) {
@@ -443,18 +574,16 @@ Future<bool?> _showApplySavedTagsToManyConfirmDialog(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text(
-                "Add tags to $fileCount file${fileCount == 1 ? "" : "s"}?",
-              ),
+              Text("Add tags to $fileCount file${fileCount == 1 ? "" : "s"}?"),
               SizedBox(height: scaleDimension(context, 12)),
               Wrap(
                 spacing: scaleDimension(context, 8),
                 runSpacing: scaleDimension(context, 8),
-                children: sorted
+                children: tags
                     .map(
-                      (String tag) => Chip(
-                        label: Text(tag),
-                        backgroundColor: tagChipColor(context, tag),
+                      (ShelfTagEntry e) => Chip(
+                        label: shelfTagChipLabel(e, semanticTypes),
+                        backgroundColor: tagChipColor(context, e.name),
                       ),
                     )
                     .toList(),

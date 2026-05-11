@@ -1,4 +1,5 @@
 import "dart:async";
+import "dart:collection";
 import "dart:convert";
 import "dart:io";
 
@@ -6,6 +7,7 @@ import "package:file_picker/file_picker.dart";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 import "package:path/path.dart" as p;
+import "package:system_fonts/system_fonts.dart";
 
 import "package:obs_clipshow/src/data/app_database.dart";
 import "package:obs_clipshow/src/data/media_repository.dart";
@@ -13,8 +15,10 @@ import "package:obs_clipshow/src/ingestion/ingestion_service.dart";
 import "package:obs_clipshow/src/ingestion/thumbnail_service.dart";
 import "package:obs_clipshow/src/ingestion/workspace_watcher.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
+import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/obs/capture_path_utils.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/obs/obs_capture_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 import "package:obs_clipshow/src/workspace/workspace_preferences.dart";
@@ -25,6 +29,35 @@ import "package:obs_clipshow/src/workspace/workspace_trash.dart";
 
 /// Manage (library prep) vs OBS Capture pane on the dashboard right column.
 enum DashboardMediaPaneTab { manage, capture }
+
+bool _semanticTagAttachmentSnapshotsEqual(
+  List<MediaTagAttachment> a,
+  List<MediaTagAttachment> b,
+) {
+  final List<MediaTagAttachment> ca = List<MediaTagAttachment>.from(a);
+  final List<MediaTagAttachment> cb = List<MediaTagAttachment>.from(b);
+  ca.sort(
+    (MediaTagAttachment p, MediaTagAttachment q) =>
+        p.mediaTagId.compareTo(q.mediaTagId),
+  );
+  cb.sort(
+    (MediaTagAttachment p, MediaTagAttachment q) =>
+        p.mediaTagId.compareTo(q.mediaTagId),
+  );
+  if (ca.length != cb.length) {
+    return false;
+  }
+  for (int i = 0; i < ca.length; i++) {
+    final MediaTagAttachment x = ca[i];
+    final MediaTagAttachment y = cb[i];
+    if (x.mediaTagId != y.mediaTagId ||
+        x.semanticTypeId != y.semanticTypeId ||
+        x.tagName != y.tagName) {
+      return false;
+    }
+  }
+  return true;
+}
 
 class DashboardViewModel extends ChangeNotifier {
   static const int _savedTagApplyBatchSize = 100;
@@ -64,9 +97,11 @@ class DashboardViewModel extends ChangeNotifier {
   List<MediaListItem> _allItems = <MediaListItem>[];
   List<MediaListItem> _visibleItems = <MediaListItem>[];
   final Map<String, Set<String>> _tagsByItemKey = <String, Set<String>>{};
+  final Map<String, List<MediaTagAttachment>> _tagAttachmentsByItemKey =
+      <String, List<MediaTagAttachment>>{};
   final Set<String> _activeTagFilters = <String>{};
   final List<String> _allTags = <String>[];
-  final List<String> _savedTags = <String>[];
+  final List<ShelfTagEntry> _savedTagEntries = <ShelfTagEntry>[];
   int _previewPositionMs = 0;
   int? _markInMs;
   int? _markOutMs;
@@ -80,17 +115,26 @@ class DashboardViewModel extends ChangeNotifier {
   WorkspaceSettingsBundle? _workspaceSettings;
   bool _dashboardPreviewPlaybackActive = false;
   DashboardMediaPaneTab _mediaPaneTab = DashboardMediaPaneTab.manage;
-  final List<String> _captureTags = <String>[];
+  final List<ShelfTagEntry> _captureTags = <ShelfTagEntry>[];
   bool _obsCaptureRecording = false;
   ObsCaptureService? _obsCaptureSession;
   String? _captureStatusMessage;
+  final Set<String> _loadedSystemFontFamilies = <String>{};
+
+  final List<bool> _previewOsgPresetVisible = <bool>[false, false, false];
+  int _previewOsgRequirementFlashToken = 0;
+  String _previewOsgRequirementFlashText = "";
+
+  /// Bumps per [MediaListItem.stableKey] when that row’s tag attachments
+  /// change in a way that affects OSG semantic resolution.
+  final Map<String, int> _semanticTagSnapshotByItemKey = <String, int>{};
 
   bool get isLoading => _isLoading;
   String? get workspacePath => _workspacePath;
   List<MasterMediaFile> get mediaFiles => _mediaFiles;
   List<MediaListItem> get visibleItems => _visibleItems;
   List<String> get allTags => _allTags;
-  List<String> get savedTags => _savedTags;
+  List<ShelfTagEntry> get savedTags => _savedTagEntries;
   Set<String> get activeTagFilters => _activeTagFilters;
   int? get markInMs => _markInMs;
   int? get markOutMs => _markOutMs;
@@ -140,9 +184,111 @@ class DashboardViewModel extends ChangeNotifier {
       CapturePathsSettings.fallback();
   bool get pauseIngestScanDuringPreview =>
       _workspaceSettings?.pauseIngestScanDuringPreview ?? true;
-  List<String> get captureTags => List<String>.unmodifiable(_captureTags);
+
+  PlayoutOutputSize get playoutOutputSize =>
+      _workspaceSettings?.playoutOutputSize ?? PlayoutOutputSize.fallback;
+
+  OsgWorkspaceConfig get osgWorkspaceConfig =>
+      _workspaceSettings?.osgWorkspaceConfig ?? OsgWorkspaceConfig.fallback();
+
+  List<TagSemanticType> get tagSemanticTypes =>
+      _workspaceSettings?.tagSemanticTypes ?? <TagSemanticType>[];
+  List<ShelfTagEntry> get captureTags =>
+      List<ShelfTagEntry>.unmodifiable(_captureTags);
   bool get obsCaptureRecording => _obsCaptureRecording;
   String? get captureStatusMessage => _captureStatusMessage;
+
+  /// Visibilities for OSG presets 1–3 in the dashboard preview (mirrors playout 8/9/0).
+  List<bool> get previewOsgPresetVisible =>
+      UnmodifiableListView<bool>(_previewOsgPresetVisible);
+
+  int get previewOsgRequirementFlashToken => _previewOsgRequirementFlashToken;
+
+  String get previewOsgRequirementFlashText => _previewOsgRequirementFlashText;
+
+  void clearPreviewOsgRequirementFlash() {
+    if (_previewOsgRequirementFlashToken == 0) {
+      return;
+    }
+    _previewOsgRequirementFlashToken = 0;
+    _previewOsgRequirementFlashText = "";
+    notifyListeners();
+  }
+
+  void _flashPreviewOsgRequirementMessage(String text) {
+    _previewOsgRequirementFlashText = text;
+    _previewOsgRequirementFlashToken++;
+    notifyListeners();
+  }
+
+  Set<int> semanticTypeIdsOnMedia(MediaListItem item) {
+    final List<MediaTagAttachment> list = tagAttachmentsForItem(item);
+    return <int>{
+      for (final MediaTagAttachment a in list)
+        if (a.semanticTypeId != null) a.semanticTypeId!,
+    };
+  }
+
+  void _reconcilePreviewOsgPresetVisibilityForSelectedItem() {
+    final MediaListItem? item = selectedItem;
+    if (item == null) {
+      _previewOsgPresetVisible[0] = false;
+      _previewOsgPresetVisible[1] = false;
+      _previewOsgPresetVisible[2] = false;
+      return;
+    }
+    final Set<int> onMedia = semanticTypeIdsOnMedia(item);
+    final List<OsgPreset> presets = osgWorkspaceConfig.threePresets;
+    for (int i = 0; i < 3; i++) {
+      if (!_previewOsgPresetVisible[i]) {
+        continue;
+      }
+      final OsgPreset p = presets[i];
+      if (!p.enabled) {
+        _previewOsgPresetVisible[i] = false;
+        continue;
+      }
+      if (p.requiredSemanticTypeIds.isNotEmpty &&
+          !p.semanticRequirementsSatisfiedBy(onMedia)) {
+        _previewOsgPresetVisible[i] = false;
+      }
+    }
+  }
+
+  void togglePreviewOsgPreset(int index) {
+    if (index < 0 || index > 2) {
+      return;
+    }
+    final OsgPreset preset = osgWorkspaceConfig.threePresets[index];
+    if (!preset.enabled) {
+      return;
+    }
+    final bool next = !_previewOsgPresetVisible[index];
+    if (next) {
+      if (preset.requiredSemanticTypeIds.isNotEmpty) {
+        final MediaListItem? item = selectedItem;
+        if (item == null) {
+          return;
+        }
+        final Set<int> onMedia = semanticTypeIdsOnMedia(item);
+        if (!preset.semanticRequirementsSatisfiedBy(onMedia)) {
+          _flashPreviewOsgRequirementMessage(
+            osgMissingSemanticRequirementsMessage(
+              preset: preset,
+              semanticTypeIdsOnMedia: onMedia,
+              tagSemanticTypes: tagSemanticTypes,
+            ),
+          );
+          return;
+        }
+      }
+    }
+    _previewOsgPresetVisible[index] = next;
+    notifyListeners();
+  }
+
+  int semanticTagSnapshotForItem(MediaListItem item) =>
+      _semanticTagSnapshotByItemKey[item.stableKey] ?? 0;
 
   void setMediaPaneTab(DashboardMediaPaneTab tab) {
     if (_mediaPaneTab == tab) {
@@ -152,14 +298,14 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setCaptureTags(List<String> tags) {
+  void setCaptureTags(List<ShelfTagEntry> tags) {
     _captureTags
       ..clear()
       ..addAll(tags);
     notifyListeners();
   }
 
-  void addCaptureTag(String raw) {
+  void addCaptureTag(String raw, {int? semanticTypeId}) {
     final MediaRepository? repository = _mediaRepository;
     if (repository == null) {
       return;
@@ -168,18 +314,56 @@ class DashboardViewModel extends ChangeNotifier {
     if (normalized.isEmpty) {
       return;
     }
-    if (_captureTags.any(
-      (String t) => t.toLowerCase() == normalized.toLowerCase(),
-    )) {
+    final int idx = _captureTags.indexWhere(
+      (ShelfTagEntry e) => e.name.toLowerCase() == normalized.toLowerCase(),
+    );
+    if (idx >= 0) {
+      if (semanticTypeId == null) {
+        return;
+      }
+      final ShelfTagEntry existing = _captureTags[idx];
+      _captureTags[idx] = ShelfTagEntry(
+        name: existing.name,
+        semanticTypeId: semanticTypeId,
+      );
+      notifyListeners();
       return;
     }
-    _captureTags.add(normalized);
+    _captureTags.add(
+      ShelfTagEntry(name: normalized, semanticTypeId: semanticTypeId),
+    );
     notifyListeners();
   }
 
   void removeCaptureTag(String tag) {
     _captureTags.removeWhere(
-      (String t) => t.toLowerCase() == tag.toLowerCase(),
+      (ShelfTagEntry e) => e.name.toLowerCase() == tag.toLowerCase(),
+    );
+    notifyListeners();
+  }
+
+  void setCaptureTagSemanticType({
+    required String tagName,
+    int? semanticTypeId,
+  }) {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    final String normalized = repository.normalizeTag(tagName);
+    if (normalized.isEmpty) {
+      return;
+    }
+    final int idx = _captureTags.indexWhere(
+      (ShelfTagEntry e) => e.name.toLowerCase() == normalized.toLowerCase(),
+    );
+    if (idx < 0) {
+      return;
+    }
+    final ShelfTagEntry existing = _captureTags[idx];
+    _captureTags[idx] = ShelfTagEntry(
+      name: existing.name,
+      semanticTypeId: semanticTypeId,
     );
     notifyListeners();
   }
@@ -189,18 +373,18 @@ class DashboardViewModel extends ChangeNotifier {
     required bool filteredOnly,
   }) {
     final MediaRepository? repository = _mediaRepository;
-    if (repository == null || _savedTags.isEmpty) {
+    if (repository == null || _savedTagEntries.isEmpty) {
       return <MediaListItem>[];
     }
     final List<MediaListItem> targetItems = List<MediaListItem>.from(
       filteredOnly ? _visibleItems : _allItems,
     );
-    final List<String> savedTags = List<String>.from(_savedTags);
+    final List<ShelfTagEntry> saved = List<ShelfTagEntry>.from(_savedTagEntries);
     if (targetItems.isEmpty) {
       return <MediaListItem>[];
     }
-    final List<String> savedTagsLower = savedTags
-        .map((String tag) => tag.toLowerCase())
+    final List<String> savedNamesLower = saved
+        .map((ShelfTagEntry e) => e.name.toLowerCase())
         .toList();
     final List<MediaListItem> itemsNeedingUpdate = <MediaListItem>[];
     for (final MediaListItem item in targetItems) {
@@ -208,8 +392,8 @@ class DashboardViewModel extends ChangeNotifier {
           (_tagsByItemKey[item.stableKey] ?? <String>{})
               .map((String tag) => tag.toLowerCase())
               .toSet();
-      final bool needsUpdate = savedTagsLower.any(
-        (String tag) => !existingTagsLower.contains(tag),
+      final bool needsUpdate = savedNamesLower.any(
+        (String nameLower) => !existingTagsLower.contains(nameLower),
       );
       if (needsUpdate) {
         itemsNeedingUpdate.add(item);
@@ -222,8 +406,8 @@ class DashboardViewModel extends ChangeNotifier {
       _itemsNeedingSavedTagApply(filteredOnly: filteredOnly).length;
 
   void mergeSavedTagsIntoCapture() {
-    for (final String tag in _savedTags) {
-      addCaptureTag(tag);
+    for (final ShelfTagEntry e in _savedTagEntries) {
+      addCaptureTag(e.name, semanticTypeId: e.semanticTypeId);
     }
     setMediaPaneTab(DashboardMediaPaneTab.capture);
   }
@@ -233,11 +417,11 @@ class DashboardViewModel extends ChangeNotifier {
     if (item == null) {
       return;
     }
-    for (final String tag in tagsForItem(item)) {
-      if (!_isUserTag(tag)) {
+    for (final MediaTagAttachment att in tagAttachmentsForItem(item)) {
+      if (!_isUserTag(att.tagName)) {
         continue;
       }
-      addCaptureTag(tag);
+      addCaptureTag(att.tagName, semanticTypeId: att.semanticTypeId);
     }
     setMediaPaneTab(DashboardMediaPaneTab.capture);
   }
@@ -327,7 +511,9 @@ class DashboardViewModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final List<String> tagSnapshot = List<String>.from(_captureTags);
+    final List<ShelfTagEntry> tagSnapshot = List<ShelfTagEntry>.from(
+      _captureTags,
+    );
     final CapturePathsSettings paths = capturePathsSettings;
     _captureStatusMessage = "Stopping…";
     notifyListeners();
@@ -361,11 +547,12 @@ class DashboardViewModel extends ChangeNotifier {
             "Copied to ${p.basename(destPath)}, but ingest did not pick it up in time.";
         return;
       }
-      for (final String tag in tagSnapshot) {
+      for (final ShelfTagEntry e in tagSnapshot) {
         await repository.addTagToMedia(
           mediaType: MediaListItemType.master,
           mediaId: master.id,
-          tag: tag,
+          tag: e.name,
+          semanticTypeId: e.semanticTypeId,
         );
       }
       await _reloadFromRepository();
@@ -429,6 +616,139 @@ class DashboardViewModel extends ChangeNotifier {
   Set<String> tagsForItem(MediaListItem item) =>
       _tagsByItemKey[item.stableKey] ?? <String>{};
 
+  List<MediaTagAttachment> tagAttachmentsForItem(MediaListItem item) =>
+      _tagAttachmentsByItemKey[item.stableKey] ?? <MediaTagAttachment>[];
+
+  Future<String?> resolveSemanticTagText(
+    PlayoutClip clip,
+    int semanticTypeId,
+  ) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return null;
+    }
+    return repository.resolveSemanticTagForMedia(
+      mediaType: clip.mediaType,
+      mediaId: clip.mediaId,
+      semanticTypeId: semanticTypeId,
+    );
+  }
+
+  Future<void> savePlayoutOutputSize(PlayoutOutputSize value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.savePlayoutOutputSize(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> saveOsgWorkspaceConfig(OsgWorkspaceConfig value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveOsgWorkspaceConfig(value);
+    await _loadWorkspaceSettings();
+    await _preloadConfiguredOsgFonts();
+    notifyListeners();
+  }
+
+  Future<int> insertTagSemanticType({
+    required String name,
+    int? iconCodePoint,
+  }) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return -1;
+    }
+    final int id = await repository.insertTagSemanticType(
+      name: name,
+      iconCodePoint: iconCodePoint,
+    );
+    await _loadWorkspaceSettings();
+    notifyListeners();
+    return id;
+  }
+
+  Future<void> updateTagSemanticType({
+    required int id,
+    required String name,
+    int? iconCodePoint,
+  }) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.updateTagSemanticType(
+      id: id,
+      name: name,
+      iconCodePoint: iconCodePoint,
+    );
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<bool> deleteTagSemanticType(int id) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return false;
+    }
+    final bool ok = await repository.deleteTagSemanticType(id);
+    if (ok) {
+      await _loadWorkspaceSettings();
+      await _reloadFromRepository();
+      notifyListeners();
+    }
+    return ok;
+  }
+
+  Future<void> setMediaTagSemanticType({
+    required int mediaTagId,
+    int? semanticTypeId,
+  }) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.setMediaTagSemanticType(
+      mediaTagId: mediaTagId,
+      semanticTypeId: semanticTypeId,
+    );
+    await _reloadFromRepository();
+  }
+
+  Future<void> swapTagValueOnMediaTag({
+    required int mediaTagId,
+    required String newTagName,
+  }) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.swapTagValueOnMediaTag(
+      mediaTagId: mediaTagId,
+      newTagName: newTagName,
+    );
+    await _reloadFromRepository();
+  }
+
+  Future<void> bulkSetSemanticTypeForTagId({
+    required int tagId,
+    int? semanticTypeId,
+  }) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.bulkSetSemanticTypeForTagId(
+      tagId: tagId,
+      semanticTypeId: semanticTypeId,
+    );
+    await _reloadFromRepository();
+  }
+
   List<String> tagSuggestionsFor(String query) {
     final Iterable<String> userTags = _allTags.where(_isUserTag);
     final String normalized = query.trim().toLowerCase();
@@ -491,6 +811,10 @@ class DashboardViewModel extends ChangeNotifier {
 
   Future<void> _startSession(WorkspaceSession session) async {
     _clipsOfMasterFilterMediaId = null;
+    _previewOsgPresetVisible[0] = false;
+    _previewOsgPresetVisible[1] = false;
+    _previewOsgPresetVisible[2] = false;
+    _semanticTagSnapshotByItemKey.clear();
     _mediaRepository = session.mediaRepository;
     _workspacePath = session.workspace.rootPath;
     await _mediaSubscription?.cancel();
@@ -510,7 +834,36 @@ class DashboardViewModel extends ChangeNotifier {
       repository: session.mediaRepository,
     );
     await _loadWorkspaceSettings();
+    await _preloadConfiguredOsgFonts();
     await _reloadFromRepository();
+  }
+
+  Future<void> _preloadConfiguredOsgFonts() async {
+    final WorkspaceSettingsBundle? settings = _workspaceSettings;
+    if (settings == null) {
+      return;
+    }
+    final Set<String> configuredFamilies = <String>{};
+    for (final OsgPreset preset in settings.osgWorkspaceConfig.threePresets) {
+      for (final OsgSlot slot in preset.slots) {
+        final String? family = slot.fontFamily?.trim();
+        if (family == null || family.isEmpty) {
+          continue;
+        }
+        configuredFamilies.add(family);
+      }
+    }
+    for (final String family in configuredFamilies) {
+      if (_loadedSystemFontFamilies.contains(family)) {
+        continue;
+      }
+      try {
+        await SystemFonts().loadFont(family);
+        _loadedSystemFontFamilies.add(family);
+      } catch (e, st) {
+        _logger.fine("Failed to preload system font '$family': $e\n$st");
+      }
+    }
   }
 
   @visibleForTesting
@@ -555,6 +908,7 @@ class DashboardViewModel extends ChangeNotifier {
     _selectedItemKey = item.stableKey;
     _markInMs = null;
     _markOutMs = null;
+    _reconcilePreviewOsgPresetVisibilityForSelectedItem();
     notifyListeners();
   }
 
@@ -695,12 +1049,27 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addSavedTag(String tag) async {
+  Future<void> addSavedTag(String tag, {int? semanticTypeId}) async {
     final MediaRepository? repository = _mediaRepository;
     if (repository == null) {
       return;
     }
-    await repository.addSavedTag(tag);
+    await repository.addSavedTag(tag, semanticTypeId: semanticTypeId);
+    await _reloadFromRepository();
+  }
+
+  Future<void> setSavedTagSemanticType({
+    required String tagName,
+    int? semanticTypeId,
+  }) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.setSavedTagSemanticType(
+      tag: tagName,
+      semanticTypeId: semanticTypeId,
+    );
     await _reloadFromRepository();
   }
 
@@ -711,6 +1080,63 @@ class DashboardViewModel extends ChangeNotifier {
     }
     await repository.removeSavedTag(tag);
     await _reloadFromRepository();
+  }
+
+  Future<void> renameSavedTagOnShelf({
+    required String oldName,
+    required String newName,
+  }) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.renameSavedTag(oldName: oldName, newName: newName);
+    renameCaptureTagEntry(oldName: oldName, newName: newName);
+    await _reloadFromRepository();
+  }
+
+  void renameCaptureTagEntry({
+    required String oldName,
+    required String newName,
+  }) {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    final String o = repository.normalizeTag(oldName);
+    final String n = repository.normalizeTag(newName);
+    if (o.isEmpty || n.isEmpty || o.toLowerCase() == n.toLowerCase()) {
+      return;
+    }
+    final int idxOld = _captureTags.indexWhere(
+      (ShelfTagEntry e) => e.name.toLowerCase() == o.toLowerCase(),
+    );
+    if (idxOld < 0) {
+      return;
+    }
+    final int? sem = _captureTags[idxOld].semanticTypeId;
+    _captureTags.removeAt(idxOld);
+    final int idxNew = _captureTags.indexWhere(
+      (ShelfTagEntry e) => e.name.toLowerCase() == n.toLowerCase(),
+    );
+    if (idxNew >= 0) {
+      final ShelfTagEntry exist = _captureTags[idxNew];
+      _captureTags[idxNew] = ShelfTagEntry(
+        name: exist.name,
+        semanticTypeId: sem ?? exist.semanticTypeId,
+      );
+    } else {
+      _captureTags.add(ShelfTagEntry(name: n, semanticTypeId: sem));
+    }
+    notifyListeners();
+  }
+
+  Future<int?> lookupTagIdForLibraryTagName(String tagName) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return null;
+    }
+    return repository.lookupTagIdByNormalizedName(tagName);
   }
 
   Future<void> setDisplayNameOverride(
@@ -729,6 +1155,22 @@ class DashboardViewModel extends ChangeNotifier {
     await _reloadFromRepository();
   }
 
+  Future<void> setAnnotations(
+    MediaListItem item,
+    String? annotations,
+  ) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.setMediaAnnotations(
+      mediaType: item.type,
+      mediaId: item.id,
+      annotations: annotations,
+    );
+    await _reloadFromRepository();
+  }
+
   Future<void> applySavedTagToSelectedMedia(String tag) async {
     await addTagToSelectedMedia(tag);
   }
@@ -736,14 +1178,15 @@ class DashboardViewModel extends ChangeNotifier {
   Future<void> applyAllSavedTagsToSelectedMedia() async {
     final MediaListItem? item = selectedItem;
     final MediaRepository? repository = _mediaRepository;
-    if (item == null || repository == null || _savedTags.isEmpty) {
+    if (item == null || repository == null || _savedTagEntries.isEmpty) {
       return;
     }
-    for (final String tag in _savedTags) {
+    for (final ShelfTagEntry e in _savedTagEntries) {
       await repository.addTagToMedia(
         mediaType: item.type,
         mediaId: item.id,
-        tag: tag,
+        tag: e.name,
+        semanticTypeId: e.semanticTypeId,
       );
     }
     await _reloadFromRepository();
@@ -751,10 +1194,12 @@ class DashboardViewModel extends ChangeNotifier {
 
   Future<int> applyAllSavedTagsToItems({required bool filteredOnly}) async {
     final MediaRepository? repository = _mediaRepository;
-    if (repository == null || _savedTags.isEmpty) {
+    if (repository == null || _savedTagEntries.isEmpty) {
       return 0;
     }
-    final List<String> savedTags = List<String>.from(_savedTags);
+    final List<ShelfTagEntry> savedTags = List<ShelfTagEntry>.from(
+      _savedTagEntries,
+    );
     final List<MediaListItem> itemsNeedingUpdate = _itemsNeedingSavedTagApply(
       filteredOnly: filteredOnly,
     );
@@ -942,17 +1387,28 @@ class DashboardViewModel extends ChangeNotifier {
     if (repository == null) {
       return;
     }
+    final Map<String, List<MediaTagAttachment>> attachmentsBefore =
+        <String, List<MediaTagAttachment>>{
+          for (final MapEntry<String, List<MediaTagAttachment>> e
+              in _tagAttachmentsByItemKey.entries)
+            e.key: List<MediaTagAttachment>.from(e.value),
+        };
     final List<MediaListItem> items = await repository.listMixedItems();
     final Map<String, Set<String>> tagsByItemKey = await repository
         .listTagsForItems(items);
+    final Map<String, List<MediaTagAttachment>> attachmentsByKey =
+        await repository.listMediaTagAttachmentsForItems(items);
     _allItems = items;
     _tagsByItemKey
       ..clear()
       ..addAll(tagsByItemKey);
+    _tagAttachmentsByItemKey
+      ..clear()
+      ..addAll(attachmentsByKey);
     _allTags
       ..clear()
       ..addAll(await repository.listAllTags());
-    _savedTags
+    _savedTagEntries
       ..clear()
       ..addAll(await repository.listSavedTags());
     if (_selectedItemKey != null &&
@@ -961,7 +1417,30 @@ class DashboardViewModel extends ChangeNotifier {
         )) {
       _selectedItemKey = null;
     }
+    final Set<String> validKeys =
+        _allItems.map((MediaListItem i) => i.stableKey).toSet();
+    _semanticTagSnapshotByItemKey.removeWhere(
+      (String k, int _) => !validKeys.contains(k),
+    );
+    final Set<String> snapKeys = Set<String>.from(attachmentsBefore.keys)
+      ..addAll(attachmentsByKey.keys);
+    for (final String k in snapKeys) {
+      if (!validKeys.contains(k)) {
+        continue;
+      }
+      final List<MediaTagAttachment> ba = List<MediaTagAttachment>.from(
+        attachmentsBefore[k] ?? const <MediaTagAttachment>[],
+      );
+      final List<MediaTagAttachment> bb = List<MediaTagAttachment>.from(
+        attachmentsByKey[k] ?? const <MediaTagAttachment>[],
+      );
+      if (!_semanticTagAttachmentSnapshotsEqual(ba, bb)) {
+        _semanticTagSnapshotByItemKey[k] =
+            (_semanticTagSnapshotByItemKey[k] ?? 0) + 1;
+      }
+    }
     _applyFilters();
+    _reconcilePreviewOsgPresetVisibilityForSelectedItem();
     notifyListeners();
   }
 
@@ -1117,6 +1596,8 @@ class DashboardViewModel extends ChangeNotifier {
     final List<MediaListItem> items = await repository.listMixedItems();
     final Map<String, Set<String>> tagsByItem = await repository
         .listTagsForItems(items);
+    final Map<String, List<MediaTagAttachment>> attachmentsByItem =
+        await repository.listMediaTagAttachmentsForItems(items);
     final WorkspaceSettingsBundle settings = await repository
         .loadWorkspaceSettings();
     final Map<String, Object?> payload = <String, Object?>{
@@ -1168,6 +1649,20 @@ class DashboardViewModel extends ChangeNotifier {
           "outputRelativeDir": settings.capturePathsSettings.outputRelativeDir,
         },
         "ignoredFolders": settings.ignoredFolders,
+        "playoutOutput": <String, Object?>{
+          "width": settings.playoutOutputSize.width,
+          "height": settings.playoutOutputSize.height,
+        },
+        "osgPresets": jsonDecode(settings.osgWorkspaceConfig.encodeToStorageJson()),
+        "tagSemanticTypes": settings.tagSemanticTypes
+            .map(
+              (TagSemanticType t) => <String, Object?>{
+                "id": t.id,
+                "name": t.name,
+                "iconCodePoint": t.iconCodePoint,
+              },
+            )
+            .toList(),
       },
       "mediaItems": items.map((MediaListItem item) {
         final bool isClip = item.type == MediaListItemType.clip;
@@ -1182,6 +1677,15 @@ class DashboardViewModel extends ChangeNotifier {
             item.filePath,
           ),
           "tags": (tagsByItem[item.stableKey] ?? <String>{}).toList()..sort(),
+          "tagRows": (attachmentsByItem[item.stableKey] ?? <MediaTagAttachment>[])
+              .map(
+                (MediaTagAttachment a) => <String, Object?>{
+                  "tagName": a.tagName,
+                  "semanticTypeId": a.semanticTypeId,
+                  "semanticTypeIconCodePoint": a.semanticTypeIconCodePoint,
+                },
+              )
+              .toList(),
           "clipRange": isClip
               ? <String, Object?>{
                   "inMs": item.clip!.inMs,
@@ -1206,9 +1710,13 @@ class DashboardViewModel extends ChangeNotifier {
     }
     final Map<String, Set<String>> tagsByItemKey = await repository
         .listTagsForItems(items);
+    final Map<String, List<MediaTagAttachment>> attachmentsByKey =
+        await repository.listMediaTagAttachmentsForItems(items);
     for (final MediaListItem item in items) {
       _tagsByItemKey[item.stableKey] =
           tagsByItemKey[item.stableKey] ?? <String>{};
+      _tagAttachmentsByItemKey[item.stableKey] =
+          attachmentsByKey[item.stableKey] ?? <MediaTagAttachment>[];
     }
     if (refreshAllTags) {
       _allTags

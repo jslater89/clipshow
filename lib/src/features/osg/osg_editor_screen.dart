@@ -1,0 +1,1291 @@
+import "dart:async";
+import "dart:io";
+
+import "package:file_picker/file_picker.dart";
+import "package:flutter/material.dart";
+import "package:path/path.dart" as p;
+import "package:provider/provider.dart";
+import "package:system_fonts/system_fonts.dart";
+
+import "package:obs_clipshow/src/app/ui_scale.dart";
+import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
+import "package:obs_clipshow/src/features/osg/osg_editor_geometry.dart";
+import "package:obs_clipshow/src/features/osg/osg_editor_pixel_rect.dart";
+import "package:obs_clipshow/src/features/osg/osg_template_aspect.dart";
+import "package:obs_clipshow/src/features/osg/widgets/osg_preset_canvas_preview.dart";
+import "package:obs_clipshow/src/features/osg/widgets/osg_semantic_type_icon_picker.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/widgets/rgba_color_picker.dart";
+import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
+
+InputDecoration _osgEditorDenseBorderlessDecoration({
+  required String labelText,
+  String? helperText,
+}) {
+  return InputDecoration(
+    floatingLabelBehavior: FloatingLabelBehavior.always,
+    labelText: labelText,
+    helperText: helperText,
+    isDense: true,
+    border: UnderlineInputBorder()
+  );
+}
+
+/// Full-screen editor for semantic types and three OSG presets.
+/// Playout canvas size is configured under Workspace Settings.
+class OsgEditorScreen extends StatefulWidget {
+  const OsgEditorScreen({super.key, required this.workspaceRoot});
+
+  final String workspaceRoot;
+
+  @override
+  State<OsgEditorScreen> createState() => _OsgEditorScreenState();
+}
+
+class _OsgEditorScreenState extends State<OsgEditorScreen>
+    with SingleTickerProviderStateMixin {
+  late OsgWorkspaceConfig _draftOsg;
+  late TabController _tabController;
+  List<String> _systemFontNames = <String>[];
+  bool _systemFontsLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    final DashboardViewModel vm = context.read<DashboardViewModel>();
+    _draftOsg = OsgWorkspaceConfig.decodeFromStorageJson(
+      vm.osgWorkspaceConfig.encodeToStorageJson(),
+    );
+    unawaited(_loadSystemFontNames());
+  }
+
+  Future<void> _loadSystemFontNames() async {
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) {
+      return;
+    }
+    try {
+      final List<String> names = List<String>.from(SystemFonts().getFontList());
+      names.sort(
+        (String a, String b) => a.toLowerCase().compareTo(b.toLowerCase()),
+      );
+      if (mounted) {
+        setState(() {
+          _systemFontNames = names;
+          _systemFontsLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _systemFontNames = <String>[];
+          _systemFontsLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _persistOsg(DashboardViewModel vm) async {
+    await vm.saveOsgWorkspaceConfig(_draftOsg);
+  }
+
+  Future<void> _importTemplate(int presetIndex) async {
+    final FilePickerResult? result = await FilePicker.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    if (result == null || result.files.single.path == null) {
+      return;
+    }
+    final String srcPath = result.files.single.path!;
+    final String base = p.basename(srcPath);
+    final String destDir = p.join(widget.workspaceRoot, "osg");
+    await Directory(destDir).create(recursive: true);
+    final String destPath = p.join(destDir, "preset_${presetIndex}_$base");
+    await File(srcPath).copy(destPath);
+    final String relative = WorkspaceMediaPaths.normalizeStored(
+      p.join("osg", "preset_${presetIndex}_$base").replaceAll("\\", "/"),
+    );
+    final double? asp = await osgReadTemplatePixelAspect(File(destPath));
+    if (!mounted) {
+      return;
+    }
+    final DashboardViewModel vm = context.read<DashboardViewModel>();
+    final double playoutAspect = vm.playoutOutputSize.aspectRatio;
+    final double imgAsp = asp ?? 16 / 9;
+    setState(() {
+      final List<OsgPreset> list = _draftOsg.threePresets.toList();
+      final OsgPreset old = list[presetIndex];
+      final OsgNormRect frame = osgClampFrameWithImageAspect(
+        frame: old.frame,
+        imageWidthOverHeight: imgAsp,
+        playoutAspect: playoutAspect,
+      );
+      list[presetIndex] = old.copyWith(
+        templateRelativePath: relative,
+        frame: frame,
+        templatePixelAspect: asp,
+        templateBackgroundKind: OsgTemplateBackgroundKind.image,
+        templateSolidWidthPx: 0,
+        templateSolidHeightPx: 0,
+      );
+      _draftOsg = OsgWorkspaceConfig(presets: list);
+    });
+  }
+
+  OsgNormRect _frameLockedToTemplateAspect(
+    OsgPreset preset,
+    OsgNormRect raw,
+    PlayoutOutputSize po,
+  ) {
+    final double asp = preset.templateAspectRatioForFrame;
+    return osgClampFrameWithImageAspect(
+      frame: raw,
+      imageWidthOverHeight: asp,
+      playoutAspect: po.aspectRatio,
+    );
+  }
+
+  void _replacePreset(int index, OsgPreset next) {
+    setState(() {
+      final List<OsgPreset> list = _draftOsg.threePresets.toList();
+      list[index] = next;
+      _draftOsg = OsgWorkspaceConfig(presets: list);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final DashboardViewModel vm = context.watch<DashboardViewModel>();
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("On-screen graphics"),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text("Done"),
+          ),
+        ],
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Expanded(
+                  flex: 1,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      scaleDimension(context, 16),
+                      scaleDimension(context, 8),
+                      scaleDimension(context, 16),
+                      scaleDimension(context, 4),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          "Playout canvas: ${vm.playoutOutputSize.width}×${vm.playoutOutputSize.height} px "
+                          "(Workspace Settings).",
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          "Semantic types",
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 4),
+                        Expanded(
+                          child: Scrollbar(
+                            child: ListView(
+                              padding: EdgeInsets.zero,
+                              children: vm.tagSemanticTypes
+                                  .map(
+                                    (TagSemanticType t) =>
+                                        _semanticTypeTile(context, vm, t),
+                                  )
+                                  .toList(),
+                            ),
+                          ),
+                        ),
+                        FilledButton.tonal(
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: () async {
+                            final String? name = await _promptName(
+                              context,
+                              "New type",
+                            );
+                            if (name == null || name.isEmpty) {
+                              return;
+                            }
+                            await vm.insertTagSemanticType(name: name);
+                          },
+                          child: const Text("Add type"),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Material(
+                  color: Theme.of(context).colorScheme.surface,
+                  child: TabBar(
+                    controller: _tabController,
+                    tabs: const <Widget>[
+                      Tab(text: "Preset 8"),
+                      Tab(text: "Preset 9"),
+                      Tab(text: "Preset 0"),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: 4,
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: <Widget>[
+                      _presetTab(context, vm, 0),
+                      _presetTab(context, vm, 1),
+                      _presetTab(context, vm, 2),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SafeArea(
+            minimum: EdgeInsets.fromLTRB(
+              scaleDimension(context, 16),
+              scaleDimension(context, 8),
+              scaleDimension(context, 16),
+              scaleDimension(context, 16),
+            ),
+            child: FilledButton.icon(
+              onPressed: () async {
+                await _persistOsg(vm);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("OSG configuration saved.")),
+                  );
+                }
+              },
+              icon: const Icon(Icons.save),
+              label: const Text("Save all OSG settings"),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _semanticTypeTile(
+    BuildContext context,
+    DashboardViewModel vm,
+    TagSemanticType t,
+  ) {
+    return ListTile(
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(vertical: 2),
+      minLeadingWidth: 28,
+      leading: t.iconCodePoint != null
+          ? Icon(osgMaterialIconFromCodePoint(t.iconCodePoint!), size: 22)
+          : Icon(Icons.label_outline, size: 22, color: Colors.grey.shade600),
+      title: Text(t.name, style: Theme.of(context).textTheme.bodyMedium),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          IconButton(
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            padding: EdgeInsets.zero,
+            tooltip: "Choose icon",
+            icon: const Icon(Icons.emoji_emotions_outlined, size: 20),
+            onPressed: () async {
+              final Object? r = await showOsgSemanticTypeIconPicker(context);
+              if (!context.mounted) {
+                return;
+              }
+              if (r == null) {
+                return;
+              }
+              if (r is OsgSemanticIconClear) {
+                await vm.updateTagSemanticType(
+                  id: t.id,
+                  name: t.name,
+                  iconCodePoint: null,
+                );
+              } else if (r is IconData) {
+                await vm.updateTagSemanticType(
+                  id: t.id,
+                  name: t.name,
+                  iconCodePoint: r.codePoint,
+                );
+              }
+            },
+          ),
+          IconButton(
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            padding: EdgeInsets.zero,
+            tooltip: "Delete type",
+            icon: const Icon(Icons.delete_outline, size: 20),
+            onPressed: () async {
+              final bool ok = await vm.deleteTagSemanticType(t.id);
+              if (context.mounted && !ok) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Cannot delete: type is still in use."),
+                  ),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _presetTab(BuildContext context, DashboardViewModel vm, int index) {
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(
+        scaleDimension(context, 16),
+        scaleDimension(context, 12),
+        scaleDimension(context, 16),
+        scaleDimension(context, 24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            "Previews",
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          Text(
+            "Left: template only."
+            "Right: template in screen space.",
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 400,
+            width: double.infinity,
+            child: Builder(
+              builder: (BuildContext context) {
+                final Map<int, String> semanticPreviewNames = <int, String>{
+                  for (final TagSemanticType t in vm.tagSemanticTypes)
+                    t.id: t.name,
+                };
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Expanded(
+                      child: OsgPresetCanvasPreview(
+                        playoutOutputSize: vm.playoutOutputSize,
+                        workspaceRoot: widget.workspaceRoot,
+                        preset: _draftOsg.threePresets[index],
+                        interaction: OsgEditorPreviewInteraction.slots,
+                        graphicLocalLayout: true,
+                        dimOutsideFrame: false,
+                        applyLayerOpacity: false,
+                        semanticTypeNamesById: semanticPreviewNames,
+                        onSlotChanged: (int slotIndex, OsgSlot slot) {
+                          final OsgPreset p = _draftOsg.threePresets[index];
+                          final List<OsgSlot> slots =
+                              List<OsgSlot>.from(p.slots);
+                          slots[slotIndex] = slot;
+                          _replacePreset(index, p.copyWith(slots: slots));
+                        },
+                      ),
+                    ),
+                    SizedBox(width: scaleDimension(context, 10)),
+                    Expanded(
+                      child: OsgPresetCanvasPreview(
+                        playoutOutputSize: vm.playoutOutputSize,
+                        workspaceRoot: widget.workspaceRoot,
+                        preset: _draftOsg.threePresets[index],
+                        interaction: OsgEditorPreviewInteraction.frame,
+                        graphicLocalLayout: false,
+                        dimOutsideFrame: false,
+                        applyLayerOpacity: true,
+                        semanticTypeNamesById: semanticPreviewNames,
+                        onFrameChanged: (OsgNormRect next) {
+                          final OsgPreset p = _draftOsg.threePresets[index];
+                          _replacePreset(index, p.copyWith(frame: next));
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          _presetControls(context, vm, index),
+        ],
+      ),
+    );
+  }
+
+  Widget _presetControls(
+    BuildContext context,
+    DashboardViewModel vm,
+    int index,
+  ) {
+    final OsgPreset preset = _draftOsg.threePresets[index];
+    final String hotkeyLabel = index == 0
+        ? "8"
+        : index == 1
+        ? "9"
+        : "0";
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Text(
+                  "Preset $hotkeyLabel",
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const Spacer(),
+                Switch(
+                  value: preset.enabled,
+                  onChanged: (bool v) {
+                    _replacePreset(index, preset.copyWith(enabled: v));
+                  },
+                ),
+              ],
+            ),
+            Text(
+              preset.templateBackgroundKind == OsgTemplateBackgroundKind.solid
+                  ? "Solid color (${preset.templateSolidWidthPx}×${preset.templateSolidHeightPx} px, aspect ${preset.templateAspectRatioForFrame.toStringAsFixed(3)} W÷H)."
+                  : (preset.templateRelativePath.isEmpty
+                        ? "No template image"
+                        : preset.templateRelativePath),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<OsgTemplateBackgroundKind>(
+              segments: const <ButtonSegment<OsgTemplateBackgroundKind>>[
+                ButtonSegment<OsgTemplateBackgroundKind>(
+                  value: OsgTemplateBackgroundKind.image,
+                  label: Text("Image"),
+                  icon: Icon(Icons.image_outlined, size: 18),
+                ),
+                ButtonSegment<OsgTemplateBackgroundKind>(
+                  value: OsgTemplateBackgroundKind.solid,
+                  label: Text("Color"),
+                  icon: Icon(Icons.format_color_fill, size: 18),
+                ),
+              ],
+              selected: <OsgTemplateBackgroundKind>{
+                preset.templateBackgroundKind,
+              },
+              onSelectionChanged: (Set<OsgTemplateBackgroundKind> next) {
+                if (next.isEmpty) {
+                  return;
+                }
+                final OsgTemplateBackgroundKind k = next.single;
+                if (k == OsgTemplateBackgroundKind.image) {
+                  _replacePreset(
+                    index,
+                    preset.copyWith(
+                      templateBackgroundKind: k,
+                      templateSolidWidthPx: 0,
+                      templateSolidHeightPx: 0,
+                    ),
+                  );
+                  return;
+                }
+                int w = preset.templateSolidWidthPx;
+                int h = preset.templateSolidHeightPx;
+                if (w <= 0 || h <= 0) {
+                  final double? a = preset.templatePixelAspect;
+                  if (a != null && a > 1e-9) {
+                    h = 720;
+                    w = (a * h).round().clamp(8, 999999);
+                  } else {
+                    w = 400;
+                    h = 200;
+                  }
+                }
+                _replacePreset(
+                  index,
+                  preset.copyWith(
+                    templateBackgroundKind: k,
+                    templateSolidWidthPx: w,
+                    templateSolidHeightPx: h,
+                    templatePixelAspect: w / h,
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                if (preset.templateBackgroundKind ==
+                    OsgTemplateBackgroundKind.image)
+                  OutlinedButton.icon(
+                    onPressed: () => unawaited(_importTemplate(index)),
+                    icon: const Icon(Icons.image_outlined),
+                    label: const Text("Import image"),
+                  ),
+                if (preset.templateBackgroundKind ==
+                    OsgTemplateBackgroundKind.solid)
+                  RgbaColorPickerButton(
+                    label: "Background",
+                    valueArgb: preset.templateSolidArgb,
+                    onChanged: (int v) => _replacePreset(
+                      index,
+                      preset.copyWith(templateSolidArgb: v),
+                    ),
+                  ),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    final List<OsgSlot> slots = List<OsgSlot>.from(preset.slots)
+                      ..add(
+                        const OsgSlot(
+                          textSource: OsgTextSource.fixed,
+                          fixedText: "Text",
+                          box: OsgNormRect(
+                            x: 0.05,
+                            y: 0.85,
+                            width: 0.5,
+                            height: 0.08,
+                          ),
+                          textColorArgb: 0xFFFFFFFF,
+                        ),
+                      );
+                    _replacePreset(
+                      index,
+                      preset.copyWith(slots: slots),
+                    );
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text("Add text slot"),
+                ),
+              ],
+            ),
+            if (preset.templateBackgroundKind ==
+                OsgTemplateBackgroundKind.solid) ...<Widget>[
+              SizedBox(height: scaleDimension(context, 8)),
+              _SolidGraphicSizeFields(
+                key: ValueKey<int>(index),
+                widthPx: preset.templateSolidWidthPx,
+                heightPx: preset.templateSolidHeightPx,
+                onCommit: (int w, int h) {
+                  final double asp = w / h;
+                  final OsgNormRect frame = osgClampFrameWithImageAspect(
+                    frame: preset.frame,
+                    imageWidthOverHeight: asp,
+                    playoutAspect: vm.playoutOutputSize.aspectRatio,
+                  );
+                  _replacePreset(
+                    index,
+                    preset.copyWith(
+                      templateSolidWidthPx: w,
+                      templateSolidHeightPx: h,
+                      templatePixelAspect: asp,
+                      frame: frame,
+                    ),
+                  );
+                },
+              ),
+            ],
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                Text(
+                  "Layer opacity",
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                Expanded(
+                  child: Slider(
+                    value: preset.layerOpacity.clamp(0.0, 1.0),
+                    min: 0,
+                    max: 1,
+                    divisions: 20,
+                    label: "${(preset.layerOpacity * 100).round()}%",
+                    onChanged: (double v) => _replacePreset(
+                      index,
+                      preset.copyWith(layerOpacity: v),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: <Widget>[
+                Text(
+                  "Corner radius",
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                Expanded(
+                  child: Slider(
+                    value: preset.templateCornerRadiusNorm.clamp(0.0, 0.25),
+                    min: 0,
+                    max: 0.25,
+                    divisions: 25,
+                    label:
+                        "${(preset.templateCornerRadiusNorm * 100).toStringAsFixed(0)}% min edge",
+                    onChanged: (double v) => _replacePreset(
+                      index,
+                      preset.copyWith(templateCornerRadiusNorm: v),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "Required Semantic Tags",
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "The overlay stays off until the media row has at least one tag for each selected type.",
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            if (vm.tagSemanticTypes.isEmpty)
+              Text(
+                "None Configured — Add Types In Workspace Settings.",
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  for (final TagSemanticType t in vm.tagSemanticTypes)
+                    FilterChip(
+                      label: Text(t.name),
+                      selected: preset.requiredSemanticTypeIds.contains(t.id),
+                      onSelected: (bool v) {
+                        final Set<int> next =
+                            preset.requiredSemanticTypeIds.toSet();
+                        if (v) {
+                          next.add(t.id);
+                        } else {
+                          next.remove(t.id);
+                        }
+                        final List<int> sorted = next.toList()..sort();
+                        _replacePreset(
+                          index,
+                          preset.copyWith(
+                            requiredSemanticTypeIds: sorted,
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            const SizedBox(height: 12),
+            _frameEditor(context, vm, index, preset),
+            const SizedBox(height: 8),
+            ...preset.slots.asMap().entries.map(
+              (MapEntry<int, OsgSlot> e) => _OsgSlotRow(
+                key: ValueKey<String>("slot_${index}_${e.key}"),
+                presetIndex: index,
+                slotIndex: e.key,
+                slot: e.value,
+                preset: preset,
+                vm: vm,
+                systemFontNames: _systemFontNames,
+                systemFontsLoading: _systemFontsLoading,
+                onSlotChanged: (OsgSlot next) => _updateSlot(index, e.key, next),
+                onDelete: () {
+                  final List<OsgSlot> slots = List<OsgSlot>.from(preset.slots)
+                    ..removeAt(e.key);
+                  _replacePreset(index, preset.copyWith(slots: slots));
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _frameEditor(
+    BuildContext context,
+    DashboardViewModel vm,
+    int presetIndex,
+    OsgPreset preset,
+  ) {
+    final PlayoutOutputSize po = vm.playoutOutputSize;
+    return OsgScaledCanvasRectFields(
+      displayMode: OsgRectFieldDisplayMode.canvasPixels,
+      canvasWidth: po.width,
+      canvasHeight: po.height,
+      normRect: preset.frame,
+      label: "Frame (canvas pixels)",
+      isSlotInFrame: false,
+      frame: null,
+      onNormChanged: (OsgNormRect next) {
+        final OsgNormRect locked = _frameLockedToTemplateAspect(
+          preset,
+          next,
+          po,
+        );
+        _replacePreset(
+          presetIndex,
+          preset.copyWith(frame: locked),
+        );
+      },
+    );
+  }
+
+  void _updateSlot(int presetIndex, int slotIndex, OsgSlot nextSlot) {
+    final OsgPreset preset = _draftOsg.threePresets[presetIndex];
+    final List<OsgSlot> slots = List<OsgSlot>.from(preset.slots);
+    slots[slotIndex] = nextSlot;
+    _replacePreset(presetIndex, preset.copyWith(slots: slots));
+  }
+}
+
+class _OsgSlotRow extends StatefulWidget {
+  const _OsgSlotRow({
+    super.key,
+    required this.presetIndex,
+    required this.slotIndex,
+    required this.slot,
+    required this.preset,
+    required this.vm,
+    required this.systemFontNames,
+    required this.systemFontsLoading,
+    required this.onSlotChanged,
+    required this.onDelete,
+  });
+
+  final int presetIndex;
+  final int slotIndex;
+  final OsgSlot slot;
+  final OsgPreset preset;
+  final DashboardViewModel vm;
+  final List<String> systemFontNames;
+  final bool systemFontsLoading;
+  final ValueChanged<OsgSlot> onSlotChanged;
+  final VoidCallback onDelete;
+
+  @override
+  State<_OsgSlotRow> createState() => _OsgSlotRowState();
+}
+
+class _OsgSlotRowState extends State<_OsgSlotRow> {
+  late final TextEditingController _fontSizePct;
+  final FocusNode _fontSizeFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _fontSizePct = TextEditingController(text: _fontSizePctLabel(widget.slot.fontSizeNorm));
+  }
+
+  static String _fontSizePctLabel(double fontSizeNorm) {
+    return (fontSizeNorm * 100).toStringAsFixed(1);
+  }
+
+  @override
+  void didUpdateWidget(covariant _OsgSlotRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.slot.fontSizeNorm != widget.slot.fontSizeNorm &&
+        !_fontSizeFocus.hasFocus) {
+      _fontSizePct.text = _fontSizePctLabel(widget.slot.fontSizeNorm);
+    }
+  }
+
+  @override
+  void dispose() {
+    _fontSizePct.dispose();
+    _fontSizeFocus.dispose();
+    super.dispose();
+  }
+
+  void _emitFontSizePct() {
+    final double? pct = double.tryParse(_fontSizePct.text.trim());
+    if (pct == null) {
+      return;
+    }
+    final double norm = (pct / 100).clamp(0.005, 0.25);
+    widget.onSlotChanged(widget.slot.copyWith(fontSizeNorm: norm));
+  }
+
+  Future<void> _applyFontFamily(String? family) async {
+    final String? trimmed = family?.trim();
+    final String? nextFamily =
+        trimmed == null || trimmed.isEmpty ? null : trimmed;
+    if (nextFamily != null) {
+      await SystemFonts().loadFont(nextFamily);
+    }
+    widget.onSlotChanged(widget.slot.copyWith(fontFamily: nextFamily));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final OsgSlot slot = widget.slot;
+    final OsgPreset preset = widget.preset;
+    final DashboardViewModel vm = widget.vm;
+    final double gap = scaleDimension(context, 8);
+    final double sizeColW = scaleDimension(context, 56);
+    final TextStyle? slotFieldLabelStyle =
+        Theme.of(context).inputDecorationTheme.labelStyle ??
+        Theme.of(context).textTheme.labelSmall;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: scaleDimension(context, 10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Text(
+                "Slot ${widget.slotIndex + 1}",
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 20),
+                onPressed: widget.onDelete,
+              ),
+            ],
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              Expanded(
+                flex: 2,
+                child: DropdownButtonFormField<OsgTextSource>(
+                  key: ValueKey<String>(
+                    "src_${widget.presetIndex}_${widget.slotIndex}_${slot.textSource.name}",
+                  ),
+                  initialValue: slot.textSource,
+                  isExpanded: true,
+                  decoration: _osgEditorDenseBorderlessDecoration(
+                    labelText: "Source",
+                  ),
+                  items: OsgTextSource.values
+                      .map(
+                        (OsgTextSource s) => DropdownMenuItem<OsgTextSource>(
+                          value: s,
+                          child: Text(s.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (OsgTextSource? v) {
+                    if (v == null) {
+                      return;
+                    }
+                    widget.onSlotChanged(slot.copyWith(textSource: v));
+                  },
+                ),
+              ),
+              SizedBox(width: gap),
+              Expanded(
+                flex: slot.textSource == OsgTextSource.fixed ? 4 : 2,
+                child: switch (slot.textSource) {
+                  OsgTextSource.fixed => TextFormField(
+                      key: ValueKey<String>(
+                        "fixed_${widget.presetIndex}_${widget.slotIndex}",
+                      ),
+                      initialValue: slot.fixedText,
+                      decoration: const InputDecoration(
+                        labelText: "Fixed text",
+                        isDense: true,
+                      ),
+                      onChanged: (String v) =>
+                          widget.onSlotChanged(slot.copyWith(fixedText: v)),
+                    ),
+                  OsgTextSource.semantic => vm.tagSemanticTypes.isEmpty
+                      ? TextFormField(
+                          key: ValueKey<String>(
+                            "sem_empty_${widget.presetIndex}_${widget.slotIndex}",
+                          ),
+                          enabled: false,
+                          initialValue: "—",
+                          style: Theme.of(context).textTheme.bodySmall,
+                          decoration: _osgEditorDenseBorderlessDecoration(
+                            labelText: "Semantic type",
+                            helperText: "Add semantic types above.",
+                          ),
+                        )
+                      : DropdownButtonFormField<int>(
+                          key: ValueKey<String>(
+                            "sem_${widget.presetIndex}_${widget.slotIndex}_${slot.semanticTypeId}",
+                          ),
+                          isExpanded: true,
+                          initialValue:
+                              slot.semanticTypeId ?? vm.tagSemanticTypes.first.id,
+                          decoration: _osgEditorDenseBorderlessDecoration(
+                            labelText: "Semantic type",
+                          ),
+                          items: vm.tagSemanticTypes
+                              .map(
+                                (TagSemanticType t) => DropdownMenuItem<int>(
+                                  value: t.id,
+                                  child: Text(t.name),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (int? v) {
+                            if (v != null) {
+                              widget.onSlotChanged(
+                                slot.copyWith(semanticTypeId: v),
+                              );
+                            }
+                          },
+                        ),
+                  OsgTextSource.annotation => TextFormField(
+                      key: ValueKey<String>(
+                        "ann_${widget.presetIndex}_${widget.slotIndex}",
+                      ),
+                      enabled: false,
+                      decoration: _osgEditorDenseBorderlessDecoration(
+                        labelText: "Annotation",
+                      ).copyWith(hintText: "Media item's annotation"),
+                    ),
+                },
+              ),
+              SizedBox(width: gap),
+              Expanded(
+                flex: 4,
+                child: widget.systemFontsLoading
+                    ? SizedBox(
+                        height: scaleDimension(context, 40),
+                        child: const Center(
+                          child: LinearProgressIndicator(minHeight: 2),
+                        ),
+                      )
+                    : widget.systemFontNames.isEmpty
+                    ? TextFormField(
+                        key: ValueKey<String>(
+                          "fontmanual_${widget.presetIndex}_${widget.slotIndex}",
+                        ),
+                        initialValue: slot.fontFamily ?? "",
+                        decoration: const InputDecoration(
+                          labelText: "Font family",
+                          isDense: true,
+                        ),
+                        onFieldSubmitted: (String v) => unawaited(_applyFontFamily(v)),
+                      )
+                    : AdaptiveAutocomplete<String>(
+                        key: ValueKey<String>(
+                          "fontac_${widget.presetIndex}_${widget.slotIndex}_${slot.fontFamily}",
+                        ),
+                        optionsBuilder: (TextEditingValue te) {
+                          final String q = te.text.trim().toLowerCase();
+                          if (q.isEmpty) {
+                            return widget.systemFontNames.take(50);
+                          }
+                          return widget.systemFontNames
+                              .where(
+                                (String f) => f.toLowerCase().contains(q),
+                              )
+                              .take(50);
+                        },
+                        onSelected: (String f) => unawaited(_applyFontFamily(f)),
+                        fieldViewBuilder: (
+                          BuildContext context,
+                          TextEditingController textEditingController,
+                          FocusNode focusNode,
+                          VoidCallback onFieldSubmitted,
+                        ) {
+                          if (!focusNode.hasFocus) {
+                            final String? fam = widget.slot.fontFamily;
+                            if (fam != null &&
+                                fam.isNotEmpty &&
+                                textEditingController.text != fam) {
+                              textEditingController.text = fam;
+                            }
+                          }
+                          return TextField(
+                            controller: textEditingController,
+                            focusNode: focusNode,
+                            decoration: const InputDecoration(
+                              labelText: "Font family",
+                              isDense: true,
+                            ),
+                            onSubmitted: (String v) {
+                              unawaited(_applyFontFamily(v));
+                              onFieldSubmitted();
+                            },
+                          );
+                        },
+                      ),
+              ),
+              SizedBox(width: gap),
+              SizedBox(
+                width: sizeColW,
+                child: TextField(
+                  controller: _fontSizePct,
+                  focusNode: _fontSizeFocus,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  maxLength: 6,
+                  buildCounter: (
+                    BuildContext c, {
+                    required int currentLength,
+                    required bool isFocused,
+                    required int? maxLength,
+                  }) =>
+                      null,
+                  decoration: const InputDecoration(
+                    labelText: "% h",
+                    isDense: true,
+                  ),
+                  onEditingComplete: _emitFontSizePct,
+                  onSubmitted: (_) => _emitFontSizePct(),
+                ),
+              ),
+              SizedBox(width: gap),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text("Align", style: slotFieldLabelStyle),
+                  SizedBox(height: scaleDimension(context, 4)),
+                  SegmentedButton<OsgSlotTextAlign>(
+                    showSelectedIcon: false,
+                    style: ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    segments: const <ButtonSegment<OsgSlotTextAlign>>[
+                      ButtonSegment<OsgSlotTextAlign>(
+                        value: OsgSlotTextAlign.left,
+                        label: Text("L"),
+                        tooltip: "Left",
+                      ),
+                      ButtonSegment<OsgSlotTextAlign>(
+                        value: OsgSlotTextAlign.center,
+                        label: Text("C"),
+                        tooltip: "Center",
+                      ),
+                      ButtonSegment<OsgSlotTextAlign>(
+                        value: OsgSlotTextAlign.right,
+                        label: Text("R"),
+                        tooltip: "Right",
+                      ),
+                    ],
+                    selected: <OsgSlotTextAlign>{slot.textAlign},
+                    onSelectionChanged: (Set<OsgSlotTextAlign> next) {
+                      if (next.isEmpty) {
+                        return;
+                      }
+                      widget.onSlotChanged(
+                        slot.copyWith(textAlign: next.single),
+                      );
+                    },
+                  ),
+                  SizedBox(height: scaleDimension(context, 6)),
+                  SegmentedButton<OsgSlotVerticalAlign>(
+                    showSelectedIcon: false,
+                    style: ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    segments: const <ButtonSegment<OsgSlotVerticalAlign>>[
+                      ButtonSegment<OsgSlotVerticalAlign>(
+                        value: OsgSlotVerticalAlign.top,
+                        label: Text("T"),
+                        tooltip: "Top",
+                      ),
+                      ButtonSegment<OsgSlotVerticalAlign>(
+                        value: OsgSlotVerticalAlign.center,
+                        label: Text("M"),
+                        tooltip: "Middle",
+                      ),
+                      ButtonSegment<OsgSlotVerticalAlign>(
+                        value: OsgSlotVerticalAlign.bottom,
+                        label: Text("B"),
+                        tooltip: "Bottom",
+                      ),
+                    ],
+                    selected: <OsgSlotVerticalAlign>{slot.verticalAlign},
+                    onSelectionChanged: (Set<OsgSlotVerticalAlign> next) {
+                      if (next.isEmpty) {
+                        return;
+                      }
+                      widget.onSlotChanged(
+                        slot.copyWith(verticalAlign: next.single),
+                      );
+                    },
+                  ),
+                ],
+              ),
+              SizedBox(width: gap),
+              RgbaColorPickerButton(
+                label: "Text color",
+                valueArgb: slot.textColorArgb,
+                onChanged: (int v) =>
+                    widget.onSlotChanged(slot.copyWith(textColorArgb: v)),
+              ),
+            ],
+          ),
+          SizedBox(height: gap),
+          OsgScaledCanvasRectFields(
+            displayMode: OsgRectFieldDisplayMode.graphicPercent,
+            canvasWidth: widget.vm.playoutOutputSize.width,
+            canvasHeight: widget.vm.playoutOutputSize.height,
+            normRect: slot.box,
+            label: "Slot box",
+            isSlotInFrame: true,
+            frame: preset.frame,
+            onNormChanged: (OsgNormRect next) {
+              widget.onSlotChanged(slot.copyWith(box: next));
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SolidGraphicSizeFields extends StatefulWidget {
+  const _SolidGraphicSizeFields({
+    super.key,
+    required this.widthPx,
+    required this.heightPx,
+    required this.onCommit,
+  });
+
+  final int widthPx;
+  final int heightPx;
+  final void Function(int widthPx, int heightPx) onCommit;
+
+  @override
+  State<_SolidGraphicSizeFields> createState() =>
+      _SolidGraphicSizeFieldsState();
+}
+
+class _SolidGraphicSizeFieldsState extends State<_SolidGraphicSizeFields> {
+  late final TextEditingController _w;
+  late final TextEditingController _h;
+  final FocusNode _fW = FocusNode();
+  final FocusNode _fH = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _w = TextEditingController(text: "${widget.widthPx}");
+    _h = TextEditingController(text: "${widget.heightPx}");
+  }
+
+  @override
+  void didUpdateWidget(covariant _SolidGraphicSizeFields oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.widthPx != widget.widthPx && !_fW.hasFocus) {
+      _w.text = "${widget.widthPx}";
+    }
+    if (oldWidget.heightPx != widget.heightPx && !_fH.hasFocus) {
+      _h.text = "${widget.heightPx}";
+    }
+  }
+
+  @override
+  void dispose() {
+    _w.dispose();
+    _h.dispose();
+    _fW.dispose();
+    _fH.dispose();
+    super.dispose();
+  }
+
+  void _commit() {
+    final int w = int.tryParse(_w.text.trim()) ?? widget.widthPx;
+    final int h = int.tryParse(_h.text.trim()) ?? widget.heightPx;
+    widget.onCommit(w.clamp(8, 99999), h.clamp(8, 99999));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double fieldW = scaleDimension(context, 104);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SizedBox(
+            width: fieldW,
+            child: TextField(
+              controller: _w,
+              focusNode: _fW,
+              keyboardType: TextInputType.number,
+              decoration: _osgEditorDenseBorderlessDecoration(
+                labelText: "W px",
+              ),
+              onEditingComplete: _commit,
+              onSubmitted: (_) => _commit(),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              scaleDimension(context, 8),
+              scaleDimension(context, 20),
+              scaleDimension(context, 8),
+              0,
+            ),
+            child: const Text("×"),
+          ),
+          SizedBox(
+            width: fieldW,
+            child: TextField(
+              controller: _h,
+              focusNode: _fH,
+              keyboardType: TextInputType.number,
+              decoration: _osgEditorDenseBorderlessDecoration(
+                labelText: "H px",
+              ),
+              onEditingComplete: _commit,
+              onSubmitted: (_) => _commit(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<String?> _promptName(BuildContext context, String title) async {
+  final TextEditingController c = TextEditingController();
+  try {
+    return await showDialog<String>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: "Name"),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, c.text.trim()),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+  } finally {
+    c.dispose();
+  }
+}

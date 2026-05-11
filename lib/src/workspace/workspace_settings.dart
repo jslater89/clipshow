@@ -1,5 +1,7 @@
 import "dart:ui";
 
+import "package:obs_clipshow/src/osg/osg_models.dart";
+
 enum DecoderProfile {
   vaapi,
   vaapiVpp,
@@ -166,6 +168,9 @@ class WorkspaceSettingsBundle {
     required this.ignoredFolders,
     required this.capturePathsSettings,
     required this.pauseIngestScanDuringPreview,
+    required this.playoutOutputSize,
+    required this.osgWorkspaceConfig,
+    required this.tagSemanticTypes,
   });
 
   final TelestratorDefaults telestratorDefaults;
@@ -180,4 +185,13 @@ class WorkspaceSettingsBundle {
   /// When true (default), background ingest scanning pauses while a clip plays
   /// in the dashboard preview. Full-screen playout always pauses ingest regardless.
   final bool pauseIngestScanDuringPreview;
+
+  /// Logical canvas for playout window sizing and OSG normalized coordinates.
+  final PlayoutOutputSize playoutOutputSize;
+
+  /// Three on-screen graphic presets (indices 0, 1, 2 map to hotkeys later).
+  final OsgWorkspaceConfig osgWorkspaceConfig;
+
+  /// Workspace-defined semantic tag types (for OSG slots and typed media tags).
+  final List<TagSemanticType> tagSemanticTypes;
 }

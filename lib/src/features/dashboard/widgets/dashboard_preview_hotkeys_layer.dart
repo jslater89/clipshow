@@ -59,6 +59,18 @@ class PreviewToggleHelpIntent extends Intent {
   const PreviewToggleHelpIntent();
 }
 
+class PreviewOsgPresetDigit8Intent extends Intent {
+  const PreviewOsgPresetDigit8Intent();
+}
+
+class PreviewOsgPresetDigit9Intent extends Intent {
+  const PreviewOsgPresetDigit9Intent();
+}
+
+class PreviewOsgPresetDigit0Intent extends Intent {
+  const PreviewOsgPresetDigit0Intent();
+}
+
 class DashboardPreviewHotkeysLayer extends StatelessWidget {
   const DashboardPreviewHotkeysLayer({
     super.key,
@@ -69,6 +81,9 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
     this.onMarkInRequested,
     this.onMarkOutRequested,
     this.onSaveClipRequested,
+    this.onOsgPresetDigit8Requested,
+    this.onOsgPresetDigit9Requested,
+    this.onOsgPresetDigit0Requested,
   });
 
   final Widget child;
@@ -78,6 +93,9 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
   final VoidCallback? onMarkInRequested;
   final VoidCallback? onMarkOutRequested;
   final VoidCallback? onSaveClipRequested;
+  final VoidCallback? onOsgPresetDigit8Requested;
+  final VoidCallback? onOsgPresetDigit9Requested;
+  final VoidCallback? onOsgPresetDigit0Requested;
 
   @override
   Widget build(BuildContext context) {
@@ -115,6 +133,15 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
         if (onSaveClipRequested != null)
           const SingleActivator(LogicalKeyboardKey.keyS):
               const PreviewSaveClipIntent(),
+        if (onOsgPresetDigit8Requested != null)
+          const SingleActivator(LogicalKeyboardKey.digit8):
+              const PreviewOsgPresetDigit8Intent(),
+        if (onOsgPresetDigit9Requested != null)
+          const SingleActivator(LogicalKeyboardKey.digit9):
+              const PreviewOsgPresetDigit9Intent(),
+        if (onOsgPresetDigit0Requested != null)
+          const SingleActivator(LogicalKeyboardKey.digit0):
+              const PreviewOsgPresetDigit0Intent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -214,6 +241,27 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
               return null;
             },
           ),
+          PreviewOsgPresetDigit8Intent:
+              CallbackAction<PreviewOsgPresetDigit8Intent>(
+                onInvoke: (_) {
+                  onOsgPresetDigit8Requested?.call();
+                  return null;
+                },
+              ),
+          PreviewOsgPresetDigit9Intent:
+              CallbackAction<PreviewOsgPresetDigit9Intent>(
+                onInvoke: (_) {
+                  onOsgPresetDigit9Requested?.call();
+                  return null;
+                },
+              ),
+          PreviewOsgPresetDigit0Intent:
+              CallbackAction<PreviewOsgPresetDigit0Intent>(
+                onInvoke: (_) {
+                  onOsgPresetDigit0Requested?.call();
+                  return null;
+                },
+              ),
         },
         child: Focus(focusNode: focusNode, autofocus: true, child: child),
       ),

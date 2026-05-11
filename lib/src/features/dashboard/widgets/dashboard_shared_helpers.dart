@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 
 /// An [Autocomplete] that opens upward when it detects insufficient vertical
@@ -42,10 +43,9 @@ class _AdaptiveAutocompleteState<T extends Object>
       final double widgetBottom =
           ro.localToGlobal(Offset.zero).dy + ro.size.height;
       final double screenHeight = MediaQuery.of(context).size.height;
-      final OptionsViewOpenDirection next =
-          (screenHeight - widgetBottom) < 150
-              ? OptionsViewOpenDirection.up
-              : OptionsViewOpenDirection.down;
+      final OptionsViewOpenDirection next = (screenHeight - widgetBottom) < 150
+          ? OptionsViewOpenDirection.up
+          : OptionsViewOpenDirection.down;
       if (next != _direction) setState(() => _direction = next);
     }
   }
@@ -62,6 +62,15 @@ class _AdaptiveAutocompleteState<T extends Object>
       ),
     );
   }
+}
+
+List<ShelfTagEntry> sortShelfTagEntries(List<ShelfTagEntry> tags) {
+  final List<ShelfTagEntry> list = List<ShelfTagEntry>.from(tags);
+  list.sort(
+    (ShelfTagEntry a, ShelfTagEntry b) =>
+        a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+  );
+  return list;
 }
 
 List<String> sortTags(List<String> tags) {
@@ -89,6 +98,57 @@ Color? tagChipColor(BuildContext context, String tag) {
   return base.withValues(alpha: 0.5);
 }
 
+/// Chip label for a saved-tag / capture-queue entry (optional semantic icon).
+Widget shelfTagChipLabel(ShelfTagEntry e, List<TagSemanticType> semanticTypes) {
+  int? cp;
+  final int? sid = e.semanticTypeId;
+  if (sid != null) {
+    for (final TagSemanticType t in semanticTypes) {
+      if (t.id == sid) {
+        cp = t.iconCodePoint;
+        break;
+      }
+    }
+  }
+  if (cp == null) {
+    return Text(e.name);
+  }
+  return Text.rich(
+    TextSpan(
+      children: <InlineSpan>[
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Icon(IconData(cp, fontFamily: "MaterialIcons"), size: 16),
+        ),
+        TextSpan(text: " ${e.name}"),
+      ],
+    ),
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+  );
+}
+
+/// Chip label: optional Material icon when the tag has a semantic type with an icon.
+Widget mediaTagAttachmentChipLabel(MediaTagAttachment a) {
+  final int? cp = a.semanticTypeIconCodePoint;
+  if (cp == null) {
+    return Text(a.tagName);
+  }
+  return Text.rich(
+    TextSpan(
+      children: <InlineSpan>[
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Icon(IconData(cp, fontFamily: "MaterialIcons"), size: 16),
+        ),
+        TextSpan(text: " ${a.tagName}"),
+      ],
+    ),
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+  );
+}
+
 String clipRangeLabel(MediaClip clip) {
   final int start = clip.inMs;
   final int? end = clip.outMs;
@@ -109,6 +169,9 @@ PlayoutClip toPlayoutClip(
   MediaListItem item, {
   required String workspaceRoot,
   int? initialOffsetMs,
+  List<bool>? osgPresetVisibleInitial,
+  int semanticTagSnapshotVersion = 0,
+  Set<int> semanticTypeIdsOnMedia = const <int>{},
 }) {
   final String absolute = WorkspaceMediaPaths.absoluteMasterPath(
     workspaceRoot,
@@ -126,6 +189,12 @@ PlayoutClip toPlayoutClip(
       startTimeMs: startTimeMs,
       endTimeMs: null,
       initialPositionMs: initialPositionMs,
+      mediaType: MediaListItemType.master,
+      mediaId: item.id,
+      osgPresetVisibleInitial: osgPresetVisibleInitial,
+      semanticTagSnapshotVersion: semanticTagSnapshotVersion,
+      semanticTypeIdsOnMedia: semanticTypeIdsOnMedia,
+      annotationsText: item.annotations ?? "",
     );
     return clip;
   }
@@ -145,6 +214,12 @@ PlayoutClip toPlayoutClip(
     startTimeMs: startTimeMs,
     endTimeMs: clipOutMs,
     initialPositionMs: initialPositionMs,
+    mediaType: MediaListItemType.clip,
+    mediaId: item.id,
+    osgPresetVisibleInitial: osgPresetVisibleInitial,
+    semanticTagSnapshotVersion: semanticTagSnapshotVersion,
+    semanticTypeIdsOnMedia: semanticTypeIdsOnMedia,
+    annotationsText: item.annotations ?? "",
   );
   return clip;
 }

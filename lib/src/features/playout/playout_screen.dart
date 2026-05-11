@@ -5,19 +5,30 @@ import "package:logging/logging.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
+import "package:obs_clipshow/src/features/playout/osg_playout_layer.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/features/playout/playout_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/playout/telestrator_canvas.dart";
 import "package:obs_clipshow/src/features/playout/telestrator_model.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
 
 class PlayoutScreen extends StatefulWidget {
   const PlayoutScreen({
     super.key,
     required this.clip,
+    required this.osgWorkspaceConfig,
+    required this.workspaceRoot,
+    required this.tagSemanticTypes,
+    required this.onResolveSemanticText,
     required this.onExitRequested,
   });
 
   final PlayoutClip clip;
+  final OsgWorkspaceConfig osgWorkspaceConfig;
+  final String workspaceRoot;
+  final List<TagSemanticType> tagSemanticTypes;
+  final OsgSemanticResolve onResolveSemanticText;
   final Future<void> Function() onExitRequested;
 
   @override
@@ -35,10 +46,103 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
   bool _showEscapeHint = true;
   bool _showHelpOverlay = false;
   Timer? _hintTimer;
+  final List<bool> _osgPresetVisible = <bool>[false, false, false];
+  int _osgRequirementFlashToken = 0;
+  String _osgRequirementFlashText = "";
+
+  bool _semanticIdSetsEqual(Set<int> a, Set<int> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (final int id in a) {
+      if (!b.contains(id)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _reconcileOsgVisibilityToRequirements({bool requestFrame = true}) {
+    final Set<int> onMedia = widget.clip.semanticTypeIdsOnMedia;
+    final List<OsgPreset> presets = widget.osgWorkspaceConfig.threePresets;
+    bool changed = false;
+    for (int i = 0; i < 3; i++) {
+      if (!_osgPresetVisible[i]) {
+        continue;
+      }
+      final OsgPreset p = presets[i];
+      if (!p.enabled) {
+        _osgPresetVisible[i] = false;
+        changed = true;
+        continue;
+      }
+      if (p.requiredSemanticTypeIds.isNotEmpty &&
+          !p.semanticRequirementsSatisfiedBy(onMedia)) {
+        _osgPresetVisible[i] = false;
+        changed = true;
+      }
+    }
+    if (changed && requestFrame && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _flashOsgRequirementMessage(String text) {
+    setState(() {
+      _osgRequirementFlashText = text;
+      _osgRequirementFlashToken++;
+    });
+  }
+
+  void _clearOsgRequirementFlash() {
+    if (_osgRequirementFlashToken == 0) {
+      return;
+    }
+    setState(() {
+      _osgRequirementFlashToken = 0;
+      _osgRequirementFlashText = "";
+    });
+  }
+
+  void _toggleOsgPreset(int index) {
+    if (index < 0 || index > 2) {
+      return;
+    }
+    final OsgPreset preset = widget.osgWorkspaceConfig.threePresets[index];
+    if (!preset.enabled) {
+      return;
+    }
+    final bool next = !_osgPresetVisible[index];
+    if (next) {
+      if (preset.requiredSemanticTypeIds.isNotEmpty) {
+        final Set<int> onMedia = widget.clip.semanticTypeIdsOnMedia;
+        if (!preset.semanticRequirementsSatisfiedBy(onMedia)) {
+          _flashOsgRequirementMessage(
+            osgMissingSemanticRequirementsMessage(
+              preset: preset,
+              semanticTypeIdsOnMedia: onMedia,
+              tagSemanticTypes: widget.tagSemanticTypes,
+            ),
+          );
+          return;
+        }
+      }
+    }
+    setState(() {
+      _osgPresetVisible[index] = next;
+    });
+  }
 
   @override
   void initState() {
     super.initState();
+    final List<bool>? initial = widget.clip.osgPresetVisibleInitial;
+    if (initial != null && initial.length == 3) {
+      _osgPresetVisible[0] = initial[0];
+      _osgPresetVisible[1] = initial[1];
+      _osgPresetVisible[2] = initial[2];
+    }
+    _reconcileOsgVisibilityToRequirements(requestFrame: false);
     _hintTimer = Timer(const Duration(seconds: 1), () {
       if (!mounted) {
         return;
@@ -48,6 +152,21 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
       });
     });
     _logger.info("Playout started for ${widget.clip.filePath}");
+  }
+
+  @override
+  void didUpdateWidget(covariant PlayoutScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.clip.mediaId != widget.clip.mediaId ||
+        oldWidget.clip.mediaType != widget.clip.mediaType ||
+        oldWidget.clip.semanticTagSnapshotVersion !=
+            widget.clip.semanticTagSnapshotVersion ||
+        !_semanticIdSetsEqual(
+          oldWidget.clip.semanticTypeIdsOnMedia,
+          widget.clip.semanticTypeIdsOnMedia,
+        )) {
+      _reconcileOsgVisibilityToRequirements();
+    }
   }
 
   Future<void> _requestExit() async {
@@ -91,7 +210,11 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
             _telestratorController.setColor(_colorThree),
         onDecreaseBrushRequested: _telestratorController.decreaseBrush,
         onIncreaseBrushRequested: _telestratorController.increaseBrush,
+        onOsgPresetDigit8Requested: () => _toggleOsgPreset(0),
+        onOsgPresetDigit9Requested: () => _toggleOsgPreset(1),
+        onOsgPresetDigit0Requested: () => _toggleOsgPreset(2),
         child: Stack(
+          fit: StackFit.expand,
           children: <Widget>[
             ClipPlayerView(
               controller: _playerController,
@@ -100,14 +223,41 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
               endTimeMs: widget.clip.endTimeMs,
               initialPositionMs: widget.clip.initialPositionMs,
               autoPlay: true,
+              videoBoxFit: BoxFit.contain,
             ),
             Positioned.fill(
-              child: TelestratorCanvas(controller: _telestratorController),
+              child: OsgPlayoutLayer(
+                clip: widget.clip,
+                config: widget.osgWorkspaceConfig,
+                workspaceRoot: widget.workspaceRoot,
+                resolveSemantic: widget.onResolveSemanticText,
+                visible: _osgPresetVisible,
+              ),
+            ),
+            Positioned.fill(
+              child: TelestratorCanvas(
+                controller: _telestratorController,
+              ),
             ),
             Positioned(
               left: edgeInset,
               bottom: edgeInset,
-              child: _TelestratorStatusHud(controller: _telestratorController),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (_osgRequirementFlashToken > 0)
+                    Padding(
+                      padding: EdgeInsets.only(bottom: scaleDimension(context, 8)),
+                      child: TransientHudBanner(
+                        key: ValueKey<int>(_osgRequirementFlashToken),
+                        text: _osgRequirementFlashText,
+                        onDismissed: _clearOsgRequirementFlash,
+                      ),
+                    ),
+                  _TelestratorStatusHud(controller: _telestratorController),
+                ],
+              ),
             ),
             if (_showEscapeHint && !_showHelpOverlay)
               Positioned(
@@ -309,6 +459,10 @@ class _PlayoutHelpOverlay extends StatelessWidget {
                     "Z": "Undo",
                     "1 / 2 / 3": "Set Color",
                     "[ / ]": "Brush Size Down/Up",
+                  }),
+                  SizedBox(height: gap10),
+                  _hotkeySection("On-screen graphics", <String, String>{
+                    "8 / 9 / 0": "Toggle OSG preset 1 / 2 / 3",
                   }),
                   SizedBox(height: gap10),
                   _hotkeySection("Exit and Help", <String, String>{

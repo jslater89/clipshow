@@ -7,6 +7,7 @@ class MasterMediaFile {
     required this.filePath,
     required this.fileName,
     this.displayNameOverride,
+    this.annotations,
     required this.fileSizeBytes,
     required this.modifiedAtMs,
     required this.createdAtMs,
@@ -21,6 +22,7 @@ class MasterMediaFile {
   final String filePath;
   final String fileName;
   final String? displayNameOverride;
+  final String? annotations;
   final int fileSizeBytes;
   final int modifiedAtMs;
   final int createdAtMs;
@@ -34,6 +36,7 @@ class MasterMediaFile {
       filePath: map["file_path"]! as String,
       fileName: map["file_name"]! as String,
       displayNameOverride: map["display_name_override"] as String?,
+      annotations: map["annotations"] as String?,
       fileSizeBytes: map["file_size_bytes"]! as int,
       modifiedAtMs: map["modified_at_ms"]! as int,
       createdAtMs: map["created_at_ms"]! as int,

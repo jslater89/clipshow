@@ -5,6 +5,9 @@ import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/osg/osg_editor_screen.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/widgets/rgba_color_picker.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 class WorkspaceSettingsDialog extends StatefulWidget {
@@ -36,6 +39,10 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       TextEditingController(text: "scene");
   final TextEditingController _webhookSceneKeyController =
       TextEditingController(text: "scene");
+  final TextEditingController _playoutOutputWidthController =
+      TextEditingController();
+  final TextEditingController _playoutOutputHeightController =
+      TextEditingController();
 
   bool _initialized = false;
   late TelestratorDefaults _draftTelestratorDefaults;
@@ -58,6 +65,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     _webhookUrlController.dispose();
     _webhookQueryParamController.dispose();
     _webhookSceneKeyController.dispose();
+    _playoutOutputWidthController.dispose();
+    _playoutOutputHeightController.dispose();
     super.dispose();
   }
 
@@ -85,6 +94,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       _enabledDecoders = List<DecoderProfile>.from(
         viewModel.decoderConfig.enabledProfiles,
       );
+      final PlayoutOutputSize playoutOut = viewModel.playoutOutputSize;
+      _playoutOutputWidthController.text = "${playoutOut.width}";
+      _playoutOutputHeightController.text = "${playoutOut.height}";
       _initialized = true;
     }
 
@@ -100,14 +112,78 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              _SectionTitle("Telestrator defaults", theme),
+              _SectionTitle("Playout canvas size", theme),
+              SizedBox(height: scaleDimension(context, 8)),
+              Text(
+                "Logical resolution for playout and on-screen graphics (pixels). "
+                "The playout window fits this aspect ratio within your display.",
+                style: theme.textTheme.bodySmall,
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  SizedBox(
+                    width: scaleDimension(context, 140),
+                    child: TextField(
+                      controller: _playoutOutputWidthController,
+                      decoration: const InputDecoration(
+                        labelText: "Width",
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 12)),
+                  SizedBox(
+                    width: scaleDimension(context, 140),
+                    child: TextField(
+                      controller: _playoutOutputHeightController,
+                      decoration: const InputDecoration(
+                        labelText: "Height",
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 12)),
+                  _AsyncFilledButton(
+                    label: "Save",
+                    onPressed: () async {
+                      final int w = int.tryParse(
+                            _playoutOutputWidthController.text.trim(),
+                          ) ??
+                          PlayoutOutputSize.fallback.width;
+                      final int h = int.tryParse(
+                            _playoutOutputHeightController.text.trim(),
+                          ) ??
+                          PlayoutOutputSize.fallback.height;
+                      if (w <= 0 || h <= 0) {
+                        return;
+                      }
+                      await viewModel.savePlayoutOutputSize(
+                        PlayoutOutputSize(width: w, height: h),
+                      );
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Playout canvas size saved."),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+              Divider(height: scaleDimension(context, 24)),
+              _SectionTitle("Telestrator settings", theme),
               SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: _colorPickerButton(
+                    child: RgbaColorPickerButton(
                       label: "Color 1",
-                      value: _draftTelestratorDefaults.colorOneArgb,
+                      valueArgb: _draftTelestratorDefaults.colorOneArgb,
                       onChanged: (int value) => setState(() {
                         _draftTelestratorDefaults = TelestratorDefaults(
                           colorOneArgb: value,
@@ -123,9 +199,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                   SizedBox(width: scaleDimension(context, 8)),
                   Expanded(
-                    child: _colorPickerButton(
+                    child: RgbaColorPickerButton(
                       label: "Color 2",
-                      value: _draftTelestratorDefaults.colorTwoArgb,
+                      valueArgb: _draftTelestratorDefaults.colorTwoArgb,
                       onChanged: (int value) => setState(() {
                         _draftTelestratorDefaults = TelestratorDefaults(
                           colorOneArgb: _draftTelestratorDefaults.colorOneArgb,
@@ -141,9 +217,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                   SizedBox(width: scaleDimension(context, 8)),
                   Expanded(
-                    child: _colorPickerButton(
+                    child: RgbaColorPickerButton(
                       label: "Color 3",
-                      value: _draftTelestratorDefaults.colorThreeArgb,
+                      valueArgb: _draftTelestratorDefaults.colorThreeArgb,
                       onChanged: (int value) => setState(() {
                         _draftTelestratorDefaults = TelestratorDefaults(
                           colorOneArgb: _draftTelestratorDefaults.colorOneArgb,
@@ -211,12 +287,57 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
               ),
               SizedBox(height: scaleDimension(context, 8)),
               _AsyncFilledButton(
-                label: "Apply Telestrator Defaults",
+                label: "Apply Telestrator Settings",
                 onPressed: () async {
                   await viewModel.saveTelestratorDefaults(
                     _draftTelestratorDefaults,
                   );
                 },
+              ),
+              Divider(height: scaleDimension(context, 24)),
+               _SectionTitle("On-screen graphics", theme),
+              SizedBox(height: scaleDimension(context, 8)),
+              Text(
+                "Templates, semantic types, and preset slots (hotkeys 8 / 9 / 0 in playout).",
+                style: theme.textTheme.bodySmall,
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
+              FilledButton.tonal(
+                onPressed: viewModel.workspacePath == null
+                    ? null
+                    : () {
+                        unawaited(
+                          Navigator.of(context)
+                              .push<void>(
+                                MaterialPageRoute<void>(
+                                  builder: (BuildContext ctx) {
+                                    return ChangeNotifierProvider<
+                                        DashboardViewModel>.value(
+                                      value: viewModel,
+                                      child: OsgEditorScreen(
+                                        workspaceRoot:
+                                            viewModel.workspacePath!,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              )
+                              .then((void _) {
+                                if (!context.mounted) {
+                                  return;
+                                }
+                                final PlayoutOutputSize next =
+                                    viewModel.playoutOutputSize;
+                                setState(() {
+                                  _playoutOutputWidthController.text =
+                                      "${next.width}";
+                                  _playoutOutputHeightController.text =
+                                      "${next.height}";
+                                });
+                              }),
+                        );
+                      },
+                child: const Text("Open on-screen graphics editor…"),
               ),
               Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Decoder config", theme),
@@ -791,146 +912,6 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     );
   }
 
-  Widget _colorPickerButton({
-    required String label,
-    required int value,
-    required void Function(int value) onChanged,
-  }) {
-    return OutlinedButton(
-      onPressed: () async {
-        final int? selected = await _showColorPicker(context, value);
-        if (selected != null) {
-          onChanged(selected);
-        }
-      },
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: scaleDimension(context, 16),
-            height: scaleDimension(context, 16),
-            color: Color(value),
-          ),
-          SizedBox(width: scaleDimension(context, 8)),
-          Text(label),
-        ],
-      ),
-    );
-  }
-
-  Future<int?> _showColorPicker(BuildContext context, int initialColor) async {
-    int r = (initialColor >> 16) & 0xFF;
-    int g = (initialColor >> 8) & 0xFF;
-    int b = initialColor & 0xFF;
-    final TextEditingController hexController = TextEditingController(
-      text: _hexColorString(r, g, b),
-    );
-    return showDialog<int>(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder:
-              (BuildContext context, void Function(void Function()) setState) {
-                void syncFromRgb() {
-                  hexController.text = _hexColorString(r, g, b);
-                }
-
-                return AlertDialog(
-                  title: const Text("Pick Color"),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Container(
-                        width: scaleDimension(context, 64),
-                        height: scaleDimension(context, 64),
-                        color: Color.fromARGB(255, r, g, b),
-                      ),
-                      SizedBox(height: scaleDimension(context, 8)),
-                      TextField(
-                        controller: hexController,
-                        decoration: const InputDecoration(
-                          labelText: "Hex (#RRGGBB)",
-                          border: OutlineInputBorder(),
-                        ),
-                        onSubmitted: (String value) {
-                          final _RgbColor? parsed = _parseHexColor(value);
-                          if (parsed == null) {
-                            return;
-                          }
-                          setState(() {
-                            r = parsed.r;
-                            g = parsed.g;
-                            b = parsed.b;
-                            syncFromRgb();
-                          });
-                        },
-                      ),
-                      Slider(
-                        value: r.toDouble(),
-                        min: 0,
-                        max: 255,
-                        onChanged: (double value) => setState(() {
-                          r = value.round();
-                          syncFromRgb();
-                        }),
-                      ),
-                      Slider(
-                        value: g.toDouble(),
-                        min: 0,
-                        max: 255,
-                        onChanged: (double value) => setState(() {
-                          g = value.round();
-                          syncFromRgb();
-                        }),
-                      ),
-                      Slider(
-                        value: b.toDouble(),
-                        min: 0,
-                        max: 255,
-                        onChanged: (double value) => setState(() {
-                          b = value.round();
-                          syncFromRgb();
-                        }),
-                      ),
-                    ],
-                  ),
-                  actions: <Widget>[
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text("Cancel"),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.of(
-                        context,
-                      ).pop(Color.fromARGB(255, r, g, b).toARGB32()),
-                      child: const Text("Use"),
-                    ),
-                  ],
-                );
-              },
-        );
-      },
-    );
-  }
-
-  String _hexColorString(int r, int g, int b) {
-    return "#${r.toRadixString(16).padLeft(2, "0").toUpperCase()}${g.toRadixString(16).padLeft(2, "0").toUpperCase()}${b.toRadixString(16).padLeft(2, "0").toUpperCase()}";
-  }
-
-  _RgbColor? _parseHexColor(String raw) {
-    final String normalized = raw.trim().replaceFirst("#", "");
-    if (normalized.length != 6) {
-      return null;
-    }
-    final int? value = int.tryParse(normalized, radix: 16);
-    if (value == null) {
-      return null;
-    }
-    return _RgbColor(
-      r: (value >> 16) & 0xFF,
-      g: (value >> 8) & 0xFF,
-      b: value & 0xFF,
-    );
-  }
 }
 
 enum _AsyncButtonVisualState { idle, loading, done }
@@ -1035,14 +1016,6 @@ class _AsyncFilledButtonState extends State<_AsyncFilledButton> {
       _state = _AsyncButtonVisualState.idle;
     });
   }
-}
-
-class _RgbColor {
-  const _RgbColor({required this.r, required this.g, required this.b});
-
-  final int r;
-  final int g;
-  final int b;
 }
 
 class _SectionTitle extends StatelessWidget {

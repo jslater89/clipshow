@@ -8,10 +8,12 @@ import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_preview_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
+import "package:obs_clipshow/src/features/playout/osg_playout_layer.dart";
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
 
 class DashboardPreviewPanel extends StatefulWidget {
   const DashboardPreviewPanel({
@@ -73,6 +75,20 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
       horizontal: scaleDimension(context, 8),
       vertical: scaleDimension(context, 4),
     );
+    final PlayoutClip? previewOsgClip =
+        workspaceRoot != null &&
+            selectedItem != null &&
+            previewIssue == MediaIssue.none
+        ? toPlayoutClip(
+            selectedItem,
+            workspaceRoot: workspaceRoot,
+            initialOffsetMs: viewModel.previewPositionMs,
+            semanticTagSnapshotVersion:
+                viewModel.semanticTagSnapshotForItem(selectedItem),
+            semanticTypeIdsOnMedia:
+                viewModel.semanticTypeIdsOnMedia(selectedItem),
+          )
+        : null;
     return Card(
       child: Padding(
         padding: EdgeInsets.all(pad12),
@@ -116,6 +132,15 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                 : () => viewModel.saveClipFromCurrentMarks(
                                     context,
                                   ),
+                            onOsgPresetDigit8Requested: workspaceRoot == null
+                                ? null
+                                : () => viewModel.togglePreviewOsgPreset(0),
+                            onOsgPresetDigit9Requested: workspaceRoot == null
+                                ? null
+                                : () => viewModel.togglePreviewOsgPreset(1),
+                            onOsgPresetDigit0Requested: workspaceRoot == null
+                                ? null
+                                : () => viewModel.togglePreviewOsgPreset(2),
                             child: Stack(
                               fit: StackFit.expand,
                               children: <Widget>[
@@ -143,13 +168,48 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                   onPositionChanged:
                                       viewModel.setPreviewPositionMs,
                                   onPlayingChanged: _onPreviewPlayingChanged,
+                                  videoAreaOverlay: previewOsgClip != null &&
+                                          workspaceRoot != null
+                                      ? OsgPlayoutLayer(
+                                          key: ValueKey<String>(
+                                            selectedItem.stableKey,
+                                          ),
+                                          clip: previewOsgClip,
+                                          config: viewModel.osgWorkspaceConfig,
+                                          workspaceRoot: workspaceRoot,
+                                          resolveSemantic:
+                                              (int semanticTypeId) =>
+                                                  viewModel
+                                                      .resolveSemanticTagText(
+                                                    previewOsgClip,
+                                                    semanticTypeId,
+                                                  ),
+                                          visible: List<bool>.from(
+                                            viewModel.previewOsgPresetVisible,
+                                          ),
+                                        )
+                                      : null,
                                 ),
+                                if (viewModel.previewOsgRequirementFlashToken > 0)
+                                  Positioned(
+                                    left: pad12,
+                                    top: pad12,
+                                    child: TransientHudBanner(
+                                      key: ValueKey<int>(
+                                        viewModel.previewOsgRequirementFlashToken,
+                                      ),
+                                      text: viewModel.previewOsgRequirementFlashText,
+                                      onDismissed: () => viewModel
+                                          .clearPreviewOsgRequirementFlash(),
+                                    ),
+                                  ),
                                 if (_showPreviewHelp)
                                   _PreviewHelpOverlay(
                                     showMarkHotkeys:
                                         selectedMedia != null &&
                                         !isClipSelection,
                                     isClipPreview: isClipSelection,
+                                    showOsgHotkeys: workspaceRoot != null,
                                   ),
                               ],
                             ),
@@ -161,7 +221,34 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
             SizedBox(height: gap12),
             Wrap(
               spacing: gap8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
+                if (previewOsgClip != null) ...<Widget>[
+                  Text(
+                    "OSG",
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  ToggleButtons(
+                    borderRadius: BorderRadius.circular(radius8),
+                    constraints: BoxConstraints(
+                      minWidth: scaleDimension(context, 40),
+                      minHeight: scaleDimension(context, 32),
+                    ),
+                    isSelected: <bool>[
+                      viewModel.previewOsgPresetVisible[0],
+                      viewModel.previewOsgPresetVisible[1],
+                      viewModel.previewOsgPresetVisible[2],
+                    ],
+                    onPressed: (int index) {
+                      viewModel.togglePreviewOsgPreset(index);
+                    },
+                    children: const <Widget>[
+                      Text("8"),
+                      Text("9"),
+                      Text("0"),
+                    ],
+                  ),
+                ],
                 if (!isClipSelection) ...<Widget>[
                   OutlinedButton(
                     onPressed: selectedMedia == null
@@ -336,6 +423,13 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                             selectedItem,
                             workspaceRoot: workspaceRoot,
                             initialOffsetMs: viewModel.previewPositionMs,
+                            osgPresetVisibleInitial: List<bool>.from(
+                              viewModel.previewOsgPresetVisible,
+                            ),
+                            semanticTagSnapshotVersion: viewModel
+                                .semanticTagSnapshotForItem(selectedItem),
+                            semanticTypeIdsOnMedia: viewModel
+                                .semanticTypeIdsOnMedia(selectedItem),
                           ),
                         ),
                   icon: const Icon(Icons.fullscreen),
@@ -406,10 +500,12 @@ class _PreviewHelpOverlay extends StatelessWidget {
   const _PreviewHelpOverlay({
     required this.showMarkHotkeys,
     required this.isClipPreview,
+    this.showOsgHotkeys = false,
   });
 
   final bool showMarkHotkeys;
   final bool isClipPreview;
+  final bool showOsgHotkeys;
 
   @override
   Widget build(BuildContext context) {
@@ -469,6 +565,12 @@ class _PreviewHelpOverlay extends StatelessWidget {
                       "+2.5s buttons below the player (no keyboard shortcuts).",
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
+                  ],
+                  if (showOsgHotkeys) ...<Widget>[
+                    SizedBox(height: gap10),
+                    _previewHotkeySection("OSG", <String, String>{
+                      "8 / 9 / 0": "Toggle OSG preset 1 / 2 / 3",
+                    }),
                   ],
                   SizedBox(height: gap10),
                   _previewHotkeySection("Help", <String, String>{

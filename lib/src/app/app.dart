@@ -4,7 +4,6 @@ import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:logging/logging.dart";
 import "package:provider/provider.dart";
-import "package:screen_retriever/screen_retriever.dart";
 import "package:window_manager/window_manager.dart";
 import "dart:async";
 
@@ -16,6 +15,7 @@ import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/features/playout/playout_screen.dart";
 import "package:obs_clipshow/src/features/workspace_settings/workspace_settings_dialog.dart";
 import "package:obs_clipshow/src/obs/obs_service.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 enum PlayoutWindowMode { windowed, fullscreen }
@@ -209,7 +209,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       _logger.warning("Unable to capture window bounds before playout: $error");
     }
 
-    await _applyPlayoutWindowMode(clip.filePath);
+    await _applyPlayoutWindowMode(_viewModel.playoutOutputSize);
     setState(() {
       _activeClip = clip;
     });
@@ -255,7 +255,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     }
   }
 
-  Future<void> _applyPlayoutWindowMode(String videoPath) async {
+  Future<void> _applyPlayoutWindowMode(PlayoutOutputSize output) async {
     _wasMaximizedBeforePlayout = false;
     try {
       if (await windowManager.isMaximized()) {
@@ -268,7 +268,9 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       );
     }
 
-    await windowManager.setAspectRatio(16 / 9);
+    final Size logical = output.size;
+    final double aspect = logical.width / logical.height;
+    await windowManager.setAspectRatio(aspect);
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
 
     if (_playoutWindowMode == PlayoutWindowMode.fullscreen) {
@@ -278,68 +280,13 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
 
     await windowManager.setFullScreen(false);
 
-    Size targetSize = _fallbackPlayoutSize;
-    try {
-      final Display display = await screenRetriever.getPrimaryDisplay();
-      final Size screenSize = display.visibleSize ?? display.size;
-      final Size? videoSize = await _probeVideoSize(videoPath);
-      final Size sourceSize = videoSize ?? _fallbackPlayoutSize;
-      targetSize = _fitWithin(
-        sourceSize: sourceSize,
-        bounds: Size(screenSize.width * 0.9, screenSize.height * 0.9),
-      );
-    } catch (error) {
-      _logger.warning("Unable to calculate windowed playout size: $error");
-    }
+    final Size targetSize = logical.width > 0 && logical.height > 0
+        ? logical
+        : _fallbackPlayoutSize;
 
     await windowManager.setSize(targetSize);
     await windowManager.center();
     await windowManager.focus();
-  }
-
-  Size _fitWithin({required Size sourceSize, required Size bounds}) {
-    final double widthScale = bounds.width / sourceSize.width;
-    final double heightScale = bounds.height / sourceSize.height;
-    final double scale = widthScale < heightScale ? widthScale : heightScale;
-    final double rawWidth = sourceSize.width * scale;
-    final double rawHeight = sourceSize.height * scale;
-    final double width = rawWidth < 960 ? 960 : rawWidth;
-    final double height = rawHeight < 540 ? 540 : rawHeight;
-    return Size(width, height);
-  }
-
-  Future<Size?> _probeVideoSize(String videoPath) async {
-    try {
-      final ProcessResult result = await Process.run("ffprobe", <String>[
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=width,height",
-        "-of",
-        "csv=s=x:p=0",
-        videoPath,
-      ]);
-      if (result.exitCode != 0) {
-        _logger.finer("ffprobe size failed: ${result.stderr}");
-        return null;
-      }
-      final String out = (result.stdout as String).trim();
-      final List<String> parts = out.split("x");
-      if (parts.length != 2) {
-        return null;
-      }
-      final double? width = double.tryParse(parts[0]);
-      final double? height = double.tryParse(parts[1]);
-      if (width == null || height == null || width <= 0 || height <= 0) {
-        return null;
-      }
-      return Size(width, height);
-    } catch (error) {
-      _logger.finer("Unable to probe video size: $error");
-      return null;
-    }
   }
 
   Future<void> _restoreDashboardScrollOffset() async {
@@ -559,7 +506,18 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
               obsLastSuccessfulPingHms: _formatHms(_lastSuccessfulObsPingAt),
               scrollController: _dashboardScrollController,
             )
-          : PlayoutScreen(clip: _activeClip!, onExitRequested: _exitPlayout),
+          : PlayoutScreen(
+              clip: _activeClip!,
+              osgWorkspaceConfig: _viewModel.osgWorkspaceConfig,
+              workspaceRoot: _viewModel.workspacePath ?? "",
+              tagSemanticTypes: _viewModel.tagSemanticTypes,
+              onResolveSemanticText: (int semanticTypeId) =>
+                  _viewModel.resolveSemanticTagText(
+                    _activeClip!,
+                    semanticTypeId,
+                  ),
+              onExitRequested: _exitPlayout,
+            ),
     );
   }
 }

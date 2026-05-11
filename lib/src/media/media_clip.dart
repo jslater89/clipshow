@@ -5,6 +5,7 @@ class MediaClip {
     required this.filePath,
     required this.fileName,
     this.displayNameOverride,
+    this.annotations,
     required this.inMs,
     required this.outMs,
     required this.createdAtMs,
@@ -17,6 +18,7 @@ class MediaClip {
   final String filePath;
   final String fileName;
   final String? displayNameOverride;
+  final String? annotations;
   final int inMs;
   final int? outMs;
   final int createdAtMs;
@@ -28,6 +30,7 @@ class MediaClip {
       filePath: map["file_path"]! as String,
       fileName: map["file_name"]! as String,
       displayNameOverride: map["display_name_override"] as String?,
+      annotations: map["annotations"] as String?,
       inMs: map["in_ms"]! as int,
       outMs: map["out_ms"] as int?,
       createdAtMs: map["created_at_ms"]! as int,
