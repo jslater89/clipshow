@@ -47,7 +47,7 @@ class ThumbnailService {
   bool _paused = false;
 
   /// [failureDetail] is null on success (thumbnail present or written).
-  void Function(String normalizedPath, String? failureDetail)?
+  Future<void> Function(String normalizedPath, String? failureDetail)?
   onThumbnailSettled;
 
   /// Emits the normalized video path when a thumbnail file has been written.
@@ -57,15 +57,14 @@ class ThumbnailService {
 
   /// Schedules thumbnail generation without blocking the caller.
   ///
-  /// If `*.thumb.jpg` already exists next to the video, returns immediately:
-  /// nothing is queued and no [thumbnailReady] event is sent (the list reads
-  /// the file directly). This avoids backlog and hundreds of UI rebuilds on startup.
+  /// If `*.thumb.jpg` already exists next to the video, awaits [onThumbnailSettled]
+  /// when set, then returns without queuing (no [thumbnailReady] event).
   ///
   /// [knownDurationSeconds] avoids a redundant ffprobe when ingestion already probed duration.
-  void requestThumbnail(
+  Future<void> requestThumbnail(
     String videoPath, {
     double? knownDurationSeconds,
-  }) {
+  }) async {
     if (_disposed) {
       return;
     }
@@ -86,7 +85,7 @@ class ThumbnailService {
     final String thumbPath = thumbnailPathForVideo(normalized);
     try {
       if (File(thumbPath).existsSync()) {
-        onThumbnailSettled?.call(normalized, null);
+        await _notifySettled(normalized, null);
         return;
       }
     } on FileSystemException {
@@ -147,7 +146,7 @@ class ThumbnailService {
     final String thumbnailPath = thumbnailPathForVideo(videoPath);
     final File thumbnailFile = File(thumbnailPath);
     if (await thumbnailFile.exists()) {
-      onThumbnailSettled?.call(videoPath, null);
+      await _notifySettled(videoPath, null);
       if (!_disposed && !_readyController.isClosed) {
         _readyController.add(videoPath);
       }
@@ -161,7 +160,7 @@ class ThumbnailService {
     } else {
       probe = await MediaDurationProbe.probeSeconds(videoPath);
       if (!probe.ok) {
-        onThumbnailSettled?.call(videoPath, probe.stderr);
+        await _notifySettled(videoPath, probe.stderr);
         return;
       }
     }
@@ -185,9 +184,9 @@ class ThumbnailService {
         thumbnailPath,
       ]);
       if (result.exitCode != 0) {
-        onThumbnailSettled?.call(videoPath, "${result.stderr}");
+        await _notifySettled(videoPath, "${result.stderr}");
       } else {
-        onThumbnailSettled?.call(videoPath, null);
+        await _notifySettled(videoPath, null);
         final int remaining = _queuedOrRunning.length - 1;
         _logger.fine(
           "Generated thumbnail: $thumbnailPath ($remaining remaining)",
@@ -197,8 +196,16 @@ class ThumbnailService {
         }
       }
     } catch (error) {
-      onThumbnailSettled?.call(videoPath, "$error");
+      await _notifySettled(videoPath, "$error");
     }
+  }
+
+  Future<void> _notifySettled(String path, String? failureDetail) async {
+    final Future<void> Function(String, String?)? handler = onThumbnailSettled;
+    if (handler == null) {
+      return;
+    }
+    await handler(path, failureDetail);
   }
 
   Future<void> deleteThumbnailForVideoPath(String videoPath) async {

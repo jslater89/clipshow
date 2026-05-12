@@ -68,6 +68,11 @@ class IngestionService {
   final Map<String, MasterMediaFile> _snapshotByPath =
       <String, MasterMediaFile>{};
 
+  /// While the post-start directory walk runs, thumbnail settlement can clear
+  /// many identical-looking DB rows; defer stream updates until the walk ends.
+  bool _initialDirectoryScanActive = false;
+  bool _snapshotNotifyDeferredUntilScanIdle = false;
+
   Stream<List<MasterMediaFile>> get mediaFiles => _mediaController.stream;
 
   /// Fires when a thumbnail file has been written for a video path (for UI refresh).
@@ -110,8 +115,11 @@ class IngestionService {
 
   /// Walks the tree asynchronously; list rows appear in batches via [_emitSnapshot].
   Future<void> _runInitialScanInBackground(int generation) async {
+    int scannedCount = 0;
+    _initialDirectoryScanActive = true;
+    _snapshotNotifyDeferredUntilScanIdle = false;
     try {
-      final int scannedCount = await _scanAllExistingFiles(generation);
+      scannedCount = await _scanAllExistingFiles(generation);
       if (_disposed || generation != _scanGeneration) {
         return;
       }
@@ -121,6 +129,15 @@ class IngestionService {
       _logger.info("Initial scan completed. Imported files: $scannedCount");
     } catch (error, stackTrace) {
       _logger.severe("Initial scan failed: $error", error, stackTrace);
+    } finally {
+      _initialDirectoryScanActive = false;
+      if (!_disposed && generation == _scanGeneration) {
+        final bool pendingDeferred = _snapshotNotifyDeferredUntilScanIdle;
+        _snapshotNotifyDeferredUntilScanIdle = false;
+        if (pendingDeferred && scannedCount == 0) {
+          await _emitSnapshot();
+        }
+      }
     }
   }
 
@@ -355,11 +372,15 @@ class IngestionService {
     } else {
       await repository.clearEmptyIssue(g.storedPath);
     }
-    _thumbnailService.requestThumbnail(
+    final bool changed = await _updateSnapshotEntryFromRepository(
+      repository,
+      g.storedPath,
+    );
+    await _thumbnailService.requestThumbnail(
       g.absolutePath,
       knownDurationSeconds: g.knownDurationSecondsForThumbnail,
     );
-    return _updateSnapshotEntryFromRepository(repository, g.storedPath);
+    return changed;
   }
 
   Future<bool> _upsertFromPath({
@@ -401,18 +422,32 @@ class IngestionService {
         MediaIssue.unreadable,
         detail: failureDetail,
       );
-      await _updateSnapshotEntryFromRepository(repository, storedPath);
-      _scheduleDebouncedSnapshot();
+      final bool updated = await _updateSnapshotEntryFromRepository(
+        repository,
+        storedPath,
+      );
+      if (updated) {
+        _scheduleDebouncedSnapshot();
+      }
       return;
     }
     final int cleared = await repository.clearUnreadableIssue(storedPath);
     if (cleared > 0) {
-      await _updateSnapshotEntryFromRepository(repository, storedPath);
-      _scheduleDebouncedSnapshot();
+      final bool updated = await _updateSnapshotEntryFromRepository(
+        repository,
+        storedPath,
+      );
+      if (updated) {
+        _scheduleDebouncedSnapshot();
+      }
     }
   }
 
   void _scheduleDebouncedSnapshot() {
+    if (_initialDirectoryScanActive) {
+      _snapshotNotifyDeferredUntilScanIdle = true;
+      return;
+    }
     _snapshotDebounce?.cancel();
     _snapshotDebounce = Timer(const Duration(milliseconds: 400), () {
       if (_disposed) {
@@ -488,7 +523,8 @@ class IngestionService {
       return removed;
     }
     _snapshotByPath[normalizedPath] = latest;
-    return !_isSameSnapshotRow(previous, latest);
+    final bool same = _isSameSnapshotRow(previous, latest);
+    return !same;
   }
 
   bool _isSameSnapshotRow(MasterMediaFile? a, MasterMediaFile b) {
@@ -496,14 +532,23 @@ class IngestionService {
       return false;
     }
     return a.id == b.id &&
-        a.filePath == b.filePath &&
+        WorkspaceMediaPaths.normalizeStored(a.filePath) ==
+            WorkspaceMediaPaths.normalizeStored(b.filePath) &&
         a.fileName == b.fileName &&
         a.fileSizeBytes == b.fileSizeBytes &&
         a.modifiedAtMs == b.modifiedAtMs &&
         a.createdAtMs == b.createdAtMs &&
         a.durationMs == b.durationMs &&
         a.mediaIssue == b.mediaIssue &&
-        a.mediaIssueDetail == b.mediaIssueDetail;
+        _normalizedIssueDetail(a.mediaIssueDetail) ==
+            _normalizedIssueDetail(b.mediaIssueDetail);
+  }
+
+  String _normalizedIssueDetail(String? detail) {
+    return (detail ?? "")
+        .replaceAll("\r\n", "\n")
+        .replaceAll("\r", "\n")
+        .trim();
   }
 
   Future<void> _refreshIgnoredFolders() async {
