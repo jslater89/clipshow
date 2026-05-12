@@ -16,6 +16,7 @@ import "package:obs_clipshow/src/features/osg/osg_template_aspect.dart";
 import "package:obs_clipshow/src/features/osg/widgets/osg_preset_canvas_preview.dart";
 import "package:obs_clipshow/src/features/osg/widgets/osg_semantic_type_icon_picker.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
 import "package:obs_clipshow/src/widgets/rgba_color_picker.dart";
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 
@@ -32,6 +33,24 @@ InputDecoration _osgEditorDenseBorderlessDecoration({
   );
 }
 
+String _osgVisibilityMotionMenuLabel(
+  OsgPresetVisibilityMotion m, {
+  required bool forExit,
+}) {
+  switch (m) {
+    case OsgPresetVisibilityMotion.none:
+      return "Fade Only";
+    case OsgPresetVisibilityMotion.left:
+      return forExit ? "Fade + To Left" : "Fade + From Left";
+    case OsgPresetVisibilityMotion.right:
+      return forExit ? "Fade + To Right" : "Fade + From Right";
+    case OsgPresetVisibilityMotion.top:
+      return forExit ? "Fade + To Top" : "Fade + From Top";
+    case OsgPresetVisibilityMotion.bottom:
+      return forExit ? "Fade + To Bottom" : "Fade + From Bottom";
+  }
+}
+
 /// Full-screen editor for semantic types and five OSG presets.
 /// Playout canvas size is configured under Workspace Settings.
 class OsgEditorScreen extends StatefulWidget {
@@ -44,21 +63,122 @@ class OsgEditorScreen extends StatefulWidget {
 }
 
 class _OsgEditorScreenState extends State<OsgEditorScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
+  static const int _motionPreviewBetweenMs = 600;
+
   late OsgWorkspaceConfig _draftOsg;
   late TabController _tabController;
+  late AnimationController _motionPreviewSequence;
   List<String> _systemFontNames = <String>[];
   bool _systemFontsLoading = true;
+  bool _motionPreviewActive = false;
+  bool _motionPreviewLoop = false;
+  late int _lastTabIndexForMotion;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
+    _lastTabIndexForMotion = _tabController.index;
     final DashboardViewModel vm = context.read<DashboardViewModel>();
     _draftOsg = OsgWorkspaceConfig.decodeFromStorageJson(
       vm.osgWorkspaceConfig.encodeToStorageJson(),
     );
     unawaited(_loadSystemFontNames());
+    _motionPreviewSequence = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1080),
+    );
+    _motionPreviewSequence.addStatusListener(_onMotionPreviewSequenceStatus);
+    _motionPreviewSequence.addListener(() {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+    _tabController.addListener(_onOsgEditorTabChanged);
+  }
+
+  void _onOsgEditorTabChanged() {
+    final int i = _tabController.index;
+    if (i == _lastTabIndexForMotion) {
+      return;
+    }
+    _lastTabIndexForMotion = i;
+    if (_motionPreviewSequence.isAnimating || _motionPreviewActive) {
+      _motionPreviewSequence.stop();
+      _motionPreviewSequence.value = 0;
+      if (_motionPreviewActive) {
+        setState(() {
+          _motionPreviewActive = false;
+        });
+      }
+    }
+  }
+
+  void _onMotionPreviewSequenceStatus(AnimationStatus status) {
+    if (!mounted) {
+      return;
+    }
+    if (status == AnimationStatus.completed) {
+      if (_motionPreviewLoop) {
+        _motionPreviewSequence.forward(from: 0);
+      } else {
+        setState(() {
+          _motionPreviewActive = false;
+        });
+        _motionPreviewSequence.value = 0;
+      }
+    }
+  }
+
+  OsgMotionPreviewSample? _motionPreviewSampleForTab(int tabIndex) {
+    if (!_motionPreviewActive || _tabController.index != tabIndex) {
+      return null;
+    }
+    final OsgPreset p = _draftOsg.workspacePresets[tabIndex];
+    final int exitMs = OsgPreset.clampVisibilityDurationMs(
+      p.visibilityExitDurationMs,
+    );
+    final int enterMs = OsgPreset.clampVisibilityDurationMs(
+      p.visibilityEnterDurationMs,
+    );
+    final double v = _motionPreviewSequence.value;
+    final double totalMs =
+        (exitMs + _motionPreviewBetweenMs + enterMs).toDouble();
+    final double exitEnd = exitMs / totalMs;
+    final double gapEnd = (exitMs + _motionPreviewBetweenMs) / totalMs;
+    if (v < exitEnd) {
+      final double t = exitEnd <= 1e-9 ? 1.0 : (v / exitEnd).clamp(0.0, 1.0);
+      final double shown = 1.0 - t;
+      return OsgMotionPreviewSample(shown: shown, isEnterLeg: false);
+    }
+    if (v < gapEnd) {
+      return const OsgMotionPreviewSample(shown: 0.0, isEnterLeg: false);
+    }
+    final double enterSpan = (1.0 - gapEnd).clamp(1e-9, 1.0);
+    final double t = ((v - gapEnd) / enterSpan).clamp(0.0, 1.0);
+    return OsgMotionPreviewSample(shown: t, isEnterLeg: true);
+  }
+
+  void _startOsgMotionPreview({
+    required int presetIndex,
+    required bool loop,
+  }) {
+    final OsgPreset p = _draftOsg.workspacePresets[presetIndex];
+    final int exitMs = OsgPreset.clampVisibilityDurationMs(
+      p.visibilityExitDurationMs,
+    );
+    final int enterMs = OsgPreset.clampVisibilityDurationMs(
+      p.visibilityEnterDurationMs,
+    );
+    _motionPreviewSequence.duration = Duration(
+      milliseconds: exitMs + _motionPreviewBetweenMs + enterMs,
+    );
+    setState(() {
+      _motionPreviewLoop = loop;
+      _motionPreviewActive = true;
+    });
+    _motionPreviewSequence.forward(from: 0);
   }
 
   Future<void> _loadSystemFontNames() async {
@@ -89,7 +209,10 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
 
   @override
   void dispose() {
+    _tabController.removeListener(_onOsgEditorTabChanged);
     _tabController.dispose();
+    _motionPreviewSequence.removeStatusListener(_onMotionPreviewSequenceStatus);
+    _motionPreviewSequence.dispose();
     super.dispose();
   }
 
@@ -407,19 +530,59 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                     ),
                     SizedBox(width: scaleDimension(context, 10)),
                     Expanded(
-                      child: OsgPresetCanvasPreview(
-                        playoutOutputSize: vm.playoutOutputSize,
-                        workspaceRoot: widget.workspaceRoot,
-                        preset: _draftOsg.workspacePresets[index],
-                        interaction: OsgEditorPreviewInteraction.frame,
-                        graphicLocalLayout: false,
-                        dimOutsideFrame: false,
-                        applyLayerOpacity: true,
-                        semanticTypeNamesById: semanticPreviewNames,
-                        onFrameChanged: (OsgNormRect next) {
-                          final OsgPreset p = _draftOsg.workspacePresets[index];
-                          _replacePreset(index, p.copyWith(frame: next));
-                        },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          Row(
+                            children: <Widget>[
+                              Text(
+                                "Preview Motion",
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: () {
+                                  _motionPreviewSequence.stop();
+                                  _motionPreviewSequence.value = 0;
+                                  _startOsgMotionPreview(
+                                    presetIndex: index,
+                                    loop: _motionPreviewLoop,
+                                  );
+                                },
+                                child: const Text("Play"),
+                              ),
+                              FilterChip(
+                                label: const Text("Loop"),
+                                selected: _motionPreviewLoop,
+                                onSelected: (bool v) {
+                                  setState(() {
+                                    _motionPreviewLoop = v;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Expanded(
+                            child: OsgPresetCanvasPreview(
+                              playoutOutputSize: vm.playoutOutputSize,
+                              workspaceRoot: widget.workspaceRoot,
+                              preset: _draftOsg.workspacePresets[index],
+                              interaction: OsgEditorPreviewInteraction.frame,
+                              graphicLocalLayout: false,
+                              dimOutsideFrame: false,
+                              applyLayerOpacity: true,
+                              semanticTypeNamesById: semanticPreviewNames,
+                              motionPreviewSample:
+                                  _motionPreviewSampleForTab(index),
+                              onFrameChanged: (OsgNormRect next) {
+                                final OsgPreset p =
+                                    _draftOsg.workspacePresets[index];
+                                _replacePreset(index, p.copyWith(frame: next));
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -645,6 +808,196 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                       index,
                       preset.copyWith(templateCornerRadiusNorm: v),
                     ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Show / Hide Motion",
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "Slide distance is percent of the overlay frame along the chosen axis "
+              "(above 100% travels farther than one frame width or height). "
+              "Durations are in milliseconds (80–4000). "
+              "Preview motion assumes the overlay is on screen: it plays exit, pauses, then enter.",
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      InputDecorator(
+                        decoration: _osgEditorDenseBorderlessDecoration(
+                          labelText: "Enter",
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<OsgPresetVisibilityMotion>(
+                            isExpanded: true,
+                            value: preset.visibilityEnterMotion,
+                            items: <DropdownMenuItem<OsgPresetVisibilityMotion>>[
+                              for (final OsgPresetVisibilityMotion m
+                                  in OsgPresetVisibilityMotion.values)
+                                DropdownMenuItem<OsgPresetVisibilityMotion>(
+                                  value: m,
+                                  child: Text(
+                                    _osgVisibilityMotionMenuLabel(
+                                      m,
+                                      forExit: false,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                            onChanged: (OsgPresetVisibilityMotion? m) {
+                              if (m == null) {
+                                return;
+                              }
+                              _replacePreset(
+                                index,
+                                preset.copyWith(visibilityEnterMotion: m),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      if (preset.visibilityEnterMotion !=
+                          OsgPresetVisibilityMotion.none) ...<Widget>[
+                        const SizedBox(height: 6),
+                        Text(
+                          "Enter slide",
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                        Slider(
+                          value:
+                              (preset.visibilityEnterSlideDistanceNorm * 100)
+                                  .clamp(5.0, 250.0),
+                          min: 5,
+                          max: 250,
+                          divisions: 49,
+                          label:
+                              "${(preset.visibilityEnterSlideDistanceNorm * 100).round()}%",
+                          onChanged: (double v) => _replacePreset(
+                            index,
+                            preset.copyWith(
+                              visibilityEnterSlideDistanceNorm: v / 100.0,
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      Text(
+                        "Enter Duration",
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      Slider(
+                        value: OsgPreset.clampVisibilityDurationMs(
+                          preset.visibilityEnterDurationMs,
+                        ).toDouble(),
+                        min: 80,
+                        max: 4000,
+                        divisions: 49,
+                        label:
+                            "${OsgPreset.clampVisibilityDurationMs(preset.visibilityEnterDurationMs)} ms",
+                        onChanged: (double v) => _replacePreset(
+                          index,
+                          preset.copyWith(
+                            visibilityEnterDurationMs: v.round(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(width: scaleDimension(context, 12)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      InputDecorator(
+                        decoration: _osgEditorDenseBorderlessDecoration(
+                          labelText: "Exit",
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<OsgPresetVisibilityMotion>(
+                            isExpanded: true,
+                            value: preset.visibilityExitMotion,
+                            items: <DropdownMenuItem<OsgPresetVisibilityMotion>>[
+                              for (final OsgPresetVisibilityMotion m
+                                  in OsgPresetVisibilityMotion.values)
+                                DropdownMenuItem<OsgPresetVisibilityMotion>(
+                                  value: m,
+                                  child: Text(
+                                    _osgVisibilityMotionMenuLabel(
+                                      m,
+                                      forExit: true,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                            onChanged: (OsgPresetVisibilityMotion? m) {
+                              if (m == null) {
+                                return;
+                              }
+                              _replacePreset(
+                                index,
+                                preset.copyWith(visibilityExitMotion: m),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      if (preset.visibilityExitMotion !=
+                          OsgPresetVisibilityMotion.none) ...<Widget>[
+                        const SizedBox(height: 6),
+                        Text(
+                          "Exit slide",
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                        Slider(
+                          value:
+                              (preset.visibilityExitSlideDistanceNorm * 100)
+                                  .clamp(5.0, 250.0),
+                          min: 5,
+                          max: 250,
+                          divisions: 49,
+                          label:
+                              "${(preset.visibilityExitSlideDistanceNorm * 100).round()}%",
+                          onChanged: (double v) => _replacePreset(
+                            index,
+                            preset.copyWith(
+                              visibilityExitSlideDistanceNorm: v / 100.0,
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      Text(
+                        "Exit Duration",
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      Slider(
+                        value: OsgPreset.clampVisibilityDurationMs(
+                          preset.visibilityExitDurationMs,
+                        ).toDouble(),
+                        min: 80,
+                        max: 4000,
+                        divisions: 49,
+                        label:
+                            "${OsgPreset.clampVisibilityDurationMs(preset.visibilityExitDurationMs)} ms",
+                        onChanged: (double v) => _replacePreset(
+                          index,
+                          preset.copyWith(
+                            visibilityExitDurationMs: v.round(),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],

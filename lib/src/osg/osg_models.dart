@@ -121,6 +121,15 @@ enum OsgTemplateBackgroundKind {
   solid,
 }
 
+/// Slide axis for OSG preset show/hide transitions (paired with fade).
+enum OsgPresetVisibilityMotion {
+  none,
+  left,
+  right,
+  top,
+  bottom,
+}
+
 class OsgSlot {
   const OsgSlot({
     required this.textSource,
@@ -256,6 +265,12 @@ class OsgPreset {
     this.templateSolidWidthPx = 0,
     this.templateSolidHeightPx = 0,
     this.requiredSemanticTypeIds = const <int>[],
+    this.visibilityEnterMotion = OsgPresetVisibilityMotion.none,
+    this.visibilityExitMotion = OsgPresetVisibilityMotion.none,
+    this.visibilityEnterSlideDistanceNorm = 1.0,
+    this.visibilityExitSlideDistanceNorm = 1.0,
+    this.visibilityEnterDurationMs = defaultVisibilityTransitionDurationMs,
+    this.visibilityExitDurationMs = defaultVisibilityTransitionDurationMs,
   });
 
   /// Width ÷ height of the template image in pixels; used to lock [frame] aspect on screen.
@@ -289,13 +304,75 @@ class OsgPreset {
   /// to be allowed (each id must match at least one tag attachment).
   final List<int> requiredSemanticTypeIds;
 
-  static const int osgPresetSchemaVersion = 8;
+  /// How the preset enters when toggled visible (fade and optional slide).
+  final OsgPresetVisibilityMotion visibilityEnterMotion;
+
+  /// How the preset leaves when toggled off.
+  final OsgPresetVisibilityMotion visibilityExitMotion;
+
+  /// Slide distance for [visibilityEnterMotion] as a multiple of frame width or height.
+  final double visibilityEnterSlideDistanceNorm;
+
+  /// Slide distance for [visibilityExitMotion] as a multiple of frame width or height.
+  final double visibilityExitSlideDistanceNorm;
+
+  /// Fade (+ slide) duration when the preset becomes visible (milliseconds).
+  final int visibilityEnterDurationMs;
+
+  /// Fade (+ slide) duration when the preset is hidden (milliseconds).
+  final int visibilityExitDurationMs;
+
+  static const int osgPresetSchemaVersion = 10;
+
+  /// Default for [visibilityEnterDurationMs] and [visibilityExitDurationMs].
+  static const int defaultVisibilityTransitionDurationMs = 240;
 
   /// Fallback aspect (W÷H) for solid presets when pixel dimensions are missing.
   /// Matches [empty] frame on [PlayoutOutputSize.fallback] (1920 x 270 px).
   static const double defaultSolidTemplateAspect = 64 / 9;
 
   static const int defaultTemplateSolidArgb = 0xFF2D2D2D;
+
+  static OsgPresetVisibilityMotion _visibilityMotionFromJson(Object? raw) {
+    if (raw is! String) {
+      return OsgPresetVisibilityMotion.none;
+    }
+    return OsgPresetVisibilityMotion.values.firstWhere(
+      (OsgPresetVisibilityMotion e) => e.name == raw,
+      orElse: () => OsgPresetVisibilityMotion.none,
+    );
+  }
+
+  static double clampVisibilitySlideDistanceNorm(double v) {
+    if (v < 0.05) {
+      return 0.05;
+    }
+    if (v > 2.5) {
+      return 2.5;
+    }
+    return v;
+  }
+
+  static double _visibilitySlideDistanceFromJson(Object? raw) {
+    final double v = (raw is num ? raw.toDouble() : null) ?? 1.0;
+    return clampVisibilitySlideDistanceNorm(v);
+  }
+
+  static int clampVisibilityDurationMs(int ms) {
+    if (ms < 80) {
+      return 80;
+    }
+    if (ms > 4000) {
+      return 4000;
+    }
+    return ms;
+  }
+
+  static int _visibilityDurationFromJson(Object? raw) {
+    final int v = (raw is num ? raw.round() : null) ??
+        defaultVisibilityTransitionDurationMs;
+    return clampVisibilityDurationMs(v);
+  }
 
   static OsgTemplateBackgroundKind _kindFromJson(
     Object? raw,
@@ -331,6 +408,12 @@ class OsgPreset {
       templateSolidWidthPx: solidW,
       templateSolidHeightPx: solidH,
       requiredSemanticTypeIds: <int>[],
+      visibilityEnterMotion: OsgPresetVisibilityMotion.none,
+      visibilityExitMotion: OsgPresetVisibilityMotion.none,
+      visibilityEnterSlideDistanceNorm: 1.0,
+      visibilityExitSlideDistanceNorm: 1.0,
+      visibilityEnterDurationMs: defaultVisibilityTransitionDurationMs,
+      visibilityExitDurationMs: defaultVisibilityTransitionDurationMs,
     );
   }
 
@@ -393,7 +476,17 @@ class OsgPreset {
     int? templateSolidWidthPx,
     int? templateSolidHeightPx,
     List<int>? requiredSemanticTypeIds,
+    OsgPresetVisibilityMotion? visibilityEnterMotion,
+    OsgPresetVisibilityMotion? visibilityExitMotion,
+    double? visibilityEnterSlideDistanceNorm,
+    double? visibilityExitSlideDistanceNorm,
+    int? visibilityEnterDurationMs,
+    int? visibilityExitDurationMs,
   }) {
+    final double? nextEnterSlide = visibilityEnterSlideDistanceNorm;
+    final double? nextExitSlide = visibilityExitSlideDistanceNorm;
+    final int? nextEnterDur = visibilityEnterDurationMs;
+    final int? nextExitDur = visibilityExitDurationMs;
     return OsgPreset(
       enabled: enabled ?? this.enabled,
       templateRelativePath: templateRelativePath ?? this.templateRelativePath,
@@ -412,6 +505,22 @@ class OsgPreset {
           templateSolidHeightPx ?? this.templateSolidHeightPx,
       requiredSemanticTypeIds:
           requiredSemanticTypeIds ?? this.requiredSemanticTypeIds,
+      visibilityEnterMotion:
+          visibilityEnterMotion ?? this.visibilityEnterMotion,
+      visibilityExitMotion:
+          visibilityExitMotion ?? this.visibilityExitMotion,
+      visibilityEnterSlideDistanceNorm: nextEnterSlide != null
+          ? OsgPreset.clampVisibilitySlideDistanceNorm(nextEnterSlide)
+          : this.visibilityEnterSlideDistanceNorm,
+      visibilityExitSlideDistanceNorm: nextExitSlide != null
+          ? OsgPreset.clampVisibilitySlideDistanceNorm(nextExitSlide)
+          : this.visibilityExitSlideDistanceNorm,
+      visibilityEnterDurationMs: nextEnterDur != null
+          ? OsgPreset.clampVisibilityDurationMs(nextEnterDur)
+          : this.visibilityEnterDurationMs,
+      visibilityExitDurationMs: nextExitDur != null
+          ? OsgPreset.clampVisibilityDurationMs(nextExitDur)
+          : this.visibilityExitDurationMs,
     );
   }
 
@@ -429,6 +538,20 @@ class OsgPreset {
     "frame": frame.toJson(),
     "slots": slots.map((OsgSlot s) => s.toJson()).toList(),
     "requiredSemanticTypeIds": requiredSemanticTypeIds,
+    "visibilityEnterMotion": visibilityEnterMotion.name,
+    "visibilityExitMotion": visibilityExitMotion.name,
+    "visibilityEnterSlideDistanceNorm":
+        OsgPreset.clampVisibilitySlideDistanceNorm(
+          visibilityEnterSlideDistanceNorm,
+        ),
+    "visibilityExitSlideDistanceNorm":
+        OsgPreset.clampVisibilitySlideDistanceNorm(
+          visibilityExitSlideDistanceNorm,
+        ),
+    "visibilityEnterDurationMs":
+        OsgPreset.clampVisibilityDurationMs(visibilityEnterDurationMs),
+    "visibilityExitDurationMs":
+        OsgPreset.clampVisibilityDurationMs(visibilityExitDurationMs),
   };
 
   factory OsgPreset.fromJson(Map<String, Object?> json) {
@@ -495,6 +618,24 @@ class OsgPreset {
       templateSolidWidthPx: solidW,
       templateSolidHeightPx: solidH,
       requiredSemanticTypeIds: requiredSemanticTypeIds,
+      visibilityEnterMotion: _visibilityMotionFromJson(
+        json["visibilityEnterMotion"],
+      ),
+      visibilityExitMotion: _visibilityMotionFromJson(
+        json["visibilityExitMotion"],
+      ),
+      visibilityEnterSlideDistanceNorm: _visibilitySlideDistanceFromJson(
+        json["visibilityEnterSlideDistanceNorm"],
+      ),
+      visibilityExitSlideDistanceNorm: _visibilitySlideDistanceFromJson(
+        json["visibilityExitSlideDistanceNorm"],
+      ),
+      visibilityEnterDurationMs: _visibilityDurationFromJson(
+        json["visibilityEnterDurationMs"],
+      ),
+      visibilityExitDurationMs: _visibilityDurationFromJson(
+        json["visibilityExitDurationMs"],
+      ),
     );
     if (ver < 2) {
       preset = preset._migrateSlotsToGraphicLocal();
@@ -538,6 +679,12 @@ class OsgPreset {
       templateSolidWidthPx: templateSolidWidthPx,
       templateSolidHeightPx: templateSolidHeightPx,
       requiredSemanticTypeIds: requiredSemanticTypeIds,
+      visibilityEnterMotion: visibilityEnterMotion,
+      visibilityExitMotion: visibilityExitMotion,
+      visibilityEnterSlideDistanceNorm: visibilityEnterSlideDistanceNorm,
+      visibilityExitSlideDistanceNorm: visibilityExitSlideDistanceNorm,
+      visibilityEnterDurationMs: visibilityEnterDurationMs,
+      visibilityExitDurationMs: visibilityExitDurationMs,
     );
   }
 

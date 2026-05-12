@@ -8,6 +8,7 @@ import "package:path/path.dart" as p;
 import "package:obs_clipshow/src/features/osg/osg_slot_text_align.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
 
 typedef OsgSemanticResolve = Future<String?> Function(int semanticTypeId);
 
@@ -93,7 +94,7 @@ class _OsgPlayoutLayerState extends State<OsgPlayoutLayer> {
   }
 }
 
-class _OsgSinglePresetLayer extends StatelessWidget {
+class _OsgSinglePresetLayer extends StatefulWidget {
   const _OsgSinglePresetLayer({
     required this.preset,
     required this.visible,
@@ -108,7 +109,7 @@ class _OsgSinglePresetLayer extends StatelessWidget {
   final Map<int, String> semanticTextByTypeId;
   final PlayoutClip clip;
 
-  static bool _canRenderImage(OsgPreset preset, String workspaceRoot) {
+  static bool canRenderImage(OsgPreset preset, String workspaceRoot) {
     if (workspaceRoot.trim().isEmpty) {
       return false;
     }
@@ -129,21 +130,81 @@ class _OsgSinglePresetLayer extends StatelessWidget {
   }
 
   @override
+  State<_OsgSinglePresetLayer> createState() => _OsgSinglePresetLayerState();
+}
+
+class _OsgSinglePresetLayerState extends State<_OsgSinglePresetLayer>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  bool _entering = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(
+        milliseconds: OsgPreset.clampVisibilityDurationMs(
+          widget.preset.visibilityEnterDurationMs,
+        ),
+      ),
+      value: widget.visible ? 1.0 : 0.0,
+    );
+    _entering = widget.visible;
+    _controller.addListener(() {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _OsgSinglePresetLayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.visible != widget.visible) {
+      if (widget.visible) {
+        _entering = true;
+        _controller.duration = Duration(
+          milliseconds: OsgPreset.clampVisibilityDurationMs(
+            widget.preset.visibilityEnterDurationMs,
+          ),
+        );
+        _controller.forward(from: _controller.value);
+      } else {
+        _entering = false;
+        _controller.duration = Duration(
+          milliseconds: OsgPreset.clampVisibilityDurationMs(
+            widget.preset.visibilityExitDurationMs,
+          ),
+        );
+        _controller.reverse(from: _controller.value);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final OsgPreset preset = widget.preset;
     if (!preset.enabled) {
       return const SizedBox.shrink();
     }
     final bool useSolid =
         preset.templateBackgroundKind == OsgTemplateBackgroundKind.solid;
     final bool imageOk =
-        !useSolid && _canRenderImage(preset, workspaceRoot);
+        !useSolid && _OsgSinglePresetLayer.canRenderImage(preset, widget.workspaceRoot);
     if (!useSolid && !imageOk) {
       return const SizedBox.shrink();
     }
     final String? absPath = !useSolid && imageOk
         ? p.normalize(
             p.join(
-              p.absolute(workspaceRoot.trim()),
+              p.absolute(widget.workspaceRoot.trim()),
               preset.templateRelativePath
                   .trim()
                   .replaceAll("/", p.separator),
@@ -152,124 +213,128 @@ class _OsgSinglePresetLayer extends StatelessWidget {
         : null;
 
     final double layerOp = preset.layerOpacity.clamp(0.0, 1.0);
-    final double animOpacity = visible ? layerOp : 0.0;
 
     return IgnorePointer(
       ignoring: true,
-      child: AnimatedOpacity(
-        opacity: animOpacity,
-        duration: const Duration(milliseconds: 240),
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints c) {
-            final double w = c.maxWidth;
-            final double h = c.maxHeight;
-            final OsgNormRect fr = preset.frame;
-            final double left = fr.x * w;
-            final double top = fr.y * h;
-            final double fw = fr.width * w;
-            final double fh = fr.height * h;
-            final double cornerR = preset.templateCornerRadiusPx(fw, fh);
-            final Widget templateStack = Stack(
-              clipBehavior: Clip.none,
-              children: <Widget>[
-                Positioned.fill(
-                  child: useSolid
-                      ? ColoredBox(color: Color(preset.templateSolidArgb))
-                      : Image.file(
-                          File(absPath!),
-                          fit: BoxFit.cover,
-                          alignment: Alignment.center,
-                          gaplessPlayback: true,
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints c) {
+          final double w = c.maxWidth;
+          final double h = c.maxHeight;
+          final OsgNormRect fr = preset.frame;
+          final double left = fr.x * w;
+          final double top = fr.y * h;
+          final double fw = fr.width * w;
+          final double fh = fr.height * h;
+          final double cornerR = preset.templateCornerRadiusPx(fw, fh);
+          final ({double opacity, Offset offset}) vis =
+              osgVisibilityOpacityAndOffset(
+                entering: _entering,
+                shown: _controller.value,
+                layerOpacity: layerOp,
+                enterMotion: preset.visibilityEnterMotion,
+                enterSlideDistanceNorm: preset.visibilityEnterSlideDistanceNorm,
+                exitMotion: preset.visibilityExitMotion,
+                exitSlideDistanceNorm: preset.visibilityExitSlideDistanceNorm,
+                frameWidthPx: fw,
+                frameHeightPx: fh,
+              );
+          final Widget templateStack = Stack(
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              Positioned.fill(
+                child: useSolid
+                    ? ColoredBox(color: Color(preset.templateSolidArgb))
+                    : Image.file(
+                        File(absPath!),
+                        fit: BoxFit.cover,
+                        alignment: Alignment.center,
+                        gaplessPlayback: true,
+                      ),
+              ),
+              ...preset.slots.map((OsgSlot slot) {
+                final OsgNormRect b = slot.box;
+                final double sl = b.x * fw;
+                final double st = b.y * fh;
+                final double sw = b.width * fw;
+                final double sh = b.height * fh;
+                final String text = switch (slot.textSource) {
+                  OsgTextSource.fixed => slot.fixedText,
+                  OsgTextSource.annotation => widget.clip.annotationsText,
+                  OsgTextSource.semantic =>
+                    slot.semanticTypeId == null
+                        ? ""
+                        : (widget.semanticTextByTypeId[slot.semanticTypeId!] ??
+                            ""),
+                };
+                final largestClamp = max(fh * 0.25, 6.0);
+                final double fontPx = (slot.fontSizeNorm * fh).clamp(
+                  6.0,
+                  largestClamp,
+                );
+                final String? ff = slot.fontFamily;
+                return Positioned(
+                  left: sl,
+                  top: st,
+                  width: sw,
+                  height: sh,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: osgSlotAlignment(
+                      slot.textAlign,
+                      slot.verticalAlign,
+                    ),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: sw,
+                        maxHeight: sh,
+                      ),
+                      child: Text(
+                        text,
+                        textAlign: osgSlotTextAlignToFlutterTextAlign(
+                          slot.textAlign,
                         ),
-                ),
-                ...preset.slots.map((OsgSlot slot) {
-                        final OsgNormRect b = slot.box;
-                        final double sl = b.x * fw;
-                        final double st = b.y * fh;
-                        final double sw = b.width * fw;
-                        final double sh = b.height * fh;
-                        final String text = switch (slot.textSource) {
-                          OsgTextSource.fixed => slot.fixedText,
-                          OsgTextSource.annotation => clip.annotationsText,
-                          OsgTextSource.semantic =>
-                            slot.semanticTypeId == null
-                                ? ""
-                                : (semanticTextByTypeId[slot.semanticTypeId!] ??
-                                    ""),
-                        };
-                        final largestClamp = max(fh * 0.25, 6.0);
-                        final double fontPx = (slot.fontSizeNorm * fh).clamp(
-                          6.0,
-                          largestClamp,
-                        );
-                        final String? ff = slot.fontFamily;
-                        return Positioned(
-                          left: sl,
-                          top: st,
-                          width: sw,
-                          height: sh,
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: osgSlotAlignment(
-                              slot.textAlign,
-                              slot.verticalAlign,
-                            ),
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: sw,
-                                maxHeight: sh,
-                              ),
-                              child: Text(
-                                text,
-                                textAlign: osgSlotTextAlignToFlutterTextAlign(
-                                  slot.textAlign,
-                                ),
-                                maxLines: slot.textSource == OsgTextSource.annotation
-                                    ? 12
-                                    : 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Color(slot.textColorArgb),
-                                  fontSize: fontPx,
-                                  fontFamily: ff == null || ff.isEmpty
-                                      ? null
-                                      : ff,
-                                  // fontWeight: FontWeight.w600,
-                                  // shadows: const <Shadow>[
-                                  //   Shadow(
-                                  //     offset: Offset(1, 1),
-                                  //     blurRadius: 2,
-                                  //     color: Colors.black87,
-                                  //   ),
-                                  // ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-              ],
-            );
-            return Stack(
-              clipBehavior: Clip.none,
-              children: <Widget>[
-                Positioned(
-                  left: left,
-                  top: top,
-                  width: fw,
-                  height: fh,
-                  child: cornerR <= 0
-                      ? templateStack
-                      : ClipRRect(
-                          borderRadius: BorderRadius.circular(cornerR),
-                          clipBehavior: Clip.antiAlias,
-                          child: templateStack,
+                        maxLines: slot.textSource == OsgTextSource.annotation
+                            ? 12
+                            : 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Color(slot.textColorArgb),
+                          fontSize: fontPx,
+                          fontFamily: ff == null || ff.isEmpty ? null : ff,
                         ),
-                ),
-              ],
-            );
-          },
-        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          );
+          final Widget framed = Stack(
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              Positioned(
+                left: left,
+                top: top,
+                width: fw,
+                height: fh,
+                child: cornerR <= 0
+                    ? templateStack
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(cornerR),
+                        clipBehavior: Clip.antiAlias,
+                        child: templateStack,
+                      ),
+              ),
+            ],
+          );
+          return Opacity(
+            opacity: vis.opacity.clamp(0.0, 1.0),
+            child: Transform.translate(
+              offset: vis.offset,
+              child: framed,
+            ),
+          );
+        },
       ),
     );
   }

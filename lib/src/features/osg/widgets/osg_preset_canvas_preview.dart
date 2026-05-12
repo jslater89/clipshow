@@ -6,6 +6,7 @@ import "package:path/path.dart" as p;
 import "package:obs_clipshow/src/features/osg/osg_editor_geometry.dart";
 import "package:obs_clipshow/src/features/osg/osg_slot_text_align.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
 import "package:obs_clipshow/src/widgets/checkerboard_background.dart";
 
 /// How the user may interact with the preview.
@@ -31,11 +32,15 @@ class OsgPresetCanvasPreview extends StatefulWidget {
     this.dimOutsideFrame = false,
     this.applyLayerOpacity = true,
     this.semanticTypeNamesById,
+    this.motionPreviewSample,
   });
 
   final PlayoutOutputSize playoutOutputSize;
   final String workspaceRoot;
   final OsgPreset preset;
+
+  /// When set, applies the same enter/exit opacity + slide as playout on the frame.
+  final OsgMotionPreviewSample? motionPreviewSample;
 
   /// When set, semantic slots show these names instead of raw ids in preview text.
   final Map<int, String>? semanticTypeNamesById;
@@ -146,9 +151,11 @@ class _OsgPresetCanvasPreviewState extends State<OsgPresetCanvasPreview> {
                       painter: _OsgFrameDimPainter(frame: widget.preset.frame),
                     ),
                   Opacity(
-                    opacity: widget.applyLayerOpacity
-                        ? widget.preset.layerOpacity.clamp(0.0, 1.0)
-                        : 1.0,
+                    opacity: widget.motionPreviewSample != null
+                        ? 1.0
+                        : (widget.applyLayerOpacity
+                              ? widget.preset.layerOpacity.clamp(0.0, 1.0)
+                              : 1.0),
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: _buildScreenLayers(pw, ph, playoutAspect),
@@ -244,39 +251,64 @@ class _OsgPresetCanvasPreviewState extends State<OsgPresetCanvasPreview> {
       ],
     );
 
+    final OsgMotionPreviewSample? mp = widget.motionPreviewSample;
+    final Widget clippedGraphic = cornerR <= 0
+        ? frameStack
+        : ClipRRect(
+            borderRadius: BorderRadius.circular(cornerR),
+            clipBehavior: Clip.antiAlias,
+            child: frameStack,
+          );
+
+    Widget graphicAndBorder = Stack(
+      clipBehavior: Clip.none,
+      fit: StackFit.expand,
+      children: <Widget>[
+        Positioned.fill(child: clippedGraphic),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: cornerR > 0
+                    ? BorderRadius.circular(cornerR)
+                    : null,
+                border: Border.all(color: Colors.amberAccent, width: 1),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+
+    if (mp != null) {
+      final double lo = preset.layerOpacity.clamp(0.0, 1.0);
+      final ({double opacity, Offset offset}) vis = osgVisibilityOpacityAndOffset(
+        entering: mp.isEnterLeg,
+        shown: mp.shown,
+        layerOpacity: lo,
+        enterMotion: preset.visibilityEnterMotion,
+        enterSlideDistanceNorm: preset.visibilityEnterSlideDistanceNorm,
+        exitMotion: preset.visibilityExitMotion,
+        exitSlideDistanceNorm: preset.visibilityExitSlideDistanceNorm,
+        frameWidthPx: fw,
+        frameHeightPx: fh,
+      );
+      graphicAndBorder = Opacity(
+        opacity: vis.opacity.clamp(0.0, 1.0),
+        child: Transform.translate(
+          offset: vis.offset,
+          child: graphicAndBorder,
+        ),
+      );
+    }
+
     return <Widget>[
       Positioned(
         left: left,
         top: top,
         width: fw,
         height: fh,
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: <Widget>[
-            Positioned.fill(
-              child: cornerR <= 0
-                  ? frameStack
-                  : ClipRRect(
-                      borderRadius: BorderRadius.circular(cornerR),
-                      clipBehavior: Clip.antiAlias,
-                      child: frameStack,
-                    ),
-            ),
-            Positioned.fill(
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: cornerR > 0
-                        ? BorderRadius.circular(cornerR)
-                        : null,
-                    border: Border.all(color: Colors.amberAccent, width: 1),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+        child: graphicAndBorder,
       ),
       if (widget.interaction == OsgEditorPreviewInteraction.frame &&
           widget.onFrameChanged != null)
