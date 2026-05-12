@@ -8,6 +8,7 @@ import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_media_tag_menu.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_tag_value_edit_dialog.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 
@@ -187,29 +188,36 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                     final bool isSystemTag =
                         att.tagName == MediaRepository.masterTag ||
                         att.tagName == MediaRepository.clipTag;
-                    return GestureDetector(
-                      onSecondaryTapUp: (TapUpDetails d) {
-                        unawaited(
-                          showMediaTagContextMenu(
-                            context: context,
-                            viewModel: viewModel,
-                            attachment: att,
-                            globalPosition: d.globalPosition,
-                          ),
-                        );
-                      },
-                      child: InputChip(
-                        label: mediaTagAttachmentChipLabel(att),
-                        backgroundColor: tagChipColor(context, att.tagName),
-                        onDeleted: isSystemTag
-                            ? null
-                            : () => unawaited(
-                                viewModel.removeTagFromSelectedMedia(
-                                  att.tagName,
-                                ),
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: <Widget>[
+                        GestureDetector(
+                          onSecondaryTapUp: (TapUpDetails d) {
+                            unawaited(
+                              showMediaTagContextMenu(
+                                context: context,
+                                viewModel: viewModel,
+                                attachment: att,
+                                globalPosition: d.globalPosition,
                               ),
-                        onPressed: () => viewModel.toggleTagFilter(att.tagName),
-                      ),
+                            );
+                          },
+                          child: InputChip(
+                            label: mediaTagAttachmentChipLabel(att),
+                            backgroundColor: tagChipColor(context, att.tagName),
+                            onDeleted: isSystemTag
+                                ? null
+                                : () => unawaited(
+                                    viewModel.removeTagFromSelectedMedia(
+                                      att.tagName,
+                                    ),
+                                  ),
+                            onPressed: () =>
+                                viewModel.toggleTagFilter(att.tagName),
+                          ),
+                        ),
+                      ],
                     );
                   }).toList(),
                 ),
@@ -291,27 +299,33 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                   runSpacing: gap8,
                   children: sortShelfTagEntries(viewModel.savedTags)
                       .map(
-                        (ShelfTagEntry e) => GestureDetector(
-                          onSecondaryTapUp: (TapUpDetails d) {
-                            unawaited(
-                              showShelfTagContextMenu(
-                                context: context,
-                                viewModel: viewModel,
-                                entry: e,
-                                target: DashboardShelfTagMenuTarget.saved,
-                                globalPosition: d.globalPosition,
+                        (ShelfTagEntry e) => Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: <Widget>[
+                            GestureDetector(
+                              onSecondaryTapUp: (TapUpDetails d) {
+                                unawaited(
+                                  showShelfTagContextMenu(
+                                    context: context,
+                                    viewModel: viewModel,
+                                    entry: e,
+                                    target: DashboardShelfTagMenuTarget.saved,
+                                    globalPosition: d.globalPosition,
+                                  ),
+                                );
+                              },
+                              child: InputChip(
+                                label: shelfTagChipLabel(
+                                  e,
+                                  viewModel.tagSemanticTypes,
+                                ),
+                                backgroundColor: tagChipColor(context, e.name),
+                                onDeleted: () =>
+                                    unawaited(viewModel.removeSavedTag(e.name)),
                               ),
-                            );
-                          },
-                          child: InputChip(
-                            label: shelfTagChipLabel(
-                              e,
-                              viewModel.tagSemanticTypes,
                             ),
-                            backgroundColor: tagChipColor(context, e.name),
-                            onDeleted: () =>
-                                unawaited(viewModel.removeSavedTag(e.name)),
-                          ),
+                          ],
                         ),
                       )
                       .toList(),

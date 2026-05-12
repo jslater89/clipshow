@@ -95,7 +95,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Text("Manage"),
+            const Text("Preview"),
             SizedBox(height: gap12),
             Expanded(
               child: GestureDetector(
@@ -221,6 +221,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
             SizedBox(height: gap12),
             Wrap(
               spacing: gap8,
+              runSpacing: gap8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 if (previewOsgClip != null) ...<Widget>[

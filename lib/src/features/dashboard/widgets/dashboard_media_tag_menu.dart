@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_tag_value_edit_dialog.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 
 List<MediaTagAttachment> sortMediaTagAttachments(List<MediaTagAttachment> raw) {
@@ -92,7 +93,11 @@ Future<void> showMediaTagContextMenu({
     return;
   }
   if (choice == "edit") {
-    final String? next = await _promptTagRename(context, attachment.tagName);
+    final String? next = await showTagValueEditDialog(
+      context: context,
+      viewModel: viewModel,
+      initialTagText: attachment.tagName,
+    );
     if (next == null || !context.mounted) {
       return;
     }
@@ -172,7 +177,11 @@ Future<void> showShelfTagContextMenu({
     return;
   }
   if (choice == "edit") {
-    final String? next = await _promptTagRename(context, entry.name);
+    final String? next = await showTagValueEditDialog(
+      context: context,
+      viewModel: viewModel,
+      initialTagText: entry.name,
+    );
     if (next == null || !context.mounted) {
       return;
     }
@@ -250,39 +259,6 @@ Future<void> showShelfTagContextMenu({
 }
 
 enum DashboardShelfTagMenuTarget { saved, capture }
-
-Future<String?> _promptTagRename(BuildContext context, String initial) async {
-  final TextEditingController controller = TextEditingController(text: initial);
-  try {
-    final String? result = await showDialog<String>(
-      context: context,
-      builder: (BuildContext ctx) {
-        return AlertDialog(
-          title: const Text("Edit tag value"),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: "Tag text"),
-            onSubmitted: (String v) => Navigator.pop(ctx, v),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text("Cancel"),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, controller.text),
-              child: const Text("Save"),
-            ),
-          ],
-        );
-      },
-    );
-    return result?.trim();
-  } finally {
-    controller.dispose();
-  }
-}
 
 Future<void> _showBulkSemanticDialog({
   required BuildContext context,
