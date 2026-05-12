@@ -92,6 +92,18 @@ class TelestratorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Initial paint color, stroke width, and whether drawing is on (from workspace settings).
+  void applyInitialTelestratorSettings({
+    required Color activeColor,
+    required double brushSize,
+    required bool enabledByDefault,
+  }) {
+    _activeColor = activeColor;
+    _brushSize = brushSize.clamp(minBrushSize, maxBrushSize);
+    _isEnabled = enabledByDefault;
+    notifyListeners();
+  }
+
   void increaseBrush() {
     _brushSize = (_brushSize + brushStep).clamp(minBrushSize, maxBrushSize);
     notifyListeners();

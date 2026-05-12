@@ -6,21 +6,33 @@ import "package:logging/logging.dart";
 import "package:path/path.dart" as p;
 
 import "package:obs_clipshow/src/ingestion/media_duration_probe.dart";
+import "package:obs_clipshow/src/workspace/workspace_settings.dart";
+
+class _ThumbnailJob {
+  const _ThumbnailJob(this.videoPath, this.knownDurationSeconds);
+
+  final String videoPath;
+
+  /// When set (e.g. from ingest-time ffprobe), skips a second ffprobe before ffmpeg.
+  final double? knownDurationSeconds;
+}
 
 /// Generates JPEG thumbnails next to video files using `ffprobe` + `ffmpeg`.
 /// Work runs in the background with bounded concurrency so ingestion stays fast.
-/// Default concurrency is 4 parallel `ffmpeg` processes; adjust [maxConcurrentJobs] if needed.
+/// Default concurrency is [IngestionConcurrencyDefaults.thumbnailDefault] parallel `ffmpeg` processes.
 class ThumbnailService {
   ThumbnailService({
-    this.maxConcurrentJobs = 4,
+    int maxConcurrentJobs = IngestionConcurrencyDefaults.thumbnailDefault,
     this.maxThumbWidth = 960,
     this.maxThumbHeight = 480,
-  });
+  }) : maxConcurrentJobs = IngestionConcurrencyDefaults.clampThumbnail(
+         maxConcurrentJobs,
+       );
 
   static const int defaultMaxThumbWidth = 960;
   static const int defaultMaxThumbHeight = 480;
 
-  final int maxConcurrentJobs;
+  int maxConcurrentJobs;
   final int maxThumbWidth;
   final int maxThumbHeight;
 
@@ -28,14 +40,14 @@ class ThumbnailService {
   final StreamController<String> _readyController =
       StreamController<String>.broadcast();
 
-  final Queue<String> _queue = Queue<String>();
+  final Queue<_ThumbnailJob> _queue = Queue<_ThumbnailJob>();
   final Set<String> _queuedOrRunning = <String>{};
   int _activeJobs = 0;
   bool _disposed = false;
   bool _paused = false;
 
   /// [failureDetail] is null on success (thumbnail present or written).
-  void Function(String normalizedPath, String? failureDetail)?
+  Future<void> Function(String normalizedPath, String? failureDetail)?
   onThumbnailSettled;
 
   /// Emits the normalized video path when a thumbnail file has been written.
@@ -45,10 +57,14 @@ class ThumbnailService {
 
   /// Schedules thumbnail generation without blocking the caller.
   ///
-  /// If `*.thumb.jpg` already exists next to the video, returns immediately:
-  /// nothing is queued and no [thumbnailReady] event is sent (the list reads
-  /// the file directly). This avoids backlog and hundreds of UI rebuilds on startup.
-  void requestThumbnail(String videoPath) {
+  /// If `*.thumb.jpg` already exists next to the video, awaits [onThumbnailSettled]
+  /// when set, then returns without queuing (no [thumbnailReady] event).
+  ///
+  /// [knownDurationSeconds] avoids a redundant ffprobe when ingestion already probed duration.
+  Future<void> requestThumbnail(
+    String videoPath, {
+    double? knownDurationSeconds,
+  }) async {
     if (_disposed) {
       return;
     }
@@ -69,7 +85,7 @@ class ThumbnailService {
     final String thumbPath = thumbnailPathForVideo(normalized);
     try {
       if (File(thumbPath).existsSync()) {
-        onThumbnailSettled?.call(normalized, null);
+        await _notifySettled(normalized, null);
         return;
       }
     } on FileSystemException {
@@ -77,7 +93,9 @@ class ThumbnailService {
     }
 
     _queuedOrRunning.add(normalized);
-    _queue.addLast(normalized);
+    _queue.addLast(
+      _ThumbnailJob(normalized, knownDurationSeconds),
+    );
     _pumpQueue();
   }
 
@@ -88,27 +106,35 @@ class ThumbnailService {
     }
   }
 
-  void _pumpQueue() {
-    while (!_disposed && !_paused && _activeJobs < maxConcurrentJobs && _queue.isNotEmpty) {
-      final String path = _queue.removeFirst();
-      _activeJobs++;
-      unawaited(_generateThumbnailJob(path));
+  void setMaxConcurrentJobs(int value) {
+    maxConcurrentJobs = IngestionConcurrencyDefaults.clampThumbnail(value);
+    if (!_disposed && !_paused) {
+      _pumpQueue();
     }
   }
 
-  Future<void> _generateThumbnailJob(String videoPath) async {
+  void _pumpQueue() {
+    while (!_disposed && !_paused && _activeJobs < maxConcurrentJobs && _queue.isNotEmpty) {
+      final _ThumbnailJob job = _queue.removeFirst();
+      _activeJobs++;
+      unawaited(_generateThumbnailJob(job));
+    }
+  }
+
+  Future<void> _generateThumbnailJob(_ThumbnailJob job) async {
     try {
-      await _generateThumbnail(videoPath);
+      await _generateThumbnail(job);
     } finally {
       _activeJobs--;
-      _queuedOrRunning.remove(videoPath);
+      _queuedOrRunning.remove(job.videoPath);
       if (!_disposed) {
         _pumpQueue();
       }
     }
   }
 
-  Future<void> _generateThumbnail(String videoPath) async {
+  Future<void> _generateThumbnail(_ThumbnailJob job) async {
+    final String videoPath = job.videoPath;
     final File source = File(videoPath);
     if (!await source.exists()) {
       return;
@@ -120,18 +146,23 @@ class ThumbnailService {
     final String thumbnailPath = thumbnailPathForVideo(videoPath);
     final File thumbnailFile = File(thumbnailPath);
     if (await thumbnailFile.exists()) {
-      onThumbnailSettled?.call(videoPath, null);
+      await _notifySettled(videoPath, null);
       if (!_disposed && !_readyController.isClosed) {
         _readyController.add(videoPath);
       }
       return;
     }
 
-    final MediaDurationProbeResult probe =
-        await MediaDurationProbe.probeSeconds(videoPath);
-    if (!probe.ok) {
-      onThumbnailSettled?.call(videoPath, probe.stderr);
-      return;
+    final double? known = job.knownDurationSeconds;
+    late final MediaDurationProbeResult probe;
+    if (known != null && known > 1e-6) {
+      probe = MediaDurationProbeResult.ok(known);
+    } else {
+      probe = await MediaDurationProbe.probeSeconds(videoPath);
+      if (!probe.ok) {
+        await _notifySettled(videoPath, probe.stderr);
+        return;
+      }
     }
     final double seekSeconds = probe.durationSeconds == null
         ? 0
@@ -153,9 +184,9 @@ class ThumbnailService {
         thumbnailPath,
       ]);
       if (result.exitCode != 0) {
-        onThumbnailSettled?.call(videoPath, "${result.stderr}");
+        await _notifySettled(videoPath, "${result.stderr}");
       } else {
-        onThumbnailSettled?.call(videoPath, null);
+        await _notifySettled(videoPath, null);
         final int remaining = _queuedOrRunning.length - 1;
         _logger.fine(
           "Generated thumbnail: $thumbnailPath ($remaining remaining)",
@@ -165,8 +196,16 @@ class ThumbnailService {
         }
       }
     } catch (error) {
-      onThumbnailSettled?.call(videoPath, "$error");
+      await _notifySettled(videoPath, "$error");
     }
+  }
+
+  Future<void> _notifySettled(String path, String? failureDetail) async {
+    final Future<void> Function(String, String?)? handler = onThumbnailSettled;
+    if (handler == null) {
+      return;
+    }
+    await handler(path, failureDetail);
   }
 
   Future<void> deleteThumbnailForVideoPath(String videoPath) async {

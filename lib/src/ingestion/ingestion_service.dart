@@ -11,13 +11,36 @@ import 'package:obs_clipshow/src/ingestion/media_duration_probe.dart';
 import 'package:obs_clipshow/src/ingestion/thumbnail_service.dart';
 import 'package:obs_clipshow/src/ingestion/workspace_watcher.dart';
 import 'package:obs_clipshow/src/workspace/workspace_media_paths.dart';
+import 'package:obs_clipshow/src/workspace/workspace_settings.dart';
+
+/// Stat + optional duration from a single file walk, before DB upsert.
+class _MasterFileGatherResult {
+  const _MasterFileGatherResult({
+    required this.absolutePath,
+    required this.storedPath,
+    required this.stat,
+    this.durationMs,
+    this.knownDurationSecondsForThumbnail,
+  });
+
+  final String absolutePath;
+  final String storedPath;
+  final FileStat stat;
+  final int? durationMs;
+
+  /// Passed to [ThumbnailService] to skip a redundant ffprobe after ingest probe.
+  final double? knownDurationSecondsForThumbnail;
+}
 
 class IngestionService {
   IngestionService({
     required WorkspaceWatcher workspaceWatcher,
     ThumbnailService? thumbnailService,
   }) : _workspaceWatcher = workspaceWatcher,
-       _thumbnailService = thumbnailService ?? ThumbnailService();
+       _thumbnailService = thumbnailService ??
+           ThumbnailService(
+             maxConcurrentJobs: IngestionConcurrencyDefaults.thumbnailDefault,
+           );
 
   static const Set<String> supportedVideoExtensions = <String>{
     ".mp4",
@@ -45,10 +68,25 @@ class IngestionService {
   final Map<String, MasterMediaFile> _snapshotByPath =
       <String, MasterMediaFile>{};
 
+  /// While the post-start directory walk runs, thumbnail settlement can clear
+  /// many identical-looking DB rows; defer stream updates until the walk ends.
+  bool _initialDirectoryScanActive = false;
+  bool _snapshotNotifyDeferredUntilScanIdle = false;
+
   Stream<List<MasterMediaFile>> get mediaFiles => _mediaController.stream;
 
   /// Fires when a thumbnail file has been written for a video path (for UI refresh).
   Stream<String> get thumbnailReady => _thumbnailService.thumbnailReady;
+
+  /// Updates parallel ffprobe batch size and thumbnail queue depth (e.g. from workspace settings).
+  void applyIngestionConcurrency({
+    required int probeConcurrency,
+    required int thumbnailConcurrency,
+  }) {
+    _scanProbeConcurrency =
+        IngestionConcurrencyDefaults.clampProbe(probeConcurrency);
+    _thumbnailService.setMaxConcurrentJobs(thumbnailConcurrency);
+  }
 
   Future<void> start({
     required String workspacePath,
@@ -77,8 +115,11 @@ class IngestionService {
 
   /// Walks the tree asynchronously; list rows appear in batches via [_emitSnapshot].
   Future<void> _runInitialScanInBackground(int generation) async {
+    int scannedCount = 0;
+    _initialDirectoryScanActive = true;
+    _snapshotNotifyDeferredUntilScanIdle = false;
     try {
-      final int scannedCount = await _scanAllExistingFiles(generation);
+      scannedCount = await _scanAllExistingFiles(generation);
       if (_disposed || generation != _scanGeneration) {
         return;
       }
@@ -88,6 +129,15 @@ class IngestionService {
       _logger.info("Initial scan completed. Imported files: $scannedCount");
     } catch (error, stackTrace) {
       _logger.severe("Initial scan failed: $error", error, stackTrace);
+    } finally {
+      _initialDirectoryScanActive = false;
+      if (!_disposed && generation == _scanGeneration) {
+        final bool pendingDeferred = _snapshotNotifyDeferredUntilScanIdle;
+        _snapshotNotifyDeferredUntilScanIdle = false;
+        if (pendingDeferred && scannedCount == 0) {
+          await _emitSnapshot();
+        }
+      }
     }
   }
 
@@ -148,6 +198,8 @@ class IngestionService {
 
   static const int _scanEmitBatchSize = 50;
 
+  int _scanProbeConcurrency = IngestionConcurrencyDefaults.probeDefault;
+
   /// Yields until neither playout nor preview playback is active.
   Future<void> _awaitUnpaused() async {
     while (_scanShouldPause && !_disposed) {
@@ -166,6 +218,40 @@ class IngestionService {
       return importedCount;
     }
 
+    final List<String> probeChunk = <String>[];
+
+    Future<void> flushProbeChunk() async {
+      if (probeChunk.isEmpty) {
+        return;
+      }
+      final List<String> paths = List<String>.from(probeChunk);
+      probeChunk.clear();
+      await _awaitUnpaused();
+      if (_disposed || generation != _scanGeneration) {
+        return;
+      }
+      final List<Future<_MasterFileGatherResult?>> probeFutures =
+          paths.map(_gatherForUpsert).toList();
+      final List<_MasterFileGatherResult?> gathered =
+          await Future.wait(probeFutures);
+      for (final _MasterFileGatherResult? g in gathered) {
+        if (_disposed || generation != _scanGeneration) {
+          return;
+        }
+        if (g == null) {
+          continue;
+        }
+        final bool changed = await _commitUpsertFromGathered(repository, g);
+        if (!changed) {
+          continue;
+        }
+        importedCount++;
+        if (importedCount == 1 || importedCount % _scanEmitBatchSize == 0) {
+          await _emitSnapshot();
+        }
+      }
+    }
+
     await for (final FileSystemEntity entity in root.list(
       recursive: true,
       followLinks: false,
@@ -182,22 +268,12 @@ class IngestionService {
       if (!isSupportedVideoPath(entity.path)) {
         continue;
       }
-      await _awaitUnpaused();
-      if (_disposed || generation != _scanGeneration) {
-        break;
-      }
-      final bool changed = await _upsertFromPath(
-        repository: repository,
-        filePath: entity.path,
-      );
-      if (!changed) {
-        continue;
-      }
-      importedCount++;
-      if (importedCount == 1 || importedCount % _scanEmitBatchSize == 0) {
-        await _emitSnapshot();
+      probeChunk.add(entity.path);
+      if (probeChunk.length >= _scanProbeConcurrency) {
+        await flushProbeChunk();
       }
     }
+    await flushProbeChunk();
     return importedCount;
   }
 
@@ -241,19 +317,17 @@ class IngestionService {
     }
   }
 
-  Future<bool> _upsertFromPath({
-    required MediaRepository repository,
-    required String filePath,
-  }) async {
+  Future<_MasterFileGatherResult?> _gatherForUpsert(String filePath) async {
     final File file = File(filePath);
     if (!await file.exists()) {
       _logger.warning("Video path no longer exists: $filePath");
-      return false;
+      return null;
     }
     final FileStat stat = await file.stat();
     final String absolutePath = _normalizedAbsolutePath(file.path);
     final String storedPath = _storedPathFromAbsolute(absolutePath);
     int? durationMs;
+    double? knownDurationSecondsForThumbnail;
     if (stat.size > 0) {
       final MasterMediaFile? cached = _snapshotByPath[storedPath];
       final bool statUnchanged =
@@ -262,29 +336,62 @@ class IngestionService {
           cached.modifiedAtMs == stat.modified.millisecondsSinceEpoch;
       if (statUnchanged && cached.durationMs != null) {
         durationMs = cached.durationMs;
+        knownDurationSecondsForThumbnail = cached.durationMs! / 1000.0;
       } else {
         final MediaDurationProbeResult probe =
             await MediaDurationProbe.probeSeconds(absolutePath);
         if (probe.ok) {
           durationMs = probe.durationMs;
+          knownDurationSecondsForThumbnail = probe.durationSeconds;
         }
       }
     }
-    await repository.upsertMasterMedia(
-      filePath: storedPath,
-      fileName: p.basename(file.path),
-      fileSizeBytes: stat.size,
-      modifiedAtMs: stat.modified.millisecondsSinceEpoch,
-      createdAtMs: stat.changed.millisecondsSinceEpoch,
+    return _MasterFileGatherResult(
+      absolutePath: absolutePath,
+      storedPath: storedPath,
+      stat: stat,
       durationMs: durationMs,
+      knownDurationSecondsForThumbnail: knownDurationSecondsForThumbnail,
     );
-    if (stat.size == 0) {
-      await repository.setMediaIssue(storedPath, MediaIssue.empty);
+  }
+
+  Future<bool> _commitUpsertFromGathered(
+    MediaRepository repository,
+    _MasterFileGatherResult g,
+  ) async {
+    await repository.upsertMasterMedia(
+      filePath: g.storedPath,
+      fileName: p.basename(g.absolutePath),
+      fileSizeBytes: g.stat.size,
+      modifiedAtMs: g.stat.modified.millisecondsSinceEpoch,
+      createdAtMs: g.stat.changed.millisecondsSinceEpoch,
+      durationMs: g.durationMs,
+    );
+    if (g.stat.size == 0) {
+      await repository.setMediaIssue(g.storedPath, MediaIssue.empty);
     } else {
-      await repository.clearEmptyIssue(storedPath);
+      await repository.clearEmptyIssue(g.storedPath);
     }
-    _thumbnailService.requestThumbnail(absolutePath);
-    return _updateSnapshotEntryFromRepository(repository, storedPath);
+    final bool changed = await _updateSnapshotEntryFromRepository(
+      repository,
+      g.storedPath,
+    );
+    await _thumbnailService.requestThumbnail(
+      g.absolutePath,
+      knownDurationSeconds: g.knownDurationSecondsForThumbnail,
+    );
+    return changed;
+  }
+
+  Future<bool> _upsertFromPath({
+    required MediaRepository repository,
+    required String filePath,
+  }) async {
+    final _MasterFileGatherResult? gathered = await _gatherForUpsert(filePath);
+    if (gathered == null) {
+      return false;
+    }
+    return _commitUpsertFromGathered(repository, gathered);
   }
 
   Future<void> _emitSnapshot() async {
@@ -315,18 +422,32 @@ class IngestionService {
         MediaIssue.unreadable,
         detail: failureDetail,
       );
-      await _updateSnapshotEntryFromRepository(repository, storedPath);
-      _scheduleDebouncedSnapshot();
+      final bool updated = await _updateSnapshotEntryFromRepository(
+        repository,
+        storedPath,
+      );
+      if (updated) {
+        _scheduleDebouncedSnapshot();
+      }
       return;
     }
     final int cleared = await repository.clearUnreadableIssue(storedPath);
     if (cleared > 0) {
-      await _updateSnapshotEntryFromRepository(repository, storedPath);
-      _scheduleDebouncedSnapshot();
+      final bool updated = await _updateSnapshotEntryFromRepository(
+        repository,
+        storedPath,
+      );
+      if (updated) {
+        _scheduleDebouncedSnapshot();
+      }
     }
   }
 
   void _scheduleDebouncedSnapshot() {
+    if (_initialDirectoryScanActive) {
+      _snapshotNotifyDeferredUntilScanIdle = true;
+      return;
+    }
     _snapshotDebounce?.cancel();
     _snapshotDebounce = Timer(const Duration(milliseconds: 400), () {
       if (_disposed) {
@@ -402,7 +523,8 @@ class IngestionService {
       return removed;
     }
     _snapshotByPath[normalizedPath] = latest;
-    return !_isSameSnapshotRow(previous, latest);
+    final bool same = _isSameSnapshotRow(previous, latest);
+    return !same;
   }
 
   bool _isSameSnapshotRow(MasterMediaFile? a, MasterMediaFile b) {
@@ -410,14 +532,23 @@ class IngestionService {
       return false;
     }
     return a.id == b.id &&
-        a.filePath == b.filePath &&
+        WorkspaceMediaPaths.normalizeStored(a.filePath) ==
+            WorkspaceMediaPaths.normalizeStored(b.filePath) &&
         a.fileName == b.fileName &&
         a.fileSizeBytes == b.fileSizeBytes &&
         a.modifiedAtMs == b.modifiedAtMs &&
         a.createdAtMs == b.createdAtMs &&
         a.durationMs == b.durationMs &&
         a.mediaIssue == b.mediaIssue &&
-        a.mediaIssueDetail == b.mediaIssueDetail;
+        _normalizedIssueDetail(a.mediaIssueDetail) ==
+            _normalizedIssueDetail(b.mediaIssueDetail);
+  }
+
+  String _normalizedIssueDetail(String? detail) {
+    return (detail ?? "")
+        .replaceAll("\r\n", "\n")
+        .replaceAll("\r", "\n")
+        .trim();
   }
 
   Future<void> _refreshIgnoredFolders() async {

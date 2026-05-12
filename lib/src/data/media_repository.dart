@@ -6,6 +6,7 @@ import 'package:obs_clipshow/src/media/master_media_file.dart';
 import 'package:obs_clipshow/src/media/media_clip.dart';
 import 'package:obs_clipshow/src/media/media_list_item.dart';
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 class MediaRepository {
@@ -59,6 +60,7 @@ class MediaRepository {
           mediaType: MediaListItemType.master,
           mediaId: masterId,
           tag: masterTag,
+          semanticTypeId: null,
         );
       }
     });
@@ -142,7 +144,9 @@ class MediaRepository {
 
   /// Rewrites legacy absolute [master_media_files.file_path] values to paths
   /// relative to [workspaceRoot] (forward slashes, portable across machines).
-  Future<void> migrateMasterPathsToWorkspaceRelative(String workspaceRoot) async {
+  Future<void> migrateMasterPathsToWorkspaceRelative(
+    String workspaceRoot,
+  ) async {
     final String ws = p.normalize(p.absolute(workspaceRoot));
     final List<Map<String, Object?>> rows = await _database.query(
       "master_media_files",
@@ -246,7 +250,7 @@ class MediaRepository {
       });
       final List<Map<String, Object?>> inheritedTagRows = await txn.rawQuery(
         """
-        SELECT tags.name
+        SELECT tags.name AS name, media_tags.semantic_type_id AS semantic_type_id
         FROM media_tags
         JOIN tags ON tags.id = media_tags.tag_id
         WHERE media_tags.media_type = 'master'
@@ -261,6 +265,7 @@ class MediaRepository {
           mediaType: MediaListItemType.clip,
           mediaId: clipId,
           tag: row["name"]! as String,
+          semanticTypeId: row["semantic_type_id"] as int?,
         );
       }
       await _attachTagToMedia(
@@ -268,6 +273,7 @@ class MediaRepository {
         mediaType: MediaListItemType.clip,
         mediaId: clipId,
         tag: clipTag,
+        semanticTypeId: null,
       );
       return clipId;
     });
@@ -279,6 +285,7 @@ class MediaRepository {
         clips.id,
         clips.master_media_id,
         clips.display_name_override,
+        clips.annotations,
         clips.in_ms,
         clips.out_ms,
         clips.created_at_ms,
@@ -289,6 +296,29 @@ class MediaRepository {
       ORDER BY clips.created_at_ms DESC, clips.id DESC
       """);
     return rows.map(MediaClip.fromMap).toList();
+  }
+
+  Future<void> setMediaAnnotations({
+    required MediaListItemType mediaType,
+    required int mediaId,
+    required String? annotations,
+  }) async {
+    final String? normalized = _normalizeAnnotations(annotations);
+    if (mediaType == MediaListItemType.master) {
+      await _database.update(
+        "master_media_files",
+        <String, Object?>{"annotations": normalized},
+        where: "id = ?",
+        whereArgs: <Object?>[mediaId],
+      );
+      return;
+    }
+    await _database.update(
+      "clips",
+      <String, Object?>{"annotations": normalized},
+      where: "id = ?",
+      whereArgs: <Object?>[mediaId],
+    );
   }
 
   Future<void> deleteClipById(int clipId) async {
@@ -439,6 +469,7 @@ class MediaRepository {
     required MediaListItemType mediaType,
     required int mediaId,
     required String tag,
+    int? semanticTypeId,
   }) async {
     final String normalized = normalizeTag(tag);
     if (normalized.isEmpty) {
@@ -450,33 +481,42 @@ class MediaRepository {
         mediaType: mediaType,
         mediaId: mediaId,
         tag: normalized,
+        semanticTypeId: semanticTypeId,
       );
     });
   }
 
   Future<void> addTagsToItems({
     required List<MediaListItem> items,
-    required List<String> tags,
+    required List<ShelfTagEntry> tags,
   }) async {
     if (items.isEmpty || tags.isEmpty) {
       return;
     }
-    final List<String> normalizedTags = tags
-        .map(normalizeTag)
-        .where((String tag) => tag.isNotEmpty)
-        .toSet()
-        .toList();
-    if (normalizedTags.isEmpty) {
+    final List<ShelfTagEntry> normalized = <ShelfTagEntry>[];
+    final Set<String> seenLower = <String>{};
+    for (final ShelfTagEntry e in tags) {
+      final String n = normalizeTag(e.name);
+      if (n.isEmpty) {
+        continue;
+      }
+      final String key = n.toLowerCase();
+      if (seenLower.add(key)) {
+        normalized.add(ShelfTagEntry(name: n, semanticTypeId: e.semanticTypeId));
+      }
+    }
+    if (normalized.isEmpty) {
       return;
     }
     await _database.transaction((Transaction txn) async {
       for (final MediaListItem item in items) {
-        for (final String tag in normalizedTags) {
+        for (final ShelfTagEntry e in normalized) {
           await _attachTagToMedia(
             txn,
             mediaType: item.type,
             mediaId: item.id,
-            tag: tag,
+            tag: e.name,
+            semanticTypeId: e.semanticTypeId,
           );
         }
       }
@@ -506,25 +546,58 @@ class MediaRepository {
     });
   }
 
-  Future<List<String>> listSavedTags() async {
+  Future<List<ShelfTagEntry>> listSavedTags() async {
     final List<Map<String, Object?>> rows = await _database.query(
       "saved_tags",
-      columns: <String>["name"],
+      columns: <String>["name", "semantic_type_id"],
       orderBy: "name COLLATE NOCASE ASC",
     );
     return rows
-        .map((Map<String, Object?> row) => row["name"]! as String)
+        .map(
+          (Map<String, Object?> row) => ShelfTagEntry(
+            name: row["name"]! as String,
+            semanticTypeId: row["semantic_type_id"] as int?,
+          ),
+        )
         .toList();
   }
 
-  Future<void> addSavedTag(String tag) async {
+  Future<void> addSavedTag(String tag, {int? semanticTypeId}) async {
     final String normalized = normalizeTag(tag);
     if (normalized.isEmpty) {
       return;
     }
-    await _database.insert("saved_tags", <String, Object?>{
-      "name": normalized,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final int inserted = await _database.rawInsert(
+      """
+      INSERT OR IGNORE INTO saved_tags (name, semantic_type_id)
+      VALUES (?, ?)
+      """,
+      <Object?>[normalized, semanticTypeId],
+    );
+    if (inserted == 0 && semanticTypeId != null) {
+      await _database.update(
+        "saved_tags",
+        <String, Object?>{"semantic_type_id": semanticTypeId},
+        where: "name = ? COLLATE NOCASE",
+        whereArgs: <Object?>[normalized],
+      );
+    }
+  }
+
+  Future<void> setSavedTagSemanticType({
+    required String tag,
+    int? semanticTypeId,
+  }) async {
+    final String normalized = normalizeTag(tag);
+    if (normalized.isEmpty) {
+      return;
+    }
+    await _database.update(
+      "saved_tags",
+      <String, Object?>{"semantic_type_id": semanticTypeId},
+      where: "name = ? COLLATE NOCASE",
+      whereArgs: <Object?>[normalized],
+    );
   }
 
   Future<void> removeSavedTag(String tag) async {
@@ -537,6 +610,75 @@ class MediaRepository {
       where: "name = ? COLLATE NOCASE",
       whereArgs: <Object?>[normalized],
     );
+  }
+
+  Future<void> renameSavedTag({
+    required String oldName,
+    required String newName,
+  }) async {
+    final String a = normalizeTag(oldName);
+    final String b = normalizeTag(newName);
+    if (a.isEmpty || b.isEmpty || a.toLowerCase() == b.toLowerCase()) {
+      return;
+    }
+    await _database.transaction((Transaction txn) async {
+      final List<Map<String, Object?>> rowsA = await txn.query(
+        "saved_tags",
+        where: "name = ? COLLATE NOCASE",
+        whereArgs: <Object?>[a],
+        limit: 1,
+      );
+      if (rowsA.isEmpty) {
+        return;
+      }
+      final int? semA = rowsA.first["semantic_type_id"] as int?;
+      final List<Map<String, Object?>> rowsB = await txn.query(
+        "saved_tags",
+        where: "name = ? COLLATE NOCASE",
+        whereArgs: <Object?>[b],
+        limit: 1,
+      );
+      if (rowsB.isNotEmpty) {
+        await txn.delete(
+          "saved_tags",
+          where: "name = ? COLLATE NOCASE",
+          whereArgs: <Object?>[a],
+        );
+        if (semA != null) {
+          await txn.update(
+            "saved_tags",
+            <String, Object?>{"semantic_type_id": semA},
+            where: "name = ? COLLATE NOCASE",
+            whereArgs: <Object?>[b],
+          );
+        }
+        return;
+      }
+      await txn.update(
+        "saved_tags",
+        <String, Object?>{"name": b},
+        where: "name = ? COLLATE NOCASE",
+        whereArgs: <Object?>[a],
+      );
+    });
+  }
+
+  Future<int?> lookupTagIdByNormalizedName(String tag) async {
+    final String n = normalizeTag(tag);
+    if (n.isEmpty) {
+      return null;
+    }
+    final List<Map<String, Object?>> rows = await _database.query(
+      "tags",
+      columns: <String>["id"],
+      where: "name = ? COLLATE NOCASE",
+      whereArgs: <Object?>[n],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return rows.single["id"]! as int;
   }
 
   Future<List<MediaListItem>> listMixedItems() async {
@@ -571,12 +713,11 @@ class MediaRepository {
       return items;
     }
 
+    final Map<String, Set<String>> tagsByKey =
+        await listTagsForItems(items);
     final List<MediaListItem> visible = <MediaListItem>[];
     for (final MediaListItem item in items) {
-      final Set<String> tags = await listTagsForMedia(
-        mediaType: item.type,
-        mediaId: item.id,
-      );
+      final Set<String> tags = tagsByKey[item.stableKey] ?? <String>{};
       if (untaggedOnly && tags.isNotEmpty) {
         continue;
       }
@@ -602,6 +743,13 @@ class MediaRepository {
     final CapturePathsSettings capturePaths = await _loadCapturePathsSettings();
     final bool pauseIngestScanDuringPreview =
         await _loadPauseIngestScanDuringPreview();
+    final int ingestProbeConcurrency = await _loadIngestProbeConcurrency();
+    final int ingestThumbnailConcurrency =
+        await _loadIngestThumbnailConcurrency();
+    final PlayoutOutputSize playoutOutputSize = await _loadPlayoutOutputSize();
+    final OsgWorkspaceConfig osgWorkspaceConfig =
+        await _loadOsgWorkspaceConfig();
+    final List<TagSemanticType> semanticTypes = await listTagSemanticTypes();
     return WorkspaceSettingsBundle(
       telestratorDefaults: telestratorDefaults,
       decoderConfig: decoderConfig,
@@ -612,12 +760,277 @@ class MediaRepository {
       ignoredFolders: ignoredFolders,
       capturePathsSettings: capturePaths,
       pauseIngestScanDuringPreview: pauseIngestScanDuringPreview,
+      ingestProbeConcurrency: ingestProbeConcurrency,
+      ingestThumbnailConcurrency: ingestThumbnailConcurrency,
+      playoutOutputSize: playoutOutputSize,
+      osgWorkspaceConfig: osgWorkspaceConfig,
+      tagSemanticTypes: semanticTypes,
     );
   }
 
+  Future<PlayoutOutputSize> _loadPlayoutOutputSize() async {
+    const PlayoutOutputSize fallback = PlayoutOutputSize.fallback;
+    final String? wRaw = await _getWorkspaceSetting("playout.outputWidth");
+    final String? hRaw = await _getWorkspaceSetting("playout.outputHeight");
+    final int w = int.tryParse(wRaw ?? "") ?? fallback.width;
+    final int h = int.tryParse(hRaw ?? "") ?? fallback.height;
+    if (w <= 0 || h <= 0) {
+      return fallback;
+    }
+    return PlayoutOutputSize(width: w, height: h);
+  }
+
+  Future<OsgWorkspaceConfig> _loadOsgWorkspaceConfig() async {
+    final String? raw = await _getWorkspaceSetting("osg.presets");
+    return OsgWorkspaceConfig.decodeFromStorageJson(raw);
+  }
+
+  Future<void> savePlayoutOutputSize(PlayoutOutputSize value) async {
+    await _putWorkspaceSetting("playout.outputWidth", "${value.width}");
+    await _putWorkspaceSetting("playout.outputHeight", "${value.height}");
+  }
+
+  Future<void> saveOsgWorkspaceConfig(OsgWorkspaceConfig value) async {
+    await _putWorkspaceSetting("osg.presets", value.encodeToStorageJson());
+  }
+
+  Future<List<TagSemanticType>> listTagSemanticTypes() async {
+    final List<Map<String, Object?>> rows = await _database.query(
+      "tag_semantic_types",
+      orderBy: "name COLLATE NOCASE ASC",
+    );
+    return rows
+        .map(
+          (Map<String, Object?> row) => TagSemanticType(
+            id: row["id"]! as int,
+            name: row["name"]! as String,
+            iconCodePoint: row["icon_code_point"] as int?,
+          ),
+        )
+        .toList();
+  }
+
+  Future<int> insertTagSemanticType({
+    required String name,
+    int? iconCodePoint,
+  }) async {
+    final String trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      throw ArgumentError("Semantic type name must not be empty");
+    }
+    final List<Map<String, Object?>> existing = await _database.query(
+      "tag_semantic_types",
+      columns: <String>["id"],
+      where: "name = ? COLLATE NOCASE",
+      whereArgs: <Object?>[trimmed],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) {
+      return existing.single["id"]! as int;
+    }
+    return _database.insert("tag_semantic_types", <String, Object?>{
+      "name": trimmed,
+      "icon_code_point": iconCodePoint,
+    });
+  }
+
+  Future<void> updateTagSemanticType({
+    required int id,
+    required String name,
+    int? iconCodePoint,
+  }) async {
+    final String trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return;
+    }
+    await _database.update(
+      "tag_semantic_types",
+      <String, Object?>{"name": trimmed, "icon_code_point": iconCodePoint},
+      where: "id = ?",
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  /// Returns false if the type is still referenced.
+  Future<bool> deleteTagSemanticType(int id) async {
+    final List<Map<String, Object?>> mt = await _database.rawQuery(
+      "SELECT 1 FROM media_tags WHERE semantic_type_id = ? LIMIT 1",
+      <Object?>[id],
+    );
+    if (mt.isNotEmpty) {
+      return false;
+    }
+    if (await _semanticTypeReferencedByOsgPresets(id)) {
+      return false;
+    }
+    await _database.delete(
+      "tag_semantic_types",
+      where: "id = ?",
+      whereArgs: <Object?>[id],
+    );
+    return true;
+  }
+
+  Future<bool> _semanticTypeReferencedByOsgPresets(int semanticTypeId) async {
+    final OsgWorkspaceConfig cfg = await _loadOsgWorkspaceConfig();
+    return cfg.referencedSemanticTypeIds().contains(semanticTypeId);
+  }
+
+  Future<Map<String, List<MediaTagAttachment>>> listMediaTagAttachmentsForItems(
+    List<MediaListItem> items,
+  ) async {
+    if (items.isEmpty) {
+      return <String, List<MediaTagAttachment>>{};
+    }
+    final String masterIds = items
+        .where((MediaListItem item) => item.type == MediaListItemType.master)
+        .map((MediaListItem item) => item.id)
+        .join(",");
+    final String clipIds = items
+        .where((MediaListItem item) => item.type == MediaListItemType.clip)
+        .map((MediaListItem item) => item.id)
+        .join(",");
+    final List<String> clauses = <String>[];
+    if (masterIds.isNotEmpty) {
+      clauses.add(
+        "(media_tags.media_type = 'master' AND media_tags.media_id IN ($masterIds))",
+      );
+    }
+    if (clipIds.isNotEmpty) {
+      clauses.add(
+        "(media_tags.media_type = 'clip' AND media_tags.media_id IN ($clipIds))",
+      );
+    }
+    if (clauses.isEmpty) {
+      return <String, List<MediaTagAttachment>>{};
+    }
+    final List<Map<String, Object?>> rows = await _database.rawQuery("""
+      SELECT
+        media_tags.id AS media_tag_id,
+        media_tags.media_type,
+        media_tags.media_id,
+        media_tags.tag_id,
+        media_tags.semantic_type_id,
+        tags.name AS tag_name,
+        tag_semantic_types.name AS semantic_type_name,
+        tag_semantic_types.icon_code_point AS semantic_type_icon_code_point
+      FROM media_tags
+      JOIN tags ON tags.id = media_tags.tag_id
+      LEFT JOIN tag_semantic_types
+        ON tag_semantic_types.id = media_tags.semantic_type_id
+      WHERE ${clauses.join(" OR ")}
+      ORDER BY tags.name COLLATE NOCASE ASC
+      """);
+    final Map<String, List<MediaTagAttachment>> byKey =
+        <String, List<MediaTagAttachment>>{};
+    for (final Map<String, Object?> row in rows) {
+      final String mediaType = row["media_type"]! as String;
+      final int mediaId = row["media_id"]! as int;
+      final String key = mediaType == "master" ? "m:$mediaId" : "c:$mediaId";
+      byKey
+          .putIfAbsent(key, () => <MediaTagAttachment>[])
+          .add(
+            MediaTagAttachment(
+              mediaTagId: row["media_tag_id"]! as int,
+              tagId: row["tag_id"]! as int,
+              tagName: row["tag_name"]! as String,
+              semanticTypeId: row["semantic_type_id"] as int?,
+              semanticTypeName: row["semantic_type_name"] as String?,
+              semanticTypeIconCodePoint:
+                  row["semantic_type_icon_code_point"] as int?,
+            ),
+          );
+    }
+    return byKey;
+  }
+
+  Future<void> setMediaTagSemanticType({
+    required int mediaTagId,
+    int? semanticTypeId,
+  }) async {
+    await _database.update(
+      "media_tags",
+      <String, Object?>{"semantic_type_id": semanticTypeId},
+      where: "id = ?",
+      whereArgs: <Object?>[mediaTagId],
+    );
+  }
+
+  Future<void> bulkSetSemanticTypeForTagId({
+    required int tagId,
+    int? semanticTypeId,
+  }) async {
+    await _database.update(
+      "media_tags",
+      <String, Object?>{"semantic_type_id": semanticTypeId},
+      where: "tag_id = ?",
+      whereArgs: <Object?>[tagId],
+    );
+  }
+
+  /// Replaces the canonical tag on one [media_tags] row; preserves semantic type.
+  Future<void> swapTagValueOnMediaTag({
+    required int mediaTagId,
+    required String newTagName,
+  }) async {
+    final String normalized = normalizeTag(newTagName);
+    if (normalized.isEmpty) {
+      return;
+    }
+    await _database.transaction((Transaction txn) async {
+      await txn.insert("tags", <String, Object?>{
+        "name": normalized,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      final List<Map<String, Object?>> tagRows = await txn.query(
+        "tags",
+        columns: <String>["id"],
+        where: "name = ? COLLATE NOCASE",
+        whereArgs: <Object?>[normalized],
+        limit: 1,
+      );
+      if (tagRows.isEmpty) {
+        return;
+      }
+      final int newTagId = tagRows.single["id"]! as int;
+      await txn.update(
+        "media_tags",
+        <String, Object?>{"tag_id": newTagId},
+        where: "id = ?",
+        whereArgs: <Object?>[mediaTagId],
+      );
+      await _deleteOrphanTags(txn);
+    });
+  }
+
+  /// First matching tag text for [semanticTypeId] on this media (lowest [media_tags.id]).
+  Future<String?> resolveSemanticTagForMedia({
+    required MediaListItemType mediaType,
+    required int mediaId,
+    required int semanticTypeId,
+  }) async {
+    final List<Map<String, Object?>> rows = await _database.rawQuery(
+      """
+      SELECT tags.name
+      FROM media_tags
+      JOIN tags ON tags.id = media_tags.tag_id
+      WHERE media_tags.media_type = ?
+        AND media_tags.media_id = ?
+        AND media_tags.semantic_type_id = ?
+      ORDER BY media_tags.id ASC
+      LIMIT 1
+      """,
+      <Object?>[_mediaTypeValue(mediaType), mediaId, semanticTypeId],
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return rows.single["name"]! as String;
+  }
+
   Future<bool> _loadPauseIngestScanDuringPreview() async {
-    final String? stored =
-        await _getWorkspaceSetting("ingestion.pauseScanDuringPreview");
+    final String? stored = await _getWorkspaceSetting(
+      "ingestion.pauseScanDuringPreview",
+    );
     if (stored == null) {
       return true;
     }
@@ -628,6 +1041,35 @@ class MediaRepository {
     await _putWorkspaceSetting(
       "ingestion.pauseScanDuringPreview",
       value ? "true" : "false",
+    );
+  }
+
+  Future<int> _loadIngestProbeConcurrency() async {
+    final String? raw = await _getWorkspaceSetting("ingestion.probeConcurrency");
+    final int parsed =
+        int.tryParse(raw ?? "") ?? IngestionConcurrencyDefaults.probeDefault;
+    return IngestionConcurrencyDefaults.clampProbe(parsed);
+  }
+
+  Future<int> _loadIngestThumbnailConcurrency() async {
+    final String? raw =
+        await _getWorkspaceSetting("ingestion.thumbnailConcurrency");
+    final int parsed =
+        int.tryParse(raw ?? "") ?? IngestionConcurrencyDefaults.thumbnailDefault;
+    return IngestionConcurrencyDefaults.clampThumbnail(parsed);
+  }
+
+  Future<void> saveIngestProbeConcurrency(int value) async {
+    await _putWorkspaceSetting(
+      "ingestion.probeConcurrency",
+      "${IngestionConcurrencyDefaults.clampProbe(value)}",
+    );
+  }
+
+  Future<void> saveIngestThumbnailConcurrency(int value) async {
+    await _putWorkspaceSetting(
+      "ingestion.thumbnailConcurrency",
+      "${IngestionConcurrencyDefaults.clampThumbnail(value)}",
     );
   }
 
@@ -773,16 +1215,23 @@ class MediaRepository {
           )
           .toList();
       if (parsed.isNotEmpty) {
-        return DecoderConfig(enabledProfiles: parsed);
+        return DecoderConfig(enabledProfiles: parsed, platform: DecoderPlatform.get());
       }
     }
+    final platform = DecoderPlatform.get();
+    final fallbackDecoders = DecoderConfig.platformFallback().enabledProfiles;
+
+    if (fallbackDecoders.isNotEmpty) {
+      return DecoderConfig(enabledProfiles: fallbackDecoders, platform: platform);
+    }
+
     final String stored =
         await _getWorkspaceSetting("decoder.profile") ?? "vaapi";
     final DecoderProfile profile = DecoderProfile.values.firstWhere(
       (DecoderProfile item) => item.name == stored,
       orElse: () => DecoderProfile.vaapi,
     );
-    return DecoderConfig(enabledProfiles: <DecoderProfile>[profile]);
+    return DecoderConfig(enabledProfiles: <DecoderProfile>[profile], platform: DecoderPlatform.get());
   }
 
   Future<void> saveDecoderConfig(DecoderConfig value) async {
@@ -1062,6 +1511,7 @@ class MediaRepository {
     required MediaListItemType mediaType,
     required int mediaId,
     required String tag,
+    int? semanticTypeId,
   }) async {
     final String normalized = normalizeTag(tag);
     if (normalized.isEmpty) {
@@ -1085,7 +1535,20 @@ class MediaRepository {
       "media_type": _mediaTypeValue(mediaType),
       "media_id": mediaId,
       "tag_id": tagId,
+      "semantic_type_id": semanticTypeId,
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    if (semanticTypeId != null) {
+      await executor.update(
+        "media_tags",
+        <String, Object?>{"semantic_type_id": semanticTypeId},
+        where: "media_type = ? AND media_id = ? AND tag_id = ?",
+        whereArgs: <Object?>[
+          _mediaTypeValue(mediaType),
+          mediaId,
+          tagId,
+        ],
+      );
+    }
   }
 
   String _mediaTypeValue(MediaListItemType mediaType) =>
@@ -1117,5 +1580,17 @@ class MediaRepository {
       return null;
     }
     return trimmed;
+  }
+
+  String? _normalizeAnnotations(String? raw) {
+    if (raw == null) {
+      return null;
+    }
+    // Preserve interior whitespace/newlines; just avoid trailing blank lines.
+    final String trimmedRight = raw.replaceAll(RegExp(r"[ \t]+\n"), "\n").trimRight();
+    if (trimmedRight.trim().isEmpty) {
+      return null;
+    }
+    return trimmedRight;
   }
 }

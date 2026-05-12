@@ -1,7 +1,8 @@
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
-import 'package:obs_clipshow/src/features/playout/clip_player_view.dart';
+import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 
 class PlayoutSeekBackwardIntent extends Intent {
   const PlayoutSeekBackwardIntent();
@@ -79,6 +80,11 @@ class PlayoutIncreaseBrushIntent extends Intent {
   const PlayoutIncreaseBrushIntent();
 }
 
+class PlayoutOsgPresetSlotIntent extends Intent {
+  const PlayoutOsgPresetSlotIntent(this.slot);
+  final OsgPresetSlot slot;
+}
+
 class PlayoutHotkeysLayer extends StatelessWidget {
   const PlayoutHotkeysLayer({
     super.key,
@@ -94,6 +100,7 @@ class PlayoutHotkeysLayer extends StatelessWidget {
     this.onSetTelestratorColor3Requested,
     this.onDecreaseBrushRequested,
     this.onIncreaseBrushRequested,
+    this.onOsgPresetSlotToggle,
   });
 
   final ClipPlayerController controller;
@@ -108,6 +115,7 @@ class PlayoutHotkeysLayer extends StatelessWidget {
   final VoidCallback? onSetTelestratorColor3Requested;
   final VoidCallback? onDecreaseBrushRequested;
   final VoidCallback? onIncreaseBrushRequested;
+  final ValueChanged<OsgPresetSlot>? onOsgPresetSlotToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -160,6 +168,18 @@ class PlayoutHotkeysLayer extends StatelessWidget {
         if (onIncreaseBrushRequested != null)
           const SingleActivator(LogicalKeyboardKey.bracketRight):
               const PlayoutIncreaseBrushIntent(),
+        if (onOsgPresetSlotToggle != null) ...<ShortcutActivator, Intent>{
+          const SingleActivator(LogicalKeyboardKey.digit6):
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset1),
+          const SingleActivator(LogicalKeyboardKey.digit7):
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset2),
+          const SingleActivator(LogicalKeyboardKey.digit8):
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset3),
+          const SingleActivator(LogicalKeyboardKey.digit9):
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset4),
+          const SingleActivator(LogicalKeyboardKey.digit0):
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset5),
+        },
         const SingleActivator(LogicalKeyboardKey.escape): const DismissIntent(),
       },
       child: Actions(
@@ -295,6 +315,13 @@ class PlayoutHotkeysLayer extends StatelessWidget {
               CallbackAction<PlayoutIncreaseBrushIntent>(
                 onInvoke: (_) {
                   onIncreaseBrushRequested?.call();
+                  return null;
+                },
+              ),
+          PlayoutOsgPresetSlotIntent:
+              CallbackAction<PlayoutOsgPresetSlotIntent>(
+                onInvoke: (PlayoutOsgPresetSlotIntent intent) {
+                  onOsgPresetSlotToggle?.call(intent.slot);
                   return null;
                 },
               ),

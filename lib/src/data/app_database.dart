@@ -12,7 +12,7 @@ class AppDatabase {
     return databaseFactoryFfi.openDatabase(
       workspace.databasePath,
       options: OpenDatabaseOptions(
-        version: 7,
+        version: 10,
         onConfigure: (Database db) async {
           await db.execute("PRAGMA foreign_keys = ON;");
         },
@@ -23,6 +23,7 @@ class AppDatabase {
               file_path TEXT NOT NULL UNIQUE,
               file_name TEXT NOT NULL,
               display_name_override TEXT,
+              annotations TEXT,
               file_size_bytes INTEGER NOT NULL,
               modified_at_ms INTEGER NOT NULL,
               created_at_ms INTEGER NOT NULL,
@@ -72,6 +73,15 @@ class AppDatabase {
               <Object?>["recordings"],
             );
           }
+          if (oldVersion < 8) {
+            await _upgradeToV8TagSemantics(db);
+          }
+          if (oldVersion < 9) {
+            await _upgradeToV9SavedTagSemanticColumn(db);
+          }
+          if (oldVersion < 10) {
+            await _addAnnotationsColumnsIfMissing(db);
+          }
         },
       ),
     );
@@ -83,6 +93,7 @@ class AppDatabase {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         master_media_id INTEGER NOT NULL,
         display_name_override TEXT,
+        annotations TEXT,
         in_ms INTEGER NOT NULL,
         out_ms INTEGER,
         created_at_ms INTEGER NOT NULL,
@@ -100,12 +111,21 @@ class AppDatabase {
       );
     """);
     await db.execute("""
+      CREATE TABLE tag_semantic_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        icon_code_point INTEGER
+      );
+    """);
+    await db.execute("""
       CREATE TABLE media_tags (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         media_type TEXT NOT NULL CHECK(media_type IN ('master', 'clip')),
         media_id INTEGER NOT NULL,
         tag_id INTEGER NOT NULL,
+        semantic_type_id INTEGER,
         FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+        FOREIGN KEY(semantic_type_id) REFERENCES tag_semantic_types(id) ON DELETE SET NULL,
         UNIQUE(media_type, media_id, tag_id)
       );
     """);
@@ -116,7 +136,8 @@ class AppDatabase {
     await db.execute("""
       CREATE TABLE saved_tags (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        semantic_type_id INTEGER REFERENCES tag_semantic_types(id) ON DELETE SET NULL
       );
     """);
   }
@@ -198,6 +219,86 @@ class AppDatabase {
       await db.execute("""
         ALTER TABLE scene_switch_profiles
         ADD COLUMN obs_capture_scene TEXT;
+      """);
+    }
+  }
+
+  Future<void> _addAnnotationsColumnsIfMissing(Database db) async {
+    final List<Map<String, Object?>> existingTables = await db.rawQuery("""
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name IN ('master_media_files', 'clips')
+      """);
+    final Set<String> names = existingTables
+        .map((Map<String, Object?> r) => r["name"] as String?)
+        .whereType<String>()
+        .toSet();
+
+    if (names.contains("master_media_files")) {
+      final List<Map<String, Object?>> masterColumns = await db.rawQuery(
+        "PRAGMA table_info(master_media_files);",
+      );
+      final bool masterHas = masterColumns.any(
+        (Map<String, Object?> row) => row["name"] == "annotations",
+      );
+      if (!masterHas) {
+        await db.execute("""
+          ALTER TABLE master_media_files
+          ADD COLUMN annotations TEXT;
+        """);
+      }
+    }
+
+    if (names.contains("clips")) {
+      final List<Map<String, Object?>> clipColumns = await db.rawQuery(
+        "PRAGMA table_info(clips);",
+      );
+      final bool clipHas = clipColumns.any(
+        (Map<String, Object?> row) => row["name"] == "annotations",
+      );
+      if (!clipHas) {
+        await db.execute("""
+          ALTER TABLE clips
+          ADD COLUMN annotations TEXT;
+        """);
+      }
+    }
+  }
+
+  Future<void> _upgradeToV8TagSemantics(Database db) async {
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS tag_semantic_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        icon_code_point INTEGER
+      );
+    """);
+    final List<Map<String, Object?>> mtCols = await db.rawQuery(
+      "PRAGMA table_info(media_tags);",
+    );
+    final bool hasSemantic = mtCols.any(
+      (Map<String, Object?> row) => row["name"] == "semantic_type_id",
+    );
+    if (!hasSemantic) {
+      await db.execute("""
+        ALTER TABLE media_tags
+        ADD COLUMN semantic_type_id INTEGER
+        REFERENCES tag_semantic_types(id) ON DELETE SET NULL;
+      """);
+    }
+  }
+
+  Future<void> _upgradeToV9SavedTagSemanticColumn(Database db) async {
+    final List<Map<String, Object?>> cols = await db.rawQuery(
+      "PRAGMA table_info(saved_tags);",
+    );
+    final bool hasSemantic = cols.any(
+      (Map<String, Object?> row) => row["name"] == "semantic_type_id",
+    );
+    if (!hasSemantic) {
+      await db.execute("""
+        ALTER TABLE saved_tags
+        ADD COLUMN semantic_type_id INTEGER
+        REFERENCES tag_semantic_types(id) ON DELETE SET NULL;
       """);
     }
   }

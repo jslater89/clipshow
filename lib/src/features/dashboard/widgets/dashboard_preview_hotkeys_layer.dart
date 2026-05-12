@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 
 class PreviewMarkInIntent extends Intent {
   const PreviewMarkInIntent();
@@ -59,6 +60,11 @@ class PreviewToggleHelpIntent extends Intent {
   const PreviewToggleHelpIntent();
 }
 
+class PreviewOsgPresetSlotIntent extends Intent {
+  const PreviewOsgPresetSlotIntent(this.slot);
+  final OsgPresetSlot slot;
+}
+
 class DashboardPreviewHotkeysLayer extends StatelessWidget {
   const DashboardPreviewHotkeysLayer({
     super.key,
@@ -69,6 +75,7 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
     this.onMarkInRequested,
     this.onMarkOutRequested,
     this.onSaveClipRequested,
+    this.onOsgPresetSlotToggle,
   });
 
   final Widget child;
@@ -78,6 +85,7 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
   final VoidCallback? onMarkInRequested;
   final VoidCallback? onMarkOutRequested;
   final VoidCallback? onSaveClipRequested;
+  final ValueChanged<OsgPresetSlot>? onOsgPresetSlotToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -115,6 +123,18 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
         if (onSaveClipRequested != null)
           const SingleActivator(LogicalKeyboardKey.keyS):
               const PreviewSaveClipIntent(),
+        if (onOsgPresetSlotToggle != null) ...<ShortcutActivator, Intent>{
+          const SingleActivator(LogicalKeyboardKey.digit6):
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset1),
+          const SingleActivator(LogicalKeyboardKey.digit7):
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset2),
+          const SingleActivator(LogicalKeyboardKey.digit8):
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset3),
+          const SingleActivator(LogicalKeyboardKey.digit9):
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset4),
+          const SingleActivator(LogicalKeyboardKey.digit0):
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset5),
+        },
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -214,6 +234,13 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
               return null;
             },
           ),
+          PreviewOsgPresetSlotIntent:
+              CallbackAction<PreviewOsgPresetSlotIntent>(
+                onInvoke: (PreviewOsgPresetSlotIntent intent) {
+                  onOsgPresetSlotToggle?.call(intent.slot);
+                  return null;
+                },
+              ),
         },
         child: Focus(focusNode: focusNode, autofocus: true, child: child),
       ),

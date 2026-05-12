@@ -41,4 +41,7 @@ class MediaListItem {
 
   String? get mediaIssueDetail =>
       type == MediaListItemType.master ? master!.mediaIssueDetail : null;
+
+  String? get annotations =>
+      type == MediaListItemType.master ? master!.annotations : clip!.annotations;
 }

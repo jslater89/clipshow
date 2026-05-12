@@ -49,9 +49,11 @@ class ClipPlayerView extends StatefulWidget {
     this.seekStep = const Duration(seconds: 5),
     this.clickTogglesPlayback = false,
     this.overlay,
+    this.videoAreaOverlay,
     this.onPositionChanged,
     this.onPlayingChanged,
     this.controller,
+    this.videoBoxFit = BoxFit.contain,
   });
 
   final String filePath;
@@ -63,9 +65,17 @@ class ClipPlayerView extends StatefulWidget {
   final Duration seekStep;
   final bool clickTogglesPlayback;
   final Widget? overlay;
+
+  /// Drawn in the letterboxed video area (same bounds as [VideoPlayer] with
+  /// [videoBoxFit]), not over controls or unused pillar/letterbox outside the
+  /// fitted frame.
+  final Widget? videoAreaOverlay;
   final ValueChanged<int>? onPositionChanged;
   final ValueChanged<bool>? onPlayingChanged;
   final ClipPlayerController? controller;
+
+  /// How the decoded video is fitted inside the player (e.g. [BoxFit.contain] vs [BoxFit.cover]).
+  final BoxFit videoBoxFit;
 
   @override
   State<ClipPlayerView> createState() => _ClipPlayerViewState();
@@ -442,17 +452,52 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         Column(
           children: <Widget>[
             Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: widget.clickTogglesPlayback ? _togglePlayPause : null,
-                child: FittedBox(
-                  fit: BoxFit.contain,
-                  child: SizedBox(
-                    width: controller.value.size.width,
-                    height: controller.value.size.height,
-                    child: VideoPlayer(controller),
-                  ),
-                ),
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints bc) {
+                  final Size container = Size(bc.maxWidth, bc.maxHeight);
+                  final Size intrinsic = controller.value.size;
+                  final Rect videoRect = _videoDestinationRect(
+                    container: container,
+                    intrinsic: intrinsic,
+                    fit: widget.videoBoxFit,
+                  );
+                  final bool showVideoOverlay = widget.videoAreaOverlay !=
+                          null &&
+                      videoRect.width > 0 &&
+                      videoRect.height > 0;
+                  return Stack(
+                    fit: StackFit.expand,
+                    clipBehavior: Clip.none,
+                    children: <Widget>[
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: widget.clickTogglesPlayback
+                            ? _togglePlayPause
+                            : null,
+                        child: Center(
+                          child: FittedBox(
+                            fit: widget.videoBoxFit,
+                            child: SizedBox(
+                              width: intrinsic.width,
+                              height: intrinsic.height,
+                              child: VideoPlayer(controller),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (showVideoOverlay)
+                        Positioned(
+                          left: videoRect.left,
+                          top: videoRect.top,
+                          width: videoRect.width,
+                          height: videoRect.height,
+                          child: ClipRect(
+                            child: widget.videoAreaOverlay!,
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
             ),
             if (widget.showControls) _buildControls(controller),
@@ -519,6 +564,24 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         ],
       ),
     );
+  }
+
+  static Rect _videoDestinationRect({
+    required Size container,
+    required Size intrinsic,
+    required BoxFit fit,
+  }) {
+    if (intrinsic.width <= 0 ||
+        intrinsic.height <= 0 ||
+        container.width <= 0 ||
+        container.height <= 0) {
+      return Rect.zero;
+    }
+    final FittedSizes fs = applyBoxFit(fit, intrinsic, container);
+    final Size d = fs.destination;
+    final double left = (container.width - d.width) * 0.5;
+    final double top = (container.height - d.height) * 0.5;
+    return Rect.fromLTWH(left, top, d.width, d.height);
   }
 
   String _formatDuration(Duration duration) {

@@ -22,7 +22,7 @@ Future<void> main() async {
     options: <String, Object>{
       "platforms": <String>["windows", "linux"],
       if (Platform.isLinux)
-        "video.decoders": <String>[startupSettings.decoderOption],
+        "video.decoders": startupSettings.decoderOptions,
       // MDK player buffer: min ms when low + max ms cap (reduces PulseAudio underruns).
       "player": <String, String>{"buffer": "2000+60000"},
       // Applied after fvp's internal "log":"all"; overrides MDK global log level.
@@ -51,8 +51,8 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
   final WorkspacePreferences prefs = WorkspacePreferences();
   final String? workspacePath = await prefs.loadWorkspacePath();
   if (workspacePath == null || workspacePath.isEmpty) {
-    return const _StartupVideoSettings(
-      decoderOption: "VAAPI",
+    return _StartupVideoSettings(
+      decoderOptions: <String>[DecoderProfile.vaapiVpp.fvpArgument],
       logVerbosity: MdkLogVerbosity.warning,
       fvpLogVerbosity: FvpLogVerbosity.warning,
     );
@@ -71,7 +71,7 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
     final String? decoderListRaw = decoderRows.isEmpty
         ? null
         : decoderRows.single["value"]! as String;
-    final List<DecoderProfile> decoderProfiles = (decoderListRaw ?? "")
+    List<DecoderProfile> decoderProfiles = (decoderListRaw ?? "")
         .split(",")
         .map((String raw) => raw.trim())
         .where((String raw) => raw.isNotEmpty)
@@ -96,6 +96,10 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
       (DecoderProfile item) => item.name == decoderProfileName,
       orElse: () => DecoderProfile.vaapi,
     );
+    if(decoderProfiles.isEmpty) {
+      decoderProfiles = <DecoderProfile>[profile];
+    }
+
     final List<Map<String, Object?>> logRows = await database.query(
       "workspace_settings",
       columns: <String>["value"],
@@ -125,9 +129,7 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
       orElse: () => FvpLogVerbosity.warning,
     );
     return _StartupVideoSettings(
-      decoderOption: _decoderOptionForProfile(
-        decoderProfiles.isEmpty ? profile : decoderProfiles.first,
-      ),
+      decoderOptions: decoderProfiles.map((DecoderProfile profile) => profile.fvpArgument).toList(),
       logVerbosity: verbosity,
       fvpLogVerbosity: fvpVerbosity,
     );
@@ -172,29 +174,14 @@ String _mdkGlobalLogOption(MdkLogVerbosity verbosity) {
   }
 }
 
-String _decoderOptionForProfile(DecoderProfile profile) {
-  switch (profile) {
-    case DecoderProfile.vaapi:
-      return "VAAPI";
-    case DecoderProfile.vaapiVpp:
-      return "VAAPI:vpp=1";
-    case DecoderProfile.vdpau:
-      return "VDPAU";
-    case DecoderProfile.ffmpegThreads0:
-      return "FFmpeg:threads=0";
-    case DecoderProfile.dav1d:
-      return "dav1d";
-  }
-}
-
 class _StartupVideoSettings {
   const _StartupVideoSettings({
-    required this.decoderOption,
+    required this.decoderOptions,
     required this.logVerbosity,
     required this.fvpLogVerbosity,
   });
 
-  final String decoderOption;
+  final List<String> decoderOptions;
   final MdkLogVerbosity logVerbosity;
   final FvpLogVerbosity fvpLogVerbosity;
 }

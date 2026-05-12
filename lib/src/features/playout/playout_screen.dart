@@ -5,19 +5,41 @@ import "package:logging/logging.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
+import "package:obs_clipshow/src/features/playout/osg_playout_layer.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/features/playout/playout_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/playout/telestrator_canvas.dart";
 import "package:obs_clipshow/src/features/playout/telestrator_model.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/workspace/workspace_settings.dart";
+import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
+
+bool _sameTelestratorDefaults(TelestratorDefaults a, TelestratorDefaults b) {
+  return a.colorOneArgb == b.colorOneArgb &&
+      a.colorTwoArgb == b.colorTwoArgb &&
+      a.colorThreeArgb == b.colorThreeArgb &&
+      a.brushSize == b.brushSize &&
+      a.enabledByDefault == b.enabledByDefault;
+}
 
 class PlayoutScreen extends StatefulWidget {
   const PlayoutScreen({
     super.key,
     required this.clip,
+    required this.osgWorkspaceConfig,
+    required this.workspaceRoot,
+    required this.tagSemanticTypes,
+    required this.telestratorDefaults,
+    required this.onResolveSemanticText,
     required this.onExitRequested,
   });
 
   final PlayoutClip clip;
+  final OsgWorkspaceConfig osgWorkspaceConfig;
+  final String workspaceRoot;
+  final List<TagSemanticType> tagSemanticTypes;
+  final TelestratorDefaults telestratorDefaults;
+  final OsgSemanticResolve onResolveSemanticText;
   final Future<void> Function() onExitRequested;
 
   @override
@@ -28,17 +50,116 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
   final Logger _logger = Logger("PlayoutScreen");
   final ClipPlayerController _playerController = ClipPlayerController();
   final TelestratorController _telestratorController = TelestratorController();
-  static const Color _colorOne = Color(0xFFFF3B30);
-  static const Color _colorTwo = Color(0xFFFFCC00);
-  static const Color _colorThree = Color(0xFF34C759);
   bool _isExiting = false;
   bool _showEscapeHint = true;
   bool _showHelpOverlay = false;
   Timer? _hintTimer;
+  OsgPresetVisibility _osgPresetVisible = const OsgPresetVisibility.allOff();
+  int _osgRequirementFlashToken = 0;
+  String _osgRequirementFlashText = "";
+
+  bool _semanticIdSetsEqual(Set<int> a, Set<int> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (final int id in a) {
+      if (!b.contains(id)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _reconcileOsgVisibilityToRequirements({bool requestFrame = true}) {
+    final Set<int> onMedia = widget.clip.semanticTypeIdsOnMedia;
+    final List<OsgPreset> presets = widget.osgWorkspaceConfig.workspacePresets;
+    OsgPresetVisibility next = _osgPresetVisible;
+    bool changed = false;
+    for (final OsgPresetSlot slot in OsgPresetSlot.values) {
+      if (!next[slot]) {
+        continue;
+      }
+      final OsgPreset p = presets[slot.presetIndex];
+      if (!p.enabled) {
+        next = next.withSlot(slot, false);
+        changed = true;
+        continue;
+      }
+      if (p.requiredSemanticTypeIds.isNotEmpty &&
+          !p.semanticRequirementsSatisfiedBy(onMedia)) {
+        next = next.withSlot(slot, false);
+        changed = true;
+      }
+    }
+    if (changed) {
+      _osgPresetVisible = next;
+      if (requestFrame && mounted) {
+        setState(() {});
+      }
+    }
+  }
+
+  void _flashOsgRequirementMessage(String text) {
+    setState(() {
+      _osgRequirementFlashText = text;
+      _osgRequirementFlashToken++;
+    });
+  }
+
+  void _clearOsgRequirementFlash() {
+    if (_osgRequirementFlashToken == 0) {
+      return;
+    }
+    setState(() {
+      _osgRequirementFlashToken = 0;
+      _osgRequirementFlashText = "";
+    });
+  }
+
+  void _toggleOsgPreset(OsgPresetSlot slot) {
+    final int index = slot.presetIndex;
+    if (index < 0 || index >= OsgPresetSlot.values.length) {
+      return;
+    }
+    final OsgPreset preset = widget.osgWorkspaceConfig.workspacePresets[index];
+    if (!preset.enabled) {
+      return;
+    }
+    final bool next = !_osgPresetVisible[slot];
+    if (next) {
+      if (preset.requiredSemanticTypeIds.isNotEmpty) {
+        final Set<int> onMedia = widget.clip.semanticTypeIdsOnMedia;
+        if (!preset.semanticRequirementsSatisfiedBy(onMedia)) {
+          _flashOsgRequirementMessage(
+            osgMissingSemanticRequirementsMessage(
+              preset: preset,
+              semanticTypeIdsOnMedia: onMedia,
+              tagSemanticTypes: widget.tagSemanticTypes,
+            ),
+          );
+          return;
+        }
+      }
+    }
+    setState(() {
+      _osgPresetVisible = _osgPresetVisible.withSlot(slot, next);
+    });
+  }
 
   @override
   void initState() {
     super.initState();
+    final TelestratorDefaults d = widget.telestratorDefaults;
+    _telestratorController.applyInitialTelestratorSettings(
+      activeColor: d.colorOne,
+      brushSize: d.brushSize,
+      enabledByDefault: d.enabledByDefault,
+    );
+    final OsgPresetVisibility? initial = widget.clip.osgPresetVisibleInitial;
+    if (initial != null) {
+      _osgPresetVisible = initial;
+    }
+    _reconcileOsgVisibilityToRequirements(requestFrame: false);
     _hintTimer = Timer(const Duration(seconds: 1), () {
       if (!mounted) {
         return;
@@ -48,6 +169,32 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
       });
     });
     _logger.info("Playout started for ${widget.clip.filePath}");
+  }
+
+  @override
+  void didUpdateWidget(covariant PlayoutScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.clip.mediaId != widget.clip.mediaId ||
+        oldWidget.clip.mediaType != widget.clip.mediaType ||
+        oldWidget.clip.semanticTagSnapshotVersion !=
+            widget.clip.semanticTagSnapshotVersion ||
+        !_semanticIdSetsEqual(
+          oldWidget.clip.semanticTypeIdsOnMedia,
+          widget.clip.semanticTypeIdsOnMedia,
+        )) {
+      _reconcileOsgVisibilityToRequirements();
+    }
+    if (!_sameTelestratorDefaults(
+      oldWidget.telestratorDefaults,
+      widget.telestratorDefaults,
+    )) {
+      final TelestratorDefaults d = widget.telestratorDefaults;
+      _telestratorController.applyInitialTelestratorSettings(
+        activeColor: d.colorOne,
+        brushSize: d.brushSize,
+        enabledByDefault: d.enabledByDefault,
+      );
+    }
   }
 
   Future<void> _requestExit() async {
@@ -83,15 +230,20 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
         onTelestratorToggleRequested: _telestratorController.toggleEnabled,
         onTelestratorClearRequested: _telestratorController.clear,
         onTelestratorUndoRequested: _telestratorController.undo,
-        onSetTelestratorColor1Requested: () =>
-            _telestratorController.setColor(_colorOne),
-        onSetTelestratorColor2Requested: () =>
-            _telestratorController.setColor(_colorTwo),
-        onSetTelestratorColor3Requested: () =>
-            _telestratorController.setColor(_colorThree),
+        onSetTelestratorColor1Requested: () => _telestratorController.setColor(
+          widget.telestratorDefaults.colorOne,
+        ),
+        onSetTelestratorColor2Requested: () => _telestratorController.setColor(
+          widget.telestratorDefaults.colorTwo,
+        ),
+        onSetTelestratorColor3Requested: () => _telestratorController.setColor(
+          widget.telestratorDefaults.colorThree,
+        ),
         onDecreaseBrushRequested: _telestratorController.decreaseBrush,
         onIncreaseBrushRequested: _telestratorController.increaseBrush,
+        onOsgPresetSlotToggle: _toggleOsgPreset,
         child: Stack(
+          fit: StackFit.expand,
           children: <Widget>[
             ClipPlayerView(
               controller: _playerController,
@@ -100,14 +252,41 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
               endTimeMs: widget.clip.endTimeMs,
               initialPositionMs: widget.clip.initialPositionMs,
               autoPlay: true,
+              videoBoxFit: BoxFit.contain,
             ),
             Positioned.fill(
-              child: TelestratorCanvas(controller: _telestratorController),
+              child: OsgPlayoutLayer(
+                clip: widget.clip,
+                config: widget.osgWorkspaceConfig,
+                workspaceRoot: widget.workspaceRoot,
+                resolveSemantic: widget.onResolveSemanticText,
+                visible: _osgPresetVisible,
+              ),
+            ),
+            Positioned.fill(
+              child: TelestratorCanvas(
+                controller: _telestratorController,
+              ),
             ),
             Positioned(
               left: edgeInset,
               bottom: edgeInset,
-              child: _TelestratorStatusHud(controller: _telestratorController),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (_osgRequirementFlashToken > 0)
+                    Padding(
+                      padding: EdgeInsets.only(bottom: scaleDimension(context, 8)),
+                      child: TransientHudBanner(
+                        key: ValueKey<int>(_osgRequirementFlashToken),
+                        text: _osgRequirementFlashText,
+                        onDismissed: _clearOsgRequirementFlash,
+                      ),
+                    ),
+                  _TelestratorStatusHud(controller: _telestratorController),
+                ],
+              ),
             ),
             if (_showEscapeHint && !_showHelpOverlay)
               Positioned(
@@ -309,6 +488,10 @@ class _PlayoutHelpOverlay extends StatelessWidget {
                     "Z": "Undo",
                     "1 / 2 / 3": "Set Color",
                     "[ / ]": "Brush Size Down/Up",
+                  }),
+                  SizedBox(height: gap10),
+                  _hotkeySection("On-screen graphics", <String, String>{
+                    "6 / 7 / 8 / 9 / 0": "Toggle OSG Presets 1 Through 5",
                   }),
                   SizedBox(height: gap10),
                   _hotkeySection("Exit and Help", <String, String>{

@@ -1,10 +1,14 @@
+import "dart:async";
+
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_media_tag_menu.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 
 class DashboardCapturePanel extends StatefulWidget {
   const DashboardCapturePanel({super.key});
@@ -41,8 +45,8 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
         !viewModel.obsCaptureRecording &&
         viewModel.workspacePath != null;
     final bool canStop = viewModel.obsCaptureRecording;
-    final List<String> sortedCaptureTags = sortTags(
-      List<String>.from(viewModel.captureTags),
+    final List<ShelfTagEntry> sortedCaptureTags = sortShelfTagEntries(
+      List<ShelfTagEntry>.from(viewModel.captureTags),
     );
 
     return Shortcuts(
@@ -93,11 +97,28 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                       spacing: gap8,
                       runSpacing: gap8,
                       children: <Widget>[
-                        for (final String tag in sortedCaptureTags)
-                          InputChip(
-                            label: Text(tag),
-                            backgroundColor: tagChipColor(context, tag),
-                            onDeleted: () => viewModel.removeCaptureTag(tag),
+                        for (final ShelfTagEntry e in sortedCaptureTags)
+                          GestureDetector(
+                            onSecondaryTapUp: (TapUpDetails d) {
+                              unawaited(
+                                showShelfTagContextMenu(
+                                  context: context,
+                                  viewModel: viewModel,
+                                  entry: e,
+                                  target: DashboardShelfTagMenuTarget.capture,
+                                  globalPosition: d.globalPosition,
+                                ),
+                              );
+                            },
+                            child: InputChip(
+                              label: shelfTagChipLabel(
+                                e,
+                                viewModel.tagSemanticTypes,
+                              ),
+                              backgroundColor: tagChipColor(context, e.name),
+                              onDeleted: () =>
+                                  viewModel.removeCaptureTag(e.name),
+                            ),
                           ),
                       ],
                     ),
