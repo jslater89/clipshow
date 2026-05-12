@@ -250,7 +250,7 @@ class MediaRepository {
       });
       final List<Map<String, Object?>> inheritedTagRows = await txn.rawQuery(
         """
-        SELECT tags.name
+        SELECT tags.name AS name, media_tags.semantic_type_id AS semantic_type_id
         FROM media_tags
         JOIN tags ON tags.id = media_tags.tag_id
         WHERE media_tags.media_type = 'master'
@@ -265,7 +265,7 @@ class MediaRepository {
           mediaType: MediaListItemType.clip,
           mediaId: clipId,
           tag: row["name"]! as String,
-          semanticTypeId: null,
+          semanticTypeId: row["semantic_type_id"] as int?,
         );
       }
       await _attachTagToMedia(

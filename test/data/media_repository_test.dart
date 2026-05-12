@@ -179,6 +179,53 @@ void main() {
       await database.close();
     });
 
+    test("createClip copies semantic types from master tags", () async {
+      final AppDatabase appDatabase = AppDatabase();
+      final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+      final Database database = await appDatabase.openForWorkspace(workspace);
+      final MediaRepository repository = MediaRepository(database);
+
+      const String filePath = "typed-source.mp4";
+      await repository.upsertMasterMedia(
+        filePath: filePath,
+        fileName: "typed-source.mp4",
+        fileSizeBytes: 3000,
+        modifiedAtMs: 3000,
+        createdAtMs: 1000,
+      );
+      final MasterMediaFile master = (await repository.listAll()).single;
+      final int semanticTypeId = await repository.insertTagSemanticType(
+        name: "Episode",
+        iconCodePoint: 0xe047,
+      );
+      await repository.addTagToMedia(
+        mediaType: MediaListItemType.master,
+        mediaId: master.id,
+        tag: "E01",
+        semanticTypeId: semanticTypeId,
+      );
+
+      await repository.createClip(
+        masterMediaId: master.id,
+        inMs: 1000,
+        outMs: 4000,
+      );
+      final MediaClip clip = (await repository.listClips()).single;
+      final Map<String, List<MediaTagAttachment>> byKey =
+          await repository.listMediaTagAttachmentsForItems(
+        <MediaListItem>[MediaListItem.clip(clip)],
+      );
+      final List<MediaTagAttachment> clipTags =
+          byKey["c:${clip.id}"] ?? <MediaTagAttachment>[];
+      final MediaTagAttachment e01 = clipTags.firstWhere(
+        (MediaTagAttachment a) => a.tagName == "E01",
+      );
+      expect(e01.semanticTypeId, semanticTypeId);
+      expect(e01.semanticTypeName, "Episode");
+
+      await database.close();
+    });
+
     test("filterItems loads tags in one batch and matches AND semantics", () async {
       final AppDatabase appDatabase = AppDatabase();
       final Workspace workspace = Workspace(rootPath: tempDirectory.path);
