@@ -1,6 +1,7 @@
 import "dart:async";
 
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
@@ -43,6 +44,10 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       TextEditingController();
   final TextEditingController _playoutOutputHeightController =
       TextEditingController();
+  final TextEditingController _ingestProbeConcurrencyController =
+      TextEditingController();
+  final TextEditingController _ingestThumbnailConcurrencyController =
+      TextEditingController();
 
   bool _initialized = false;
   late TelestratorDefaults _draftTelestratorDefaults;
@@ -67,7 +72,70 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     _webhookSceneKeyController.dispose();
     _playoutOutputWidthController.dispose();
     _playoutOutputHeightController.dispose();
+    _ingestProbeConcurrencyController.dispose();
+    _ingestThumbnailConcurrencyController.dispose();
     super.dispose();
+  }
+
+  void _showIngestConcurrencySnack(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _submitIngestConcurrencySettings(
+    DashboardViewModel viewModel,
+  ) async {
+    final int? probe = int.tryParse(
+      _ingestProbeConcurrencyController.text.trim(),
+    );
+    if (probe == null) {
+      _showIngestConcurrencySnack(
+        "Ffprobe batch size must be a whole number.",
+      );
+      return;
+    }
+    if (probe < IngestionConcurrencyDefaults.probeMin ||
+        probe > IngestionConcurrencyDefaults.probeMax) {
+      _showIngestConcurrencySnack(
+        "Ffprobe batch size must be between "
+        "${IngestionConcurrencyDefaults.probeMin} and "
+        "${IngestionConcurrencyDefaults.probeMax}.",
+      );
+      return;
+    }
+    final int? thumbs = int.tryParse(
+      _ingestThumbnailConcurrencyController.text.trim(),
+    );
+    if (thumbs == null) {
+      _showIngestConcurrencySnack(
+        "Thumbnail concurrency must be a whole number.",
+      );
+      return;
+    }
+    if (thumbs < IngestionConcurrencyDefaults.thumbnailMin ||
+        thumbs > IngestionConcurrencyDefaults.thumbnailMax) {
+      _showIngestConcurrencySnack(
+        "Thumbnail concurrency must be between "
+        "${IngestionConcurrencyDefaults.thumbnailMin} and "
+        "${IngestionConcurrencyDefaults.thumbnailMax}.",
+      );
+      return;
+    }
+    await viewModel.saveIngestProbeConcurrency(probe);
+    await viewModel.saveIngestThumbnailConcurrency(thumbs);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _ingestProbeConcurrencyController.text =
+          "${viewModel.ingestProbeConcurrency}";
+      _ingestThumbnailConcurrencyController.text =
+          "${viewModel.ingestThumbnailConcurrency}";
+    });
   }
 
   @override
@@ -97,11 +165,16 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       final PlayoutOutputSize playoutOut = viewModel.playoutOutputSize;
       _playoutOutputWidthController.text = "${playoutOut.width}";
       _playoutOutputHeightController.text = "${playoutOut.height}";
+      _ingestProbeConcurrencyController.text =
+          "${viewModel.ingestProbeConcurrency}";
+      _ingestThumbnailConcurrencyController.text =
+          "${viewModel.ingestThumbnailConcurrency}";
       _initialized = true;
     }
 
+    final platform = DecoderPlatform.get();
     final List<DecoderProfile> availableDecoders = DecoderProfile.values
-        .where((DecoderProfile item) => !_enabledDecoders.contains(item))
+        .where((DecoderProfile item) => item.supportedPlatforms.contains(platform) && !_enabledDecoders.contains(item))
         .toList();
 
     return AlertDialog(
@@ -466,7 +539,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 label: "Apply Decoder Settings",
                 onPressed: () async {
                   await viewModel.saveDecoderConfig(
-                    DecoderConfig(enabledProfiles: _enabledDecoders),
+                    DecoderConfig(enabledProfiles: _enabledDecoders, platform: DecoderPlatform.get()),
                   );
                 },
               ),
@@ -487,6 +560,62 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 value: viewModel.pauseIngestScanDuringPreview,
                 onChanged: (bool value) =>
                     unawaited(viewModel.savePauseIngestScanDuringPreview(value)),
+              ),
+              SizedBox(height: scaleDimension(context, 12)),
+              Text(
+                "Ffprobe batch size (${IngestionConcurrencyDefaults.probeMin}–${IngestionConcurrencyDefaults.probeMax}): "
+                "parallel duration probes per batch while scanning the workspace—higher can speed a cold scan on fast storage; lower reduces CPU and disk contention. "
+                "Thumbnail concurrency (${IngestionConcurrencyDefaults.thumbnailMin}–${IngestionConcurrencyDefaults.thumbnailMax}): "
+                "parallel ffmpeg jobs for sidecar JPEGs—lower if ingest pegs the CPU; raise on fast disks when thumbs lag. ",
+                style: theme.textTheme.bodySmall,
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Expanded(
+                    child: TextField(
+                      controller: _ingestProbeConcurrencyController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: <TextInputFormatter>[
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: "Ffprobe Batch Size",
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) => unawaited(
+                        _submitIngestConcurrencySettings(viewModel),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  Expanded(
+                    child: TextField(
+                      controller: _ingestThumbnailConcurrencyController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: <TextInputFormatter>[
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: "Thumbnail Concurrency",
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) => unawaited(
+                        _submitIngestConcurrencySettings(viewModel),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  FilledButton(
+                    onPressed: () => unawaited(
+                      _submitIngestConcurrencySettings(viewModel),
+                    ),
+                    child: const Text("Save"),
+                  ),
+                ],
               ),
               Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Scene switch settings", theme),

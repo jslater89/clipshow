@@ -60,7 +60,7 @@ class _ArgbComponents {
 Future<int?> showRgbaColorPickerDialog(
   BuildContext context, {
   required int initialArgb,
-}) {
+}) async {
   final _ArgbComponents start = _ArgbComponents.fromArgb(initialArgb);
   int a = start.a;
   int r = start.r;
@@ -69,135 +69,140 @@ Future<int?> showRgbaColorPickerDialog(
   final TextEditingController hexController = TextEditingController(
     text: formatHexArgb(Color.fromARGB(a, r, g, b).toARGB32()),
   );
-  return showDialog<int>(
-    context: context,
-    builder: (BuildContext context) {
-      return StatefulBuilder(
-        builder:
-            (BuildContext context, void Function(void Function()) setState) {
-          void syncFromArgb() {
-            hexController.text = formatHexArgb(
-              Color.fromARGB(a, r, g, b).toARGB32(),
-            );
-          }
+  try {
+    return await showDialog<int>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder:
+              (BuildContext context, void Function(void Function()) setState) {
+            void syncFromArgb() {
+              hexController.text = formatHexArgb(
+                Color.fromARGB(a, r, g, b).toARGB32(),
+              );
+            }
 
-          return AlertDialog(
-            title: const Text("Pick Color"),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  SizedBox(
-                    width: scaleDimension(context, 72),
-                    height: scaleDimension(context, 72),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: <Widget>[
-                        const CheckerboardBackground(divisions: 2),
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Color.fromARGB(a, r, g, b),
+            return AlertDialog(
+              title: const Text("Pick Color"),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    SizedBox(
+                      width: scaleDimension(context, 72),
+                      height: scaleDimension(context, 72),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: <Widget>[
+                          const CheckerboardBackground(divisions: 2),
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Color.fromARGB(a, r, g, b),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  SizedBox(height: scaleDimension(context, 8)),
-                  TextField(
-                    controller: hexController,
-                    decoration: const InputDecoration(
-                      labelText: "Hex (#AARRGGBB or #RRGGBB)",
-                      border: OutlineInputBorder(),
+                    SizedBox(height: scaleDimension(context, 8)),
+                    TextField(
+                      controller: hexController,
+                      decoration: const InputDecoration(
+                        labelText: "Hex (#AARRGGBB or #RRGGBB)",
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (String value) {
+                        final int? parsed = tryParseHexArgb(value);
+                        if (parsed == null) {
+                          return;
+                        }
+                        final _ArgbComponents c = _ArgbComponents.fromArgb(
+                          parsed,
+                        );
+                        setState(() {
+                          a = c.a;
+                          r = c.r;
+                          g = c.g;
+                          b = c.b;
+                          syncFromArgb();
+                        });
+                      },
                     ),
-                    onSubmitted: (String value) {
-                      final int? parsed = tryParseHexArgb(value);
-                      if (parsed == null) {
-                        return;
-                      }
-                      final _ArgbComponents c = _ArgbComponents.fromArgb(
-                        parsed,
-                      );
-                      setState(() {
-                        a = c.a;
-                        r = c.r;
-                        g = c.g;
-                        b = c.b;
+                    SizedBox(height: scaleDimension(context, 4)),
+                    Text(
+                      "Alpha",
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                    Slider(
+                      value: a.toDouble(),
+                      min: 0,
+                      max: 255,
+                      onChanged: (double value) => setState(() {
+                        a = value.round();
                         syncFromArgb();
-                      });
-                    },
-                  ),
-                  SizedBox(height: scaleDimension(context, 4)),
-                  Text(
-                    "Alpha",
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                  Slider(
-                    value: a.toDouble(),
-                    min: 0,
-                    max: 255,
-                    onChanged: (double value) => setState(() {
-                      a = value.round();
-                      syncFromArgb();
-                    }),
-                  ),
-                  Text(
-                    "Red",
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                  Slider(
-                    value: r.toDouble(),
-                    min: 0,
-                    max: 255,
-                    onChanged: (double value) => setState(() {
-                      r = value.round();
-                      syncFromArgb();
-                    }),
-                  ),
-                  Text(
-                    "Green",
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                  Slider(
-                    value: g.toDouble(),
-                    min: 0,
-                    max: 255,
-                    onChanged: (double value) => setState(() {
-                      g = value.round();
-                      syncFromArgb();
-                    }),
-                  ),
-                  Text(
-                    "Blue",
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                  Slider(
-                    value: b.toDouble(),
-                    min: 0,
-                    max: 255,
-                    onChanged: (double value) => setState(() {
-                      b = value.round();
-                      syncFromArgb();
-                    }),
-                  ),
-                ],
+                      }),
+                    ),
+                    Text(
+                      "Red",
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                    Slider(
+                      value: r.toDouble(),
+                      min: 0,
+                      max: 255,
+                      onChanged: (double value) => setState(() {
+                        r = value.round();
+                        syncFromArgb();
+                      }),
+                    ),
+                    Text(
+                      "Green",
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                    Slider(
+                      value: g.toDouble(),
+                      min: 0,
+                      max: 255,
+                      onChanged: (double value) => setState(() {
+                        g = value.round();
+                        syncFromArgb();
+                      }),
+                    ),
+                    Text(
+                      "Blue",
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                    Slider(
+                      value: b.toDouble(),
+                      min: 0,
+                      max: 255,
+                      onChanged: (double value) => setState(() {
+                        b = value.round();
+                        syncFromArgb();
+                      }),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text("Cancel"),
-              ),
-              FilledButton(
-                onPressed: () =>
-                    Navigator.of(context).pop(Color.fromARGB(a, r, g, b).toARGB32()),
-                child: const Text("Use"),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text("Cancel"),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(
+                    Color.fromARGB(a, r, g, b).toARGB32(),
+                  ),
+                  child: const Text("Use"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  } finally {
+    hexController.dispose();
+  }
 }
 
 /// Opens [showRgbaColorPickerDialog] and invokes [onChanged] when the user confirms.

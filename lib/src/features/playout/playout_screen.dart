@@ -11,7 +11,16 @@ import "package:obs_clipshow/src/features/playout/playout_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/playout/telestrator_canvas.dart";
 import "package:obs_clipshow/src/features/playout/telestrator_model.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
+
+bool _sameTelestratorDefaults(TelestratorDefaults a, TelestratorDefaults b) {
+  return a.colorOneArgb == b.colorOneArgb &&
+      a.colorTwoArgb == b.colorTwoArgb &&
+      a.colorThreeArgb == b.colorThreeArgb &&
+      a.brushSize == b.brushSize &&
+      a.enabledByDefault == b.enabledByDefault;
+}
 
 class PlayoutScreen extends StatefulWidget {
   const PlayoutScreen({
@@ -20,6 +29,7 @@ class PlayoutScreen extends StatefulWidget {
     required this.osgWorkspaceConfig,
     required this.workspaceRoot,
     required this.tagSemanticTypes,
+    required this.telestratorDefaults,
     required this.onResolveSemanticText,
     required this.onExitRequested,
   });
@@ -28,6 +38,7 @@ class PlayoutScreen extends StatefulWidget {
   final OsgWorkspaceConfig osgWorkspaceConfig;
   final String workspaceRoot;
   final List<TagSemanticType> tagSemanticTypes;
+  final TelestratorDefaults telestratorDefaults;
   final OsgSemanticResolve onResolveSemanticText;
   final Future<void> Function() onExitRequested;
 
@@ -39,14 +50,11 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
   final Logger _logger = Logger("PlayoutScreen");
   final ClipPlayerController _playerController = ClipPlayerController();
   final TelestratorController _telestratorController = TelestratorController();
-  static const Color _colorOne = Color(0xFFFF3B30);
-  static const Color _colorTwo = Color(0xFFFFCC00);
-  static const Color _colorThree = Color(0xFF34C759);
   bool _isExiting = false;
   bool _showEscapeHint = true;
   bool _showHelpOverlay = false;
   Timer? _hintTimer;
-  final List<bool> _osgPresetVisible = <bool>[false, false, false];
+  OsgPresetVisibility _osgPresetVisible = const OsgPresetVisibility.allOff();
   int _osgRequirementFlashToken = 0;
   String _osgRequirementFlashText = "";
 
@@ -64,26 +72,30 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
 
   void _reconcileOsgVisibilityToRequirements({bool requestFrame = true}) {
     final Set<int> onMedia = widget.clip.semanticTypeIdsOnMedia;
-    final List<OsgPreset> presets = widget.osgWorkspaceConfig.threePresets;
+    final List<OsgPreset> presets = widget.osgWorkspaceConfig.workspacePresets;
+    OsgPresetVisibility next = _osgPresetVisible;
     bool changed = false;
-    for (int i = 0; i < 3; i++) {
-      if (!_osgPresetVisible[i]) {
+    for (final OsgPresetSlot slot in OsgPresetSlot.values) {
+      if (!next[slot]) {
         continue;
       }
-      final OsgPreset p = presets[i];
+      final OsgPreset p = presets[slot.presetIndex];
       if (!p.enabled) {
-        _osgPresetVisible[i] = false;
+        next = next.withSlot(slot, false);
         changed = true;
         continue;
       }
       if (p.requiredSemanticTypeIds.isNotEmpty &&
           !p.semanticRequirementsSatisfiedBy(onMedia)) {
-        _osgPresetVisible[i] = false;
+        next = next.withSlot(slot, false);
         changed = true;
       }
     }
-    if (changed && requestFrame && mounted) {
-      setState(() {});
+    if (changed) {
+      _osgPresetVisible = next;
+      if (requestFrame && mounted) {
+        setState(() {});
+      }
     }
   }
 
@@ -104,15 +116,16 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
     });
   }
 
-  void _toggleOsgPreset(int index) {
-    if (index < 0 || index > 2) {
+  void _toggleOsgPreset(OsgPresetSlot slot) {
+    final int index = slot.presetIndex;
+    if (index < 0 || index >= OsgPresetSlot.values.length) {
       return;
     }
-    final OsgPreset preset = widget.osgWorkspaceConfig.threePresets[index];
+    final OsgPreset preset = widget.osgWorkspaceConfig.workspacePresets[index];
     if (!preset.enabled) {
       return;
     }
-    final bool next = !_osgPresetVisible[index];
+    final bool next = !_osgPresetVisible[slot];
     if (next) {
       if (preset.requiredSemanticTypeIds.isNotEmpty) {
         final Set<int> onMedia = widget.clip.semanticTypeIdsOnMedia;
@@ -129,18 +142,22 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
       }
     }
     setState(() {
-      _osgPresetVisible[index] = next;
+      _osgPresetVisible = _osgPresetVisible.withSlot(slot, next);
     });
   }
 
   @override
   void initState() {
     super.initState();
-    final List<bool>? initial = widget.clip.osgPresetVisibleInitial;
-    if (initial != null && initial.length == 3) {
-      _osgPresetVisible[0] = initial[0];
-      _osgPresetVisible[1] = initial[1];
-      _osgPresetVisible[2] = initial[2];
+    final TelestratorDefaults d = widget.telestratorDefaults;
+    _telestratorController.applyInitialTelestratorSettings(
+      activeColor: d.colorOne,
+      brushSize: d.brushSize,
+      enabledByDefault: d.enabledByDefault,
+    );
+    final OsgPresetVisibility? initial = widget.clip.osgPresetVisibleInitial;
+    if (initial != null) {
+      _osgPresetVisible = initial;
     }
     _reconcileOsgVisibilityToRequirements(requestFrame: false);
     _hintTimer = Timer(const Duration(seconds: 1), () {
@@ -166,6 +183,17 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
           widget.clip.semanticTypeIdsOnMedia,
         )) {
       _reconcileOsgVisibilityToRequirements();
+    }
+    if (!_sameTelestratorDefaults(
+      oldWidget.telestratorDefaults,
+      widget.telestratorDefaults,
+    )) {
+      final TelestratorDefaults d = widget.telestratorDefaults;
+      _telestratorController.applyInitialTelestratorSettings(
+        activeColor: d.colorOne,
+        brushSize: d.brushSize,
+        enabledByDefault: d.enabledByDefault,
+      );
     }
   }
 
@@ -202,17 +230,18 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
         onTelestratorToggleRequested: _telestratorController.toggleEnabled,
         onTelestratorClearRequested: _telestratorController.clear,
         onTelestratorUndoRequested: _telestratorController.undo,
-        onSetTelestratorColor1Requested: () =>
-            _telestratorController.setColor(_colorOne),
-        onSetTelestratorColor2Requested: () =>
-            _telestratorController.setColor(_colorTwo),
-        onSetTelestratorColor3Requested: () =>
-            _telestratorController.setColor(_colorThree),
+        onSetTelestratorColor1Requested: () => _telestratorController.setColor(
+          widget.telestratorDefaults.colorOne,
+        ),
+        onSetTelestratorColor2Requested: () => _telestratorController.setColor(
+          widget.telestratorDefaults.colorTwo,
+        ),
+        onSetTelestratorColor3Requested: () => _telestratorController.setColor(
+          widget.telestratorDefaults.colorThree,
+        ),
         onDecreaseBrushRequested: _telestratorController.decreaseBrush,
         onIncreaseBrushRequested: _telestratorController.increaseBrush,
-        onOsgPresetDigit8Requested: () => _toggleOsgPreset(0),
-        onOsgPresetDigit9Requested: () => _toggleOsgPreset(1),
-        onOsgPresetDigit0Requested: () => _toggleOsgPreset(2),
+        onOsgPresetSlotToggle: _toggleOsgPreset,
         child: Stack(
           fit: StackFit.expand,
           children: <Widget>[
@@ -462,7 +491,7 @@ class _PlayoutHelpOverlay extends StatelessWidget {
                   }),
                   SizedBox(height: gap10),
                   _hotkeySection("On-screen graphics", <String, String>{
-                    "8 / 9 / 0": "Toggle OSG preset 1 / 2 / 3",
+                    "6 / 7 / 8 / 9 / 0": "Toggle OSG Presets 1 Through 5",
                   }),
                   SizedBox(height: gap10),
                   _hotkeySection("Exit and Help", <String, String>{

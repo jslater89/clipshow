@@ -713,12 +713,11 @@ class MediaRepository {
       return items;
     }
 
+    final Map<String, Set<String>> tagsByKey =
+        await listTagsForItems(items);
     final List<MediaListItem> visible = <MediaListItem>[];
     for (final MediaListItem item in items) {
-      final Set<String> tags = await listTagsForMedia(
-        mediaType: item.type,
-        mediaId: item.id,
-      );
+      final Set<String> tags = tagsByKey[item.stableKey] ?? <String>{};
       if (untaggedOnly && tags.isNotEmpty) {
         continue;
       }
@@ -744,6 +743,9 @@ class MediaRepository {
     final CapturePathsSettings capturePaths = await _loadCapturePathsSettings();
     final bool pauseIngestScanDuringPreview =
         await _loadPauseIngestScanDuringPreview();
+    final int ingestProbeConcurrency = await _loadIngestProbeConcurrency();
+    final int ingestThumbnailConcurrency =
+        await _loadIngestThumbnailConcurrency();
     final PlayoutOutputSize playoutOutputSize = await _loadPlayoutOutputSize();
     final OsgWorkspaceConfig osgWorkspaceConfig =
         await _loadOsgWorkspaceConfig();
@@ -758,6 +760,8 @@ class MediaRepository {
       ignoredFolders: ignoredFolders,
       capturePathsSettings: capturePaths,
       pauseIngestScanDuringPreview: pauseIngestScanDuringPreview,
+      ingestProbeConcurrency: ingestProbeConcurrency,
+      ingestThumbnailConcurrency: ingestThumbnailConcurrency,
       playoutOutputSize: playoutOutputSize,
       osgWorkspaceConfig: osgWorkspaceConfig,
       tagSemanticTypes: semanticTypes,
@@ -1040,6 +1044,35 @@ class MediaRepository {
     );
   }
 
+  Future<int> _loadIngestProbeConcurrency() async {
+    final String? raw = await _getWorkspaceSetting("ingestion.probeConcurrency");
+    final int parsed =
+        int.tryParse(raw ?? "") ?? IngestionConcurrencyDefaults.probeDefault;
+    return IngestionConcurrencyDefaults.clampProbe(parsed);
+  }
+
+  Future<int> _loadIngestThumbnailConcurrency() async {
+    final String? raw =
+        await _getWorkspaceSetting("ingestion.thumbnailConcurrency");
+    final int parsed =
+        int.tryParse(raw ?? "") ?? IngestionConcurrencyDefaults.thumbnailDefault;
+    return IngestionConcurrencyDefaults.clampThumbnail(parsed);
+  }
+
+  Future<void> saveIngestProbeConcurrency(int value) async {
+    await _putWorkspaceSetting(
+      "ingestion.probeConcurrency",
+      "${IngestionConcurrencyDefaults.clampProbe(value)}",
+    );
+  }
+
+  Future<void> saveIngestThumbnailConcurrency(int value) async {
+    await _putWorkspaceSetting(
+      "ingestion.thumbnailConcurrency",
+      "${IngestionConcurrencyDefaults.clampThumbnail(value)}",
+    );
+  }
+
   Future<CapturePathsSettings> _loadCapturePathsSettings() async {
     final String recording =
         (await _getWorkspaceSetting("capture.recordingRelativeDir"))?.trim() ??
@@ -1182,16 +1215,23 @@ class MediaRepository {
           )
           .toList();
       if (parsed.isNotEmpty) {
-        return DecoderConfig(enabledProfiles: parsed);
+        return DecoderConfig(enabledProfiles: parsed, platform: DecoderPlatform.get());
       }
     }
+    final platform = DecoderPlatform.get();
+    final fallbackDecoders = DecoderConfig.platformFallback().enabledProfiles;
+
+    if (fallbackDecoders.isNotEmpty) {
+      return DecoderConfig(enabledProfiles: fallbackDecoders, platform: platform);
+    }
+
     final String stored =
         await _getWorkspaceSetting("decoder.profile") ?? "vaapi";
     final DecoderProfile profile = DecoderProfile.values.firstWhere(
       (DecoderProfile item) => item.name == stored,
       orElse: () => DecoderProfile.vaapi,
     );
-    return DecoderConfig(enabledProfiles: <DecoderProfile>[profile]);
+    return DecoderConfig(enabledProfiles: <DecoderProfile>[profile], platform: DecoderPlatform.get());
   }
 
   Future<void> saveDecoderConfig(DecoderConfig value) async {

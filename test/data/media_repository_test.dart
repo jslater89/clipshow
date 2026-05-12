@@ -179,6 +179,65 @@ void main() {
       await database.close();
     });
 
+    test("filterItems loads tags in one batch and matches AND semantics", () async {
+      final AppDatabase appDatabase = AppDatabase();
+      final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+      final Database database = await appDatabase.openForWorkspace(workspace);
+      final MediaRepository repository = MediaRepository(database);
+
+      await repository.upsertMasterMedia(
+        filePath: "a.mp4",
+        fileName: "a.mp4",
+        fileSizeBytes: 1000,
+        modifiedAtMs: 1000,
+        createdAtMs: 1000,
+      );
+      await repository.upsertMasterMedia(
+        filePath: "b.mp4",
+        fileName: "b.mp4",
+        fileSizeBytes: 2000,
+        modifiedAtMs: 2000,
+        createdAtMs: 1000,
+      );
+      final List<MasterMediaFile> masters = await repository.listAll();
+      final MasterMediaFile first = masters.firstWhere(
+        (MasterMediaFile m) => m.filePath == "a.mp4",
+      );
+      final MasterMediaFile second = masters.firstWhere(
+        (MasterMediaFile m) => m.filePath == "b.mp4",
+      );
+      await repository.addTagToMedia(
+        mediaType: MediaListItemType.master,
+        mediaId: first.id,
+        tag: "Day 3",
+      );
+      await repository.addTagToMedia(
+        mediaType: MediaListItemType.master,
+        mediaId: first.id,
+        tag: "Stage 5",
+      );
+      await repository.addTagToMedia(
+        mediaType: MediaListItemType.master,
+        mediaId: second.id,
+        tag: "Day 3",
+      );
+
+      final List<MediaListItem> andFilter = await repository.filterItems(
+        requiredTags: <String>{"Day 3", "Stage 5"},
+        untaggedOnly: false,
+      );
+      expect(andFilter, hasLength(1));
+      expect(andFilter.single.master!.filePath, "a.mp4");
+
+      final List<MediaListItem> dayOnly = await repository.filterItems(
+        requiredTags: <String>{"Day 3"},
+        untaggedOnly: false,
+      );
+      expect(dayOnly, hasLength(2));
+
+      await database.close();
+    });
+
     test("persists duration_ms on master media upsert", () async {
       final AppDatabase appDatabase = AppDatabase();
       final Workspace workspace = Workspace(rootPath: tempDirectory.path);
@@ -653,6 +712,7 @@ void main() {
         );
         await repository.saveDecoderConfig(
           const DecoderConfig(
+            platform: DecoderPlatform.linux,
             enabledProfiles: <DecoderProfile>[DecoderProfile.vdpau],
           ),
         );
@@ -731,11 +791,39 @@ void main() {
         expect(settings.webhookSceneSwitchConfigs.last.enabled, isFalse);
         expect(settings.ignoredFolders, contains("20260713"));
         expect(settings.pauseIngestScanDuringPreview, isTrue);
+        expect(
+          settings.ingestProbeConcurrency,
+          IngestionConcurrencyDefaults.probeDefault,
+        );
+        expect(
+          settings.ingestThumbnailConcurrency,
+          IngestionConcurrencyDefaults.thumbnailDefault,
+        );
 
         await repository.savePauseIngestScanDuringPreview(false);
         expect(
           (await repository.loadWorkspaceSettings()).pauseIngestScanDuringPreview,
           isFalse,
+        );
+
+        await repository.saveIngestProbeConcurrency(12);
+        await repository.saveIngestThumbnailConcurrency(4);
+        final WorkspaceSettingsBundle ingestTuned =
+            await repository.loadWorkspaceSettings();
+        expect(ingestTuned.ingestProbeConcurrency, 12);
+        expect(ingestTuned.ingestThumbnailConcurrency, 4);
+
+        await repository.saveIngestProbeConcurrency(999);
+        await repository.saveIngestThumbnailConcurrency(0);
+        final WorkspaceSettingsBundle clamped =
+            await repository.loadWorkspaceSettings();
+        expect(
+          clamped.ingestProbeConcurrency,
+          IngestionConcurrencyDefaults.probeMax,
+        );
+        expect(
+          clamped.ingestThumbnailConcurrency,
+          IngestionConcurrencyDefaults.thumbnailMin,
         );
 
         await repository.saveObsSceneSwitchConfig(null);

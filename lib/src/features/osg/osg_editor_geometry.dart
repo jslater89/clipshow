@@ -22,6 +22,26 @@ OsgNormRect osgClampSlotBox(OsgNormRect b, {double minNorm = 0.02}) {
   return OsgNormRect(x: x, y: y, width: w, height: h);
 }
 
+/// Playout [OsgPreset.frame]: width and height stay between [minNormW] / [minNormH] and 1.0
+/// in normalized canvas space; x and y may extend up to [maxFractionOffscreen] times size
+/// past each edge so roughly half the frame can sit off-screen (for wide or tall templates).
+OsgNormRect osgClampFrameForPlayout(
+  OsgNormRect f, {
+  double minNormW = 0.05,
+  double minNormH = 0.05,
+  double maxFractionOffscreen = 0.5,
+}) {
+  double w = f.width.clamp(minNormW, 1.0);
+  double h = f.height.clamp(minNormH, 1.0);
+  final double minX = -maxFractionOffscreen * w;
+  final double maxX = 1.0 - w + maxFractionOffscreen * w;
+  final double minY = -maxFractionOffscreen * h;
+  final double maxY = 1.0 - h + maxFractionOffscreen * h;
+  final double x = f.x.clamp(minX, maxX);
+  final double y = f.y.clamp(minY, maxY);
+  return OsgNormRect(x: x, y: y, width: w, height: h);
+}
+
 /// Locks normalized frame size so on-screen aspect matches template pixels.
 /// [playoutAspect] is canvas width ÷ height (logical). [imageWidthOverHeight] is image pixels.
 OsgNormRect osgClampFrameWithImageAspect({
@@ -30,9 +50,15 @@ OsgNormRect osgClampFrameWithImageAspect({
   required double playoutAspect,
   double minNormW = 0.05,
   double minNormH = 0.05,
+  double maxFractionOffscreen = 0.5,
 }) {
   if (imageWidthOverHeight <= 0 || playoutAspect <= 0) {
-    return osgClampFrame(frame, minNorm: minNormW);
+    return osgClampFrameForPlayout(
+      frame,
+      minNormW: minNormW,
+      minNormH: minNormH,
+      maxFractionOffscreen: maxFractionOffscreen,
+    );
   }
   double w = frame.width.clamp(minNormW, 1.0);
   double h = w * playoutAspect / imageWidthOverHeight;
@@ -52,11 +78,12 @@ OsgNormRect osgClampFrameWithImageAspect({
       w = (h * imageWidthOverHeight / playoutAspect).clamp(minNormW, 1.0);
     }
   }
-  double x = frame.x.clamp(0.0, 1.0 - w);
-  double y = frame.y.clamp(0.0, 1.0 - h);
-  w = w.clamp(minNormW, 1.0 - x);
-  h = (w * playoutAspect / imageWidthOverHeight).clamp(minNormH, 1.0 - y);
-  w = (h * imageWidthOverHeight / playoutAspect).clamp(minNormW, 1.0 - x);
+  final double minX = -maxFractionOffscreen * w;
+  final double maxX = 1.0 - w + maxFractionOffscreen * w;
+  final double minY = -maxFractionOffscreen * h;
+  final double maxY = 1.0 - h + maxFractionOffscreen * h;
+  final double x = frame.x.clamp(minX, maxX);
+  final double y = frame.y.clamp(minY, maxY);
   return OsgNormRect(x: x, y: y, width: w, height: h);
 }
 

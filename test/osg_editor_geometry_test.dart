@@ -29,6 +29,22 @@ void main() {
     });
   });
 
+  group("osgClampFrameForPlayout", () {
+    test("allows frame to extend roughly half off each axis", () {
+      const OsgNormRect r = OsgNormRect(
+        x: -0.2,
+        y: 0.9,
+        width: 0.4,
+        height: 0.2,
+      );
+      final OsgNormRect c = osgClampFrameForPlayout(r);
+      expect(c.x, closeTo(-0.2, 1e-9));
+      expect(c.y, closeTo(0.9, 1e-9));
+      expect(c.width, 0.4);
+      expect(c.height, 0.2);
+    });
+  });
+
   group("osgClampFrameWithImageAspect", () {
     test("forces normalized w/h ratio from image vs playout aspect", () {
       const double img = 16 / 9;
@@ -69,6 +85,42 @@ void main() {
       expect(back.y, closeTo(r.y, 1e-5));
       expect(back.width, closeTo(r.width, 1e-5));
       expect(back.height, closeTo(r.height, 1e-5));
+    });
+
+    test("frame canvas pixels round-trip with negative origin", () {
+      const OsgNormRect r = OsgNormRect(
+        x: -0.05,
+        y: 0.75,
+        width: 0.5,
+        height: 0.2,
+      );
+      const int cw = 1920;
+      const int ch = 1080;
+      final ({int x, int y, int w, int h}) p = osgNormFrameToCanvasPixels(
+        r,
+        cw,
+        ch,
+      );
+      expect(p.x, lessThan(0));
+      final OsgNormRect back = osgCanvasPixelsToNormFrame(
+        p.x,
+        p.y,
+        p.w,
+        p.h,
+        cw,
+        ch,
+      );
+      expect(back.x, closeTo(r.x, 1e-5));
+      expect(back.y, closeTo(r.y, 1e-5));
+    });
+  });
+
+  group("osgSolidTemplatePixelsForFrame", () {
+    test("matches empty preset frame on fallback canvas", () {
+      final OsgPreset e = OsgPreset.empty();
+      expect(e.templateSolidWidthPx, 1920);
+      expect(e.templateSolidHeightPx, 270);
+      expect(e.templateAspectRatioForFrame, closeTo(1920 / 270, 1e-9));
     });
   });
 

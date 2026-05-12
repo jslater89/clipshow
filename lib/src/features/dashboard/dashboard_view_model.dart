@@ -1,5 +1,4 @@
 import "dart:async";
-import "dart:collection";
 import "dart:convert";
 import "dart:io";
 
@@ -121,7 +120,8 @@ class DashboardViewModel extends ChangeNotifier {
   String? _captureStatusMessage;
   final Set<String> _loadedSystemFontFamilies = <String>{};
 
-  final List<bool> _previewOsgPresetVisible = <bool>[false, false, false];
+  OsgPresetVisibility _previewOsgPresetVisibility =
+      const OsgPresetVisibility.allOff();
   int _previewOsgRequirementFlashToken = 0;
   String _previewOsgRequirementFlashText = "";
 
@@ -165,7 +165,7 @@ class DashboardViewModel extends ChangeNotifier {
   TelestratorDefaults get telestratorDefaults =>
       _workspaceSettings?.telestratorDefaults ?? TelestratorDefaults.fallback();
   DecoderConfig get decoderConfig =>
-      _workspaceSettings?.decoderConfig ?? const DecoderConfig.fallbackLinux();
+      _workspaceSettings?.decoderConfig ?? DecoderConfig.platformFallback();
   MdkLogVerbosity get mdkLogVerbosity =>
       _workspaceSettings?.mdkLogVerbosity ?? MdkLogVerbosity.warning;
 
@@ -185,6 +185,14 @@ class DashboardViewModel extends ChangeNotifier {
   bool get pauseIngestScanDuringPreview =>
       _workspaceSettings?.pauseIngestScanDuringPreview ?? true;
 
+  int get ingestProbeConcurrency =>
+      _workspaceSettings?.ingestProbeConcurrency ??
+      IngestionConcurrencyDefaults.probeDefault;
+
+  int get ingestThumbnailConcurrency =>
+      _workspaceSettings?.ingestThumbnailConcurrency ??
+      IngestionConcurrencyDefaults.thumbnailDefault;
+
   PlayoutOutputSize get playoutOutputSize =>
       _workspaceSettings?.playoutOutputSize ?? PlayoutOutputSize.fallback;
 
@@ -198,9 +206,8 @@ class DashboardViewModel extends ChangeNotifier {
   bool get obsCaptureRecording => _obsCaptureRecording;
   String? get captureStatusMessage => _captureStatusMessage;
 
-  /// Visibilities for OSG presets 1–3 in the dashboard preview (mirrors playout 8/9/0).
-  List<bool> get previewOsgPresetVisible =>
-      UnmodifiableListView<bool>(_previewOsgPresetVisible);
+  /// Visibilities for OSG presets in the dashboard preview (mirrors playout 6–0).
+  OsgPresetVisibility get previewOsgPresetVisibility => _previewOsgPresetVisibility;
 
   int get previewOsgRequirementFlashToken => _previewOsgRequirementFlashToken;
 
@@ -232,38 +239,39 @@ class DashboardViewModel extends ChangeNotifier {
   void _reconcilePreviewOsgPresetVisibilityForSelectedItem() {
     final MediaListItem? item = selectedItem;
     if (item == null) {
-      _previewOsgPresetVisible[0] = false;
-      _previewOsgPresetVisible[1] = false;
-      _previewOsgPresetVisible[2] = false;
+      _previewOsgPresetVisibility = const OsgPresetVisibility.allOff();
       return;
     }
     final Set<int> onMedia = semanticTypeIdsOnMedia(item);
-    final List<OsgPreset> presets = osgWorkspaceConfig.threePresets;
-    for (int i = 0; i < 3; i++) {
-      if (!_previewOsgPresetVisible[i]) {
+    final List<OsgPreset> presets = osgWorkspaceConfig.workspacePresets;
+    OsgPresetVisibility next = _previewOsgPresetVisibility;
+    for (final OsgPresetSlot slot in OsgPresetSlot.values) {
+      if (!next[slot]) {
         continue;
       }
-      final OsgPreset p = presets[i];
+      final OsgPreset p = presets[slot.presetIndex];
       if (!p.enabled) {
-        _previewOsgPresetVisible[i] = false;
+        next = next.withSlot(slot, false);
         continue;
       }
       if (p.requiredSemanticTypeIds.isNotEmpty &&
           !p.semanticRequirementsSatisfiedBy(onMedia)) {
-        _previewOsgPresetVisible[i] = false;
+        next = next.withSlot(slot, false);
       }
     }
+    _previewOsgPresetVisibility = next;
   }
 
-  void togglePreviewOsgPreset(int index) {
-    if (index < 0 || index > 2) {
+  void togglePreviewOsgPresetSlot(OsgPresetSlot slot) {
+    final int index = slot.presetIndex;
+    if (index < 0 || index >= OsgPresetSlot.values.length) {
       return;
     }
-    final OsgPreset preset = osgWorkspaceConfig.threePresets[index];
+    final OsgPreset preset = osgWorkspaceConfig.workspacePresets[index];
     if (!preset.enabled) {
       return;
     }
-    final bool next = !_previewOsgPresetVisible[index];
+    final bool next = !_previewOsgPresetVisibility[slot];
     if (next) {
       if (preset.requiredSemanticTypeIds.isNotEmpty) {
         final MediaListItem? item = selectedItem;
@@ -283,7 +291,8 @@ class DashboardViewModel extends ChangeNotifier {
         }
       }
     }
-    _previewOsgPresetVisible[index] = next;
+    _previewOsgPresetVisibility =
+        _previewOsgPresetVisibility.withSlot(slot, next);
     notifyListeners();
   }
 
@@ -811,12 +820,11 @@ class DashboardViewModel extends ChangeNotifier {
 
   Future<void> _startSession(WorkspaceSession session) async {
     _clipsOfMasterFilterMediaId = null;
-    _previewOsgPresetVisible[0] = false;
-    _previewOsgPresetVisible[1] = false;
-    _previewOsgPresetVisible[2] = false;
+    _previewOsgPresetVisibility = const OsgPresetVisibility.allOff();
     _semanticTagSnapshotByItemKey.clear();
     _mediaRepository = session.mediaRepository;
     _workspacePath = session.workspace.rootPath;
+    await _loadWorkspaceSettings();
     await _mediaSubscription?.cancel();
     await _thumbnailSubscription?.cancel();
     _thumbnailSubscription = _ingestionService.thumbnailReady.listen(
@@ -833,7 +841,6 @@ class DashboardViewModel extends ChangeNotifier {
       workspacePath: session.workspace.rootPath,
       repository: session.mediaRepository,
     );
-    await _loadWorkspaceSettings();
     await _preloadConfiguredOsgFonts();
     await _reloadFromRepository();
   }
@@ -844,7 +851,7 @@ class DashboardViewModel extends ChangeNotifier {
       return;
     }
     final Set<String> configuredFamilies = <String>{};
-    for (final OsgPreset preset in settings.osgWorkspaceConfig.threePresets) {
+    for (final OsgPreset preset in settings.osgWorkspaceConfig.workspacePresets) {
       for (final OsgSlot slot in preset.slots) {
         final String? family = slot.fontFamily?.trim();
         if (family == null || family.isEmpty) {
@@ -1221,6 +1228,13 @@ class DashboardViewModel extends ChangeNotifier {
     _allTags
       ..clear()
       ..addAll(await repository.listAllTags());
+    // [_refreshTagsForItems] skips the attachment diff in [_reloadFromRepository], so
+    // bump snapshots so preview/playout OSG layers reload semantic tag text.
+    for (final MediaListItem item in itemsNeedingUpdate) {
+      final String k = item.stableKey;
+      _semanticTagSnapshotByItemKey[k] =
+          (_semanticTagSnapshotByItemKey[k] ?? 0) + 1;
+    }
     _applyFilters();
     notifyListeners();
     return itemsNeedingUpdate.length;
@@ -1450,6 +1464,18 @@ class DashboardViewModel extends ChangeNotifier {
       return;
     }
     _workspaceSettings = await repository.loadWorkspaceSettings();
+    _syncIngestionConcurrencyFromWorkspace();
+  }
+
+  void _syncIngestionConcurrencyFromWorkspace() {
+    final WorkspaceSettingsBundle? bundle = _workspaceSettings;
+    if (bundle == null) {
+      return;
+    }
+    _ingestionService.applyIngestionConcurrency(
+      probeConcurrency: bundle.ingestProbeConcurrency,
+      thumbnailConcurrency: bundle.ingestThumbnailConcurrency,
+    );
   }
 
   Future<void> saveTelestratorDefaults(TelestratorDefaults value) async {
@@ -1790,6 +1816,26 @@ class DashboardViewModel extends ChangeNotifier {
     await repository.savePauseIngestScanDuringPreview(value);
     await _loadWorkspaceSettings();
     _syncIngestPreviewPause();
+    notifyListeners();
+  }
+
+  Future<void> saveIngestProbeConcurrency(int value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveIngestProbeConcurrency(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> saveIngestThumbnailConcurrency(int value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveIngestThumbnailConcurrency(value);
+    await _loadWorkspaceSettings();
     notifyListeners();
   }
 

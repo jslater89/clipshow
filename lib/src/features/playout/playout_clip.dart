@@ -1,4 +1,5 @@
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 
 class PlayoutClip {
   PlayoutClip({
@@ -23,9 +24,9 @@ class PlayoutClip {
   final MediaListItemType mediaType;
   final int mediaId;
 
-  /// When non-null and length is 3, playout starts with these OSG preset
-  /// visibilities (hotkeys 8 / 9 / 0). Otherwise all presets start hidden.
-  final List<bool>? osgPresetVisibleInitial;
+  /// When non-null, playout starts with these OSG preset visibilities (hotkeys
+  /// 6 through 0). Otherwise all presets start hidden.
+  final OsgPresetVisibility? osgPresetVisibleInitial;
 
   /// Bumps when tag rows for this media change in a way that affects OSG
   /// semantic text (e.g. semantic type or tag value). Preview uses this so

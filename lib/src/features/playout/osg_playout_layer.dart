@@ -10,7 +10,7 @@ import "package:obs_clipshow/src/osg/osg_models.dart";
 
 typedef OsgSemanticResolve = Future<String?> Function(int semanticTypeId);
 
-/// Renders up to three OSG presets in normalized 0..1 coordinates over the canvas.
+/// Renders up to five OSG presets in normalized 0..1 coordinates over the canvas.
 class OsgPlayoutLayer extends StatefulWidget {
   const OsgPlayoutLayer({
     super.key,
@@ -25,7 +25,7 @@ class OsgPlayoutLayer extends StatefulWidget {
   final OsgWorkspaceConfig config;
   final String workspaceRoot;
   final OsgSemanticResolve resolveSemantic;
-  final List<bool> visible;
+  final OsgPresetVisibility visible;
 
   @override
   State<OsgPlayoutLayer> createState() => _OsgPlayoutLayerState();
@@ -54,7 +54,7 @@ class _OsgPlayoutLayerState extends State<OsgPlayoutLayer> {
 
   Future<void> _loadSemantics() async {
     final Set<int> ids = <int>{};
-    for (final OsgPreset pr in widget.config.threePresets) {
+    for (final OsgPreset pr in widget.config.workspacePresets) {
       for (final OsgSlot slot in pr.slots) {
         if (slot.textSource == OsgTextSource.semantic &&
             slot.semanticTypeId != null) {
@@ -75,14 +75,14 @@ class _OsgPlayoutLayerState extends State<OsgPlayoutLayer> {
 
   @override
   Widget build(BuildContext context) {
-    final List<OsgPreset> presets = widget.config.threePresets;
+    final List<OsgPreset> presets = widget.config.workspacePresets;
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        for (int i = 0; i < 3; i++)
+        for (final OsgPresetSlot slot in OsgPresetSlot.values)
           _OsgSinglePresetLayer(
-            preset: presets[i],
-            visible: i < widget.visible.length ? widget.visible[i] : false,
+            preset: presets[slot.presetIndex],
+            visible: widget.visible[slot],
             workspaceRoot: widget.workspaceRoot,
             semanticTextByTypeId: _semanticTextByTypeId,
             clip: widget.clip,

@@ -383,9 +383,8 @@ class DashboardFileListPanel extends StatelessWidget {
                                     toPlayoutClip(
                                       item,
                                       workspaceRoot: workspacePath,
-                                      osgPresetVisibleInitial: List<bool>.from(
-                                        viewModel.previewOsgPresetVisible,
-                                      ),
+                                      osgPresetVisibleInitial: viewModel
+                                          .previewOsgPresetVisibility,
                                       semanticTagSnapshotVersion: viewModel
                                           .semanticTagSnapshotForItem(item),
                                       semanticTypeIdsOnMedia: viewModel

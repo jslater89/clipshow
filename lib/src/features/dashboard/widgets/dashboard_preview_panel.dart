@@ -13,6 +13,7 @@ import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
 
 class DashboardPreviewPanel extends StatefulWidget {
@@ -132,15 +133,9 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                 : () => viewModel.saveClipFromCurrentMarks(
                                     context,
                                   ),
-                            onOsgPresetDigit8Requested: workspaceRoot == null
+                            onOsgPresetSlotToggle: workspaceRoot == null
                                 ? null
-                                : () => viewModel.togglePreviewOsgPreset(0),
-                            onOsgPresetDigit9Requested: workspaceRoot == null
-                                ? null
-                                : () => viewModel.togglePreviewOsgPreset(1),
-                            onOsgPresetDigit0Requested: workspaceRoot == null
-                                ? null
-                                : () => viewModel.togglePreviewOsgPreset(2),
+                                : viewModel.togglePreviewOsgPresetSlot,
                             child: Stack(
                               fit: StackFit.expand,
                               children: <Widget>[
@@ -184,9 +179,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                                     previewOsgClip,
                                                     semanticTypeId,
                                                   ),
-                                          visible: List<bool>.from(
-                                            viewModel.previewOsgPresetVisible,
-                                          ),
+                                          visible: viewModel.previewOsgPresetVisibility,
                                         )
                                       : null,
                                 ),
@@ -232,21 +225,21 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   ToggleButtons(
                     borderRadius: BorderRadius.circular(radius8),
                     constraints: BoxConstraints(
-                      minWidth: scaleDimension(context, 40),
-                      minHeight: scaleDimension(context, 32),
+                      minWidth: scaleDimension(context, 30),
+                      minHeight: scaleDimension(context, 28),
                     ),
                     isSelected: <bool>[
-                      viewModel.previewOsgPresetVisible[0],
-                      viewModel.previewOsgPresetVisible[1],
-                      viewModel.previewOsgPresetVisible[2],
+                      for (final OsgPresetSlot s in OsgPresetSlot.values)
+                        viewModel.previewOsgPresetVisibility[s],
                     ],
                     onPressed: (int index) {
-                      viewModel.togglePreviewOsgPreset(index);
+                      viewModel.togglePreviewOsgPresetSlot(
+                        OsgPresetSlot.values[index],
+                      );
                     },
-                    children: const <Widget>[
-                      Text("8"),
-                      Text("9"),
-                      Text("0"),
+                    children: <Widget>[
+                      for (final OsgPresetSlot s in OsgPresetSlot.values)
+                        Text(s.playoutHotkeyDigitLabel),
                     ],
                   ),
                 ],
@@ -424,9 +417,8 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                             selectedItem,
                             workspaceRoot: workspaceRoot,
                             initialOffsetMs: viewModel.previewPositionMs,
-                            osgPresetVisibleInitial: List<bool>.from(
-                              viewModel.previewOsgPresetVisible,
-                            ),
+                            osgPresetVisibleInitial:
+                                viewModel.previewOsgPresetVisibility,
                             semanticTagSnapshotVersion: viewModel
                                 .semanticTagSnapshotForItem(selectedItem),
                             semanticTypeIdsOnMedia: viewModel
@@ -570,7 +562,7 @@ class _PreviewHelpOverlay extends StatelessWidget {
                   if (showOsgHotkeys) ...<Widget>[
                     SizedBox(height: gap10),
                     _previewHotkeySection("OSG", <String, String>{
-                      "8 / 9 / 0": "Toggle OSG preset 1 / 2 / 3",
+                      "6 / 7 / 8 / 9 / 0": "Toggle OSG Presets 1 Through 5",
                     }),
                   ],
                   SizedBox(height: gap10),

@@ -1,7 +1,8 @@
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
-import 'package:obs_clipshow/src/features/playout/clip_player_view.dart';
+import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 
 class PlayoutSeekBackwardIntent extends Intent {
   const PlayoutSeekBackwardIntent();
@@ -79,16 +80,9 @@ class PlayoutIncreaseBrushIntent extends Intent {
   const PlayoutIncreaseBrushIntent();
 }
 
-class PlayoutOsgPresetDigit8Intent extends Intent {
-  const PlayoutOsgPresetDigit8Intent();
-}
-
-class PlayoutOsgPresetDigit9Intent extends Intent {
-  const PlayoutOsgPresetDigit9Intent();
-}
-
-class PlayoutOsgPresetDigit0Intent extends Intent {
-  const PlayoutOsgPresetDigit0Intent();
+class PlayoutOsgPresetSlotIntent extends Intent {
+  const PlayoutOsgPresetSlotIntent(this.slot);
+  final OsgPresetSlot slot;
 }
 
 class PlayoutHotkeysLayer extends StatelessWidget {
@@ -106,9 +100,7 @@ class PlayoutHotkeysLayer extends StatelessWidget {
     this.onSetTelestratorColor3Requested,
     this.onDecreaseBrushRequested,
     this.onIncreaseBrushRequested,
-    this.onOsgPresetDigit8Requested,
-    this.onOsgPresetDigit9Requested,
-    this.onOsgPresetDigit0Requested,
+    this.onOsgPresetSlotToggle,
   });
 
   final ClipPlayerController controller;
@@ -123,9 +115,7 @@ class PlayoutHotkeysLayer extends StatelessWidget {
   final VoidCallback? onSetTelestratorColor3Requested;
   final VoidCallback? onDecreaseBrushRequested;
   final VoidCallback? onIncreaseBrushRequested;
-  final VoidCallback? onOsgPresetDigit8Requested;
-  final VoidCallback? onOsgPresetDigit9Requested;
-  final VoidCallback? onOsgPresetDigit0Requested;
+  final ValueChanged<OsgPresetSlot>? onOsgPresetSlotToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -178,15 +168,18 @@ class PlayoutHotkeysLayer extends StatelessWidget {
         if (onIncreaseBrushRequested != null)
           const SingleActivator(LogicalKeyboardKey.bracketRight):
               const PlayoutIncreaseBrushIntent(),
-        if (onOsgPresetDigit8Requested != null)
+        if (onOsgPresetSlotToggle != null) ...<ShortcutActivator, Intent>{
+          const SingleActivator(LogicalKeyboardKey.digit6):
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset1),
+          const SingleActivator(LogicalKeyboardKey.digit7):
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset2),
           const SingleActivator(LogicalKeyboardKey.digit8):
-              const PlayoutOsgPresetDigit8Intent(),
-        if (onOsgPresetDigit9Requested != null)
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset3),
           const SingleActivator(LogicalKeyboardKey.digit9):
-              const PlayoutOsgPresetDigit9Intent(),
-        if (onOsgPresetDigit0Requested != null)
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset4),
           const SingleActivator(LogicalKeyboardKey.digit0):
-              const PlayoutOsgPresetDigit0Intent(),
+              const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset5),
+        },
         const SingleActivator(LogicalKeyboardKey.escape): const DismissIntent(),
       },
       child: Actions(
@@ -325,24 +318,10 @@ class PlayoutHotkeysLayer extends StatelessWidget {
                   return null;
                 },
               ),
-          PlayoutOsgPresetDigit8Intent:
-              CallbackAction<PlayoutOsgPresetDigit8Intent>(
-                onInvoke: (_) {
-                  onOsgPresetDigit8Requested?.call();
-                  return null;
-                },
-              ),
-          PlayoutOsgPresetDigit9Intent:
-              CallbackAction<PlayoutOsgPresetDigit9Intent>(
-                onInvoke: (_) {
-                  onOsgPresetDigit9Requested?.call();
-                  return null;
-                },
-              ),
-          PlayoutOsgPresetDigit0Intent:
-              CallbackAction<PlayoutOsgPresetDigit0Intent>(
-                onInvoke: (_) {
-                  onOsgPresetDigit0Requested?.call();
+          PlayoutOsgPresetSlotIntent:
+              CallbackAction<PlayoutOsgPresetSlotIntent>(
+                onInvoke: (PlayoutOsgPresetSlotIntent intent) {
+                  onOsgPresetSlotToggle?.call(intent.slot);
                   return null;
                 },
               ),

@@ -18,6 +18,11 @@ int osgDisplayPixel(int v) {
   return v.clamp(0, 99999);
 }
 
+/// Like [osgDisplayPixel] but allows negative coordinates when the playout frame extends past the canvas.
+int osgDisplayPixelSigned(int v) {
+  return v.clamp(-999999, 999999);
+}
+
 /// One decimal place; value is 0–100, not 0–1 (use for text fields without a "%" suffix).
 String osgFormatGraphicPercent(double norm) {
   return (norm * 100).toStringAsFixed(1);
@@ -40,8 +45,8 @@ double osgParseGraphicPercentField(String raw) {
   final double cw = canvasW.toDouble();
   final double ch = canvasH.toDouble();
   return (
-    x: osgDisplayPixel((r.x * cw).round()),
-    y: osgDisplayPixel((r.y * ch).round()),
+    x: osgDisplayPixelSigned((r.x * cw).round()),
+    y: osgDisplayPixelSigned((r.y * ch).round()),
     w: osgDisplayPixel((r.width * cw).round()),
     h: osgDisplayPixel((r.height * ch).round()),
   );
@@ -57,11 +62,13 @@ OsgNormRect osgCanvasPixelsToNormFrame(
 ) {
   final double cw = canvasW.toDouble();
   final double ch = canvasH.toDouble();
-  return OsgNormRect(
-    x: (xPx / cw).clamp(0.0, 1.0),
-    y: (yPx / ch).clamp(0.0, 1.0),
-    width: (wPx / cw).clamp(0.0, 1.0),
-    height: (hPx / ch).clamp(0.0, 1.0),
+  return osgClampFrameForPlayout(
+    OsgNormRect(
+      x: xPx / cw,
+      y: yPx / ch,
+      width: (wPx / cw).clamp(0.0, 1.0),
+      height: (hPx / ch).clamp(0.0, 1.0),
+    ),
   );
 }
 
@@ -82,8 +89,8 @@ OsgNormRect osgCanvasPixelsToNormFrame(
   final double w = slot.width * fw;
   final double h = slot.height * fh;
   return (
-    x: osgDisplayPixel(x.round()),
-    y: osgDisplayPixel(y.round()),
+    x: osgDisplayPixelSigned(x.round()),
+    y: osgDisplayPixelSigned(y.round()),
     w: osgDisplayPixel(w.round()),
     h: osgDisplayPixel(h.round()),
   );
@@ -236,6 +243,14 @@ class _OsgScaledRectFieldsState extends State<OsgScaledRectFields> {
     return v.clamp(0, maxPx);
   }
 
+  int _parseSignedAxis(String raw, int canvasLen) {
+    final int? v = int.tryParse(raw.trim());
+    if (v == null) {
+      return 0;
+    }
+    return v.clamp(-canvasLen * 4, canvasLen * 4);
+  }
+
   void _emit() {
     if (widget.displayMode == OsgRectFieldDisplayMode.graphicPercent) {
       final double nx = osgParseGraphicPercentField(_x.text);
@@ -250,7 +265,7 @@ class _OsgScaledRectFieldsState extends State<OsgScaledRectFields> {
       );
       final OsgNormRect clamped = widget.isSlotInFrame
           ? osgClampSlotBox(raw)
-          : osgClampFrame(raw);
+          : osgClampFrameForPlayout(raw);
       widget.onNormChanged(clamped);
       if (!_anyFocused) {
         _applyNormToControllers(norm: clamped);
@@ -259,10 +274,14 @@ class _OsgScaledRectFieldsState extends State<OsgScaledRectFields> {
     }
     final int cw = widget.canvasWidth;
     final int ch = widget.canvasHeight;
-    final int xPx = _parseClamped(_x.text, cw);
-    final int yPx = _parseClamped(_y.text, ch);
-    final int wPx = _parseClamped(_w.text, cw);
-    final int hPx = _parseClamped(_h.text, ch);
+    final int xPx = widget.isSlotInFrame
+        ? _parseClamped(_x.text, cw)
+        : _parseSignedAxis(_x.text, cw);
+    final int yPx = widget.isSlotInFrame
+        ? _parseClamped(_y.text, ch)
+        : _parseSignedAxis(_y.text, ch);
+    final int wPx = _parseClamped(_w.text, cw).clamp(1, cw);
+    final int hPx = _parseClamped(_h.text, ch).clamp(1, ch);
     if (widget.isSlotInFrame) {
       final OsgNormRect next = osgCanvasPixelsToSlotGraphicLocal(
         xPx,

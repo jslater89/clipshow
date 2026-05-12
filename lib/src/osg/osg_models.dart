@@ -2,6 +2,8 @@ import "dart:convert";
 import "dart:math" as math;
 import "dart:ui";
 
+import "package:flutter/foundation.dart";
+
 /// Logical playout / broadcast canvas size (pixels). Used for window sizing and OSG 0..1 space.
 class PlayoutOutputSize {
   const PlayoutOutputSize({required this.width, required this.height});
@@ -19,6 +21,16 @@ class PlayoutOutputSize {
   double get aspectRatio => width / height;
 
   bool get isValid => width > 0 && height > 0;
+}
+
+/// Notional solid-template pixel size matching [frame] on [playout] (width × height).
+(int, int) osgSolidTemplatePixelsForFrame(
+  OsgNormRect frame,
+  PlayoutOutputSize playout,
+) {
+  final int w = (frame.width * playout.width).round().clamp(1, 999999);
+  final int h = (frame.height * playout.height).round().clamp(1, 999999);
+  return (w, h);
 }
 
 /// Normalized rectangle in 0..1 relative to [PlayoutOutputSize].
@@ -279,8 +291,9 @@ class OsgPreset {
 
   static const int osgPresetSchemaVersion = 8;
 
-  /// Logical template size used when [templatePixelAspect] is null and background is solid.
-  static const double defaultSolidTemplateAspect = 400 / 200;
+  /// Fallback aspect (W÷H) for solid presets when pixel dimensions are missing.
+  /// Matches [empty] frame on [PlayoutOutputSize.fallback] (1920 x 270 px).
+  static const double defaultSolidTemplateAspect = 64 / 9;
 
   static const int defaultTemplateSolidArgb = 0xFF2D2D2D;
 
@@ -300,18 +313,23 @@ class OsgPreset {
   }
 
   static OsgPreset empty() {
-    return const OsgPreset(
+    const OsgNormRect frame = OsgNormRect(x: 0, y: 0.75, width: 1, height: 0.25);
+    final (int solidW, int solidH) = osgSolidTemplatePixelsForFrame(
+      frame,
+      PlayoutOutputSize.fallback,
+    );
+    return OsgPreset(
       enabled: false,
       templateRelativePath: "",
-      frame: OsgNormRect(x: 0, y: 0.75, width: 1, height: 0.25),
+      frame: frame,
       slots: <OsgSlot>[],
       templatePixelAspect: null,
       templateBackgroundKind: OsgTemplateBackgroundKind.solid,
       templateSolidArgb: defaultTemplateSolidArgb,
       layerOpacity: 1.0,
       templateCornerRadiusNorm: 0,
-      templateSolidWidthPx: 400,
-      templateSolidHeightPx: 200,
+      templateSolidWidthPx: solidW,
+      templateSolidHeightPx: solidH,
       requiredSemanticTypeIds: <int>[],
     );
   }
@@ -433,6 +451,9 @@ class OsgPreset {
     final Object? tpa = json["templatePixelAspect"];
     final double? templatePixelAspect = tpa is num ? tpa.toDouble() : null;
     final String path = json["templateRelativePath"] as String? ?? "";
+    final OsgNormRect frame = OsgNormRect.fromJson(
+      json["frame"] as Map<String, Object?>?,
+    );
     final OsgTemplateBackgroundKind kind = _kindFromJson(
       json["templateBackgroundKind"],
       path,
@@ -453,14 +474,18 @@ class OsgPreset {
         solidH = 1000;
         solidW = (a * solidH).round().clamp(1, 999999);
       } else {
-        solidW = 400;
-        solidH = 200;
+        final (int fw, int fh) = osgSolidTemplatePixelsForFrame(
+          frame,
+          PlayoutOutputSize.fallback,
+        );
+        solidW = fw;
+        solidH = fh;
       }
     }
     OsgPreset preset = OsgPreset(
       enabled: json["enabled"] == true,
       templateRelativePath: path,
-      frame: OsgNormRect.fromJson(json["frame"] as Map<String, Object?>?),
+      frame: frame,
       slots: slots,
       templatePixelAspect: templatePixelAspect,
       templateBackgroundKind: kind,
@@ -536,6 +561,131 @@ class OsgPreset {
   }
 }
 
+/// Playout / preview hotkey order: 6, 7, 8, 9, 0 (indices 0–4).
+enum OsgPresetSlot {
+  preset1,
+  preset2,
+  preset3,
+  preset4,
+  preset5,
+}
+
+extension OsgPresetSlotPlayoutHotkey on OsgPresetSlot {
+  /// Digit label on the keyboard row (matches [OsgPresetSlot] order).
+  String get playoutHotkeyDigitLabel => switch (this) {
+    OsgPresetSlot.preset1 => "6",
+    OsgPresetSlot.preset2 => "7",
+    OsgPresetSlot.preset3 => "8",
+    OsgPresetSlot.preset4 => "9",
+    OsgPresetSlot.preset5 => "0",
+  };
+
+  /// Index into [OsgWorkspaceConfig.workspacePresets] (0..4).
+  int get presetIndex => index;
+}
+
+/// Which OSG overlays are toggled on in preview / playout (hotkeys 6–0).
+@immutable
+class OsgPresetVisibility {
+  const OsgPresetVisibility({
+    required this.preset1,
+    required this.preset2,
+    required this.preset3,
+    required this.preset4,
+    required this.preset5,
+  });
+
+  const OsgPresetVisibility.allOff()
+    : preset1 = false,
+      preset2 = false,
+      preset3 = false,
+      preset4 = false,
+      preset5 = false;
+
+  final bool preset1;
+  final bool preset2;
+  final bool preset3;
+  final bool preset4;
+  final bool preset5;
+
+  /// Builds visibility from a list (e.g. legacy length-3); missing entries are false.
+  factory OsgPresetVisibility.fromBoolList(List<bool> values) {
+    bool g(int i) => i < values.length ? values[i] : false;
+    return OsgPresetVisibility(
+      preset1: g(0),
+      preset2: g(1),
+      preset3: g(2),
+      preset4: g(3),
+      preset5: g(4),
+    );
+  }
+
+  bool operator [](OsgPresetSlot slot) => switch (slot) {
+    OsgPresetSlot.preset1 => preset1,
+    OsgPresetSlot.preset2 => preset2,
+    OsgPresetSlot.preset3 => preset3,
+    OsgPresetSlot.preset4 => preset4,
+    OsgPresetSlot.preset5 => preset5,
+  };
+
+  OsgPresetVisibility withSlot(OsgPresetSlot slot, bool value) => switch (slot) {
+    OsgPresetSlot.preset1 => OsgPresetVisibility(
+      preset1: value,
+      preset2: preset2,
+      preset3: preset3,
+      preset4: preset4,
+      preset5: preset5,
+    ),
+    OsgPresetSlot.preset2 => OsgPresetVisibility(
+      preset1: preset1,
+      preset2: value,
+      preset3: preset3,
+      preset4: preset4,
+      preset5: preset5,
+    ),
+    OsgPresetSlot.preset3 => OsgPresetVisibility(
+      preset1: preset1,
+      preset2: preset2,
+      preset3: value,
+      preset4: preset4,
+      preset5: preset5,
+    ),
+    OsgPresetSlot.preset4 => OsgPresetVisibility(
+      preset1: preset1,
+      preset2: preset2,
+      preset3: preset3,
+      preset4: value,
+      preset5: preset5,
+    ),
+    OsgPresetSlot.preset5 => OsgPresetVisibility(
+      preset1: preset1,
+      preset2: preset2,
+      preset3: preset3,
+      preset4: preset4,
+      preset5: value,
+    ),
+  };
+
+  @override
+  bool operator ==(Object other) {
+    return other is OsgPresetVisibility &&
+        other.preset1 == preset1 &&
+        other.preset2 == preset2 &&
+        other.preset3 == preset3 &&
+        other.preset4 == preset4 &&
+        other.preset5 == preset5;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    preset1,
+    preset2,
+    preset3,
+    preset4,
+    preset5,
+  );
+}
+
 class OsgWorkspaceConfig {
   const OsgWorkspaceConfig({required this.presets});
 
@@ -545,22 +695,28 @@ class OsgWorkspaceConfig {
         OsgPreset.empty(),
         OsgPreset.empty(),
         OsgPreset.empty(),
+        OsgPreset.empty(),
+        OsgPreset.empty(),
       ],
     );
   }
 
   final List<OsgPreset> presets;
 
-  List<OsgPreset> get threePresets {
+  /// Five presets aligned with playout hotkeys 6, 7, 8, 9, and 0.
+  List<OsgPreset> get workspacePresets {
     final List<OsgPreset> p = List<OsgPreset>.from(presets);
-    while (p.length < 3) {
+    while (p.length < 5) {
       p.add(OsgPreset.empty());
     }
-    return p.sublist(0, 3);
+    if (p.length > 5) {
+      return p.sublist(0, 5);
+    }
+    return p;
   }
 
   String encodeToStorageJson() {
-    final List<OsgPreset> p = threePresets;
+    final List<OsgPreset> p = workspacePresets;
     return jsonEncode(p.map((OsgPreset e) => e.toJson()).toList());
   }
 
@@ -589,7 +745,7 @@ class OsgWorkspaceConfig {
   /// Returns distinct semantic type ids referenced by enabled presets.
   Set<int> referencedSemanticTypeIds() {
     final Set<int> ids = <int>{};
-    for (final OsgPreset preset in threePresets) {
+    for (final OsgPreset preset in workspacePresets) {
       if (!preset.enabled) {
         continue;
       }

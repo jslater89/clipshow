@@ -48,6 +48,9 @@ void main() {
   testWidgets("shows media list when files are available", (
     WidgetTester tester,
   ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 720));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
     final DashboardViewModel viewModel = createViewModel();
     addTearDown(viewModel.dispose);
     viewModel.setStateForTest(

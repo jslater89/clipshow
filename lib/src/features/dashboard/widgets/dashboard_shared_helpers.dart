@@ -169,7 +169,7 @@ PlayoutClip toPlayoutClip(
   MediaListItem item, {
   required String workspaceRoot,
   int? initialOffsetMs,
-  List<bool>? osgPresetVisibleInitial,
+  OsgPresetVisibility? osgPresetVisibleInitial,
   int semanticTagSnapshotVersion = 0,
   Set<int> semanticTypeIdsOnMedia = const <int>{},
 }) {

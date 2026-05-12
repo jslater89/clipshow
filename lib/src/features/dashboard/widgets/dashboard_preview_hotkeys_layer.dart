@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 
 class PreviewMarkInIntent extends Intent {
   const PreviewMarkInIntent();
@@ -59,16 +60,9 @@ class PreviewToggleHelpIntent extends Intent {
   const PreviewToggleHelpIntent();
 }
 
-class PreviewOsgPresetDigit8Intent extends Intent {
-  const PreviewOsgPresetDigit8Intent();
-}
-
-class PreviewOsgPresetDigit9Intent extends Intent {
-  const PreviewOsgPresetDigit9Intent();
-}
-
-class PreviewOsgPresetDigit0Intent extends Intent {
-  const PreviewOsgPresetDigit0Intent();
+class PreviewOsgPresetSlotIntent extends Intent {
+  const PreviewOsgPresetSlotIntent(this.slot);
+  final OsgPresetSlot slot;
 }
 
 class DashboardPreviewHotkeysLayer extends StatelessWidget {
@@ -81,9 +75,7 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
     this.onMarkInRequested,
     this.onMarkOutRequested,
     this.onSaveClipRequested,
-    this.onOsgPresetDigit8Requested,
-    this.onOsgPresetDigit9Requested,
-    this.onOsgPresetDigit0Requested,
+    this.onOsgPresetSlotToggle,
   });
 
   final Widget child;
@@ -93,9 +85,7 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
   final VoidCallback? onMarkInRequested;
   final VoidCallback? onMarkOutRequested;
   final VoidCallback? onSaveClipRequested;
-  final VoidCallback? onOsgPresetDigit8Requested;
-  final VoidCallback? onOsgPresetDigit9Requested;
-  final VoidCallback? onOsgPresetDigit0Requested;
+  final ValueChanged<OsgPresetSlot>? onOsgPresetSlotToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -133,15 +123,18 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
         if (onSaveClipRequested != null)
           const SingleActivator(LogicalKeyboardKey.keyS):
               const PreviewSaveClipIntent(),
-        if (onOsgPresetDigit8Requested != null)
+        if (onOsgPresetSlotToggle != null) ...<ShortcutActivator, Intent>{
+          const SingleActivator(LogicalKeyboardKey.digit6):
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset1),
+          const SingleActivator(LogicalKeyboardKey.digit7):
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset2),
           const SingleActivator(LogicalKeyboardKey.digit8):
-              const PreviewOsgPresetDigit8Intent(),
-        if (onOsgPresetDigit9Requested != null)
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset3),
           const SingleActivator(LogicalKeyboardKey.digit9):
-              const PreviewOsgPresetDigit9Intent(),
-        if (onOsgPresetDigit0Requested != null)
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset4),
           const SingleActivator(LogicalKeyboardKey.digit0):
-              const PreviewOsgPresetDigit0Intent(),
+              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset5),
+        },
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -241,24 +234,10 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
               return null;
             },
           ),
-          PreviewOsgPresetDigit8Intent:
-              CallbackAction<PreviewOsgPresetDigit8Intent>(
-                onInvoke: (_) {
-                  onOsgPresetDigit8Requested?.call();
-                  return null;
-                },
-              ),
-          PreviewOsgPresetDigit9Intent:
-              CallbackAction<PreviewOsgPresetDigit9Intent>(
-                onInvoke: (_) {
-                  onOsgPresetDigit9Requested?.call();
-                  return null;
-                },
-              ),
-          PreviewOsgPresetDigit0Intent:
-              CallbackAction<PreviewOsgPresetDigit0Intent>(
-                onInvoke: (_) {
-                  onOsgPresetDigit0Requested?.call();
+          PreviewOsgPresetSlotIntent:
+              CallbackAction<PreviewOsgPresetSlotIntent>(
+                onInvoke: (PreviewOsgPresetSlotIntent intent) {
+                  onOsgPresetSlotToggle?.call(intent.slot);
                   return null;
                 },
               ),

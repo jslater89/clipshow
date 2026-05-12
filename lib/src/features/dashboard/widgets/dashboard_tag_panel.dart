@@ -8,7 +8,6 @@ import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_media_tag_menu.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
-import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_tag_value_edit_dialog.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 

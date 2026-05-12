@@ -250,13 +250,33 @@ class _OsgPresetCanvasPreviewState extends State<OsgPresetCanvasPreview> {
         top: top,
         width: fw,
         height: fh,
-        child: cornerR <= 0
-            ? frameStack
-            : ClipRRect(
-                borderRadius: BorderRadius.circular(cornerR),
-                clipBehavior: Clip.antiAlias,
-                child: frameStack,
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: <Widget>[
+            Positioned.fill(
+              child: cornerR <= 0
+                  ? frameStack
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(cornerR),
+                      clipBehavior: Clip.antiAlias,
+                      child: frameStack,
+                    ),
+            ),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: cornerR > 0
+                        ? BorderRadius.circular(cornerR)
+                        : null,
+                    border: Border.all(color: Colors.amberAccent, width: 1),
+                  ),
+                ),
               ),
+            ),
+          ],
+        ),
       ),
       if (widget.interaction == OsgEditorPreviewInteraction.frame &&
           widget.onFrameChanged != null)
@@ -357,7 +377,7 @@ class _OsgPresetCanvasPreviewState extends State<OsgPresetCanvasPreview> {
               final double nx = _framePanAccum.dx / canvasPw;
               final double ny = _framePanAccum.dy / canvasPh;
               widget.onFrameChanged!(
-                osgClampFrame(
+                osgClampFrameForPlayout(
                   OsgNormRect(
                     x: start.x + nx,
                     y: start.y + ny,

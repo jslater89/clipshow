@@ -511,6 +511,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
               osgWorkspaceConfig: _viewModel.osgWorkspaceConfig,
               workspaceRoot: _viewModel.workspacePath ?? "",
               tagSemanticTypes: _viewModel.tagSemanticTypes,
+              telestratorDefaults: _viewModel.telestratorDefaults,
               onResolveSemanticText: (int semanticTypeId) =>
                   _viewModel.resolveSemanticTagText(
                     _activeClip!,

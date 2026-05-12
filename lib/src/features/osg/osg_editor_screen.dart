@@ -32,7 +32,7 @@ InputDecoration _osgEditorDenseBorderlessDecoration({
   );
 }
 
-/// Full-screen editor for semantic types and three OSG presets.
+/// Full-screen editor for semantic types and five OSG presets.
 /// Playout canvas size is configured under Workspace Settings.
 class OsgEditorScreen extends StatefulWidget {
   const OsgEditorScreen({super.key, required this.workspaceRoot});
@@ -53,7 +53,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     final DashboardViewModel vm = context.read<DashboardViewModel>();
     _draftOsg = OsgWorkspaceConfig.decodeFromStorageJson(
       vm.osgWorkspaceConfig.encodeToStorageJson(),
@@ -122,7 +122,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
     final double playoutAspect = vm.playoutOutputSize.aspectRatio;
     final double imgAsp = asp ?? 16 / 9;
     setState(() {
-      final List<OsgPreset> list = _draftOsg.threePresets.toList();
+      final List<OsgPreset> list = _draftOsg.workspacePresets.toList();
       final OsgPreset old = list[presetIndex];
       final OsgNormRect frame = osgClampFrameWithImageAspect(
         frame: old.frame,
@@ -156,7 +156,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
 
   void _replacePreset(int index, OsgPreset next) {
     setState(() {
-      final List<OsgPreset> list = _draftOsg.threePresets.toList();
+      final List<OsgPreset> list = _draftOsg.workspacePresets.toList();
       list[index] = next;
       _draftOsg = OsgWorkspaceConfig(presets: list);
     });
@@ -242,10 +242,10 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                   color: Theme.of(context).colorScheme.surface,
                   child: TabBar(
                     controller: _tabController,
-                    tabs: const <Widget>[
-                      Tab(text: "Preset 8"),
-                      Tab(text: "Preset 9"),
-                      Tab(text: "Preset 0"),
+                    isScrollable: true,
+                    tabs: <Widget>[
+                      for (final OsgPresetSlot s in OsgPresetSlot.values)
+                        Tab(text: "Preset ${s.playoutHotkeyDigitLabel}"),
                     ],
                   ),
                 ),
@@ -254,9 +254,8 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                   child: TabBarView(
                     controller: _tabController,
                     children: <Widget>[
-                      _presetTab(context, vm, 0),
-                      _presetTab(context, vm, 1),
-                      _presetTab(context, vm, 2),
+                      for (int i = 0; i < 5; i++)
+                        _presetTab(context, vm, i),
                     ],
                   ),
                 ),
@@ -391,14 +390,14 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                       child: OsgPresetCanvasPreview(
                         playoutOutputSize: vm.playoutOutputSize,
                         workspaceRoot: widget.workspaceRoot,
-                        preset: _draftOsg.threePresets[index],
+                        preset: _draftOsg.workspacePresets[index],
                         interaction: OsgEditorPreviewInteraction.slots,
                         graphicLocalLayout: true,
                         dimOutsideFrame: false,
                         applyLayerOpacity: false,
                         semanticTypeNamesById: semanticPreviewNames,
                         onSlotChanged: (int slotIndex, OsgSlot slot) {
-                          final OsgPreset p = _draftOsg.threePresets[index];
+                          final OsgPreset p = _draftOsg.workspacePresets[index];
                           final List<OsgSlot> slots =
                               List<OsgSlot>.from(p.slots);
                           slots[slotIndex] = slot;
@@ -411,14 +410,14 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                       child: OsgPresetCanvasPreview(
                         playoutOutputSize: vm.playoutOutputSize,
                         workspaceRoot: widget.workspaceRoot,
-                        preset: _draftOsg.threePresets[index],
+                        preset: _draftOsg.workspacePresets[index],
                         interaction: OsgEditorPreviewInteraction.frame,
                         graphicLocalLayout: false,
                         dimOutsideFrame: false,
                         applyLayerOpacity: true,
                         semanticTypeNamesById: semanticPreviewNames,
                         onFrameChanged: (OsgNormRect next) {
-                          final OsgPreset p = _draftOsg.threePresets[index];
+                          final OsgPreset p = _draftOsg.workspacePresets[index];
                           _replacePreset(index, p.copyWith(frame: next));
                         },
                       ),
@@ -440,12 +439,9 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
     DashboardViewModel vm,
     int index,
   ) {
-    final OsgPreset preset = _draftOsg.threePresets[index];
-    final String hotkeyLabel = index == 0
-        ? "8"
-        : index == 1
-        ? "9"
-        : "0";
+    final OsgPreset preset = _draftOsg.workspacePresets[index];
+    final String hotkeyLabel =
+        OsgPresetSlot.values[index].playoutHotkeyDigitLabel;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -516,8 +512,12 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                     h = 720;
                     w = (a * h).round().clamp(8, 999999);
                   } else {
-                    w = 400;
-                    h = 200;
+                    final (int fw, int fh) = osgSolidTemplatePixelsForFrame(
+                      preset.frame,
+                      vm.playoutOutputSize,
+                    );
+                    w = fw;
+                    h = fh;
                   }
                 }
                 _replacePreset(
@@ -750,7 +750,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
   }
 
   void _updateSlot(int presetIndex, int slotIndex, OsgSlot nextSlot) {
-    final OsgPreset preset = _draftOsg.threePresets[presetIndex];
+    final OsgPreset preset = _draftOsg.workspacePresets[presetIndex];
     final List<OsgSlot> slots = List<OsgSlot>.from(preset.slots);
     slots[slotIndex] = nextSlot;
     _replacePreset(presetIndex, preset.copyWith(slots: slots));

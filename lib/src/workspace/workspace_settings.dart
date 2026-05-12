@@ -1,13 +1,66 @@
+import "dart:io";
 import "dart:ui";
 
 import "package:obs_clipshow/src/osg/osg_models.dart";
 
+/// Defaults and bounds for directory-scan ffprobe batching and thumbnail [ffmpeg] jobs.
+abstract final class IngestionConcurrencyDefaults {
+  static const int probeMin = 1;
+  static const int probeMax = 32;
+  static const int thumbnailMin = 1;
+  static const int thumbnailMax = 16;
+
+  static const int probeDefault = 8;
+  static const int thumbnailDefault = 3;
+
+  static int clampProbe(int value) =>
+      value < probeMin
+          ? probeMin
+          : (value > probeMax ? probeMax : value);
+
+  static int clampThumbnail(int value) =>
+      value < thumbnailMin
+          ? thumbnailMin
+          : (value > thumbnailMax ? thumbnailMax : value);
+}
+
+enum DecoderPlatform {
+  linux, windows, macos;
+
+  static DecoderPlatform get() {
+    if (Platform.isLinux) {
+      return DecoderPlatform.linux;
+    }
+    else if (Platform.isWindows) {
+      return DecoderPlatform.windows;
+    }
+    else if (Platform.isMacOS) {
+      return DecoderPlatform.macos;
+    }
+    else {
+      throw UnimplementedError("Unsupported platform: ${Platform.operatingSystem}");
+    }
+  }
+}
+
 enum DecoderProfile {
+  // multiplatform decoders
   vaapi,
   vaapiVpp,
   vdpau,
   ffmpegThreads0,
-  dav1d;
+  dav1d,
+  cuda,
+  nvdec,
+
+  // windows only
+  mft,
+  d3d12,
+  d3d11,
+
+  // macos only
+  mdkVT,
+  videoToolbox;
 
   String get label {
     switch (this) {
@@ -21,8 +74,81 @@ enum DecoderProfile {
         return "FFmpeg:threads=0";
       case DecoderProfile.dav1d:
         return "dav1d";
+      case DecoderProfile.cuda:
+        return "CUDA (nvidia only)";
+      case DecoderProfile.nvdec:
+        return "NVDEC (nvidia only)";
+      case DecoderProfile.videoToolbox:
+        return "VideoToolbox";
+      case DecoderProfile.mft:
+        return "MFT";
+      case DecoderProfile.d3d12:
+        return "D3D12";
+      case DecoderProfile.d3d11:
+        return "D3D11";
+      case DecoderProfile.mdkVT:
+        return "VT";
     }
   }
+
+  String get fvpArgument {
+    switch (this) {
+      case DecoderProfile.vaapi:
+        return "VAAPI";
+      case DecoderProfile.vaapiVpp:
+        return "VAAPI:vpp=1";
+      case DecoderProfile.vdpau:
+        return "VDPAU";
+      case DecoderProfile.ffmpegThreads0:
+        return "FFmpeg:threads=0";
+      case DecoderProfile.dav1d:
+        return "dav1d";
+      case DecoderProfile.cuda:
+        return "CUDA";
+      case DecoderProfile.nvdec:
+        return "NVDEC";
+      case DecoderProfile.videoToolbox:
+        return "VideoToolbox";
+      case DecoderProfile.mft:
+        return "MFT";
+      case DecoderProfile.d3d12:
+        return "D3D12";
+      case DecoderProfile.d3d11:
+        return "D3D11";
+      case DecoderProfile.mdkVT:
+        return "VT";
+    }
+  }
+
+  List<DecoderPlatform> get supportedPlatforms {
+    switch (this) {
+      case DecoderProfile.vaapi:
+        return <DecoderPlatform>[DecoderPlatform.linux, DecoderPlatform.windows];
+      case DecoderProfile.vaapiVpp:
+        return <DecoderPlatform>[DecoderPlatform.linux, DecoderPlatform.windows];
+      case DecoderProfile.vdpau:
+        return <DecoderPlatform>[DecoderPlatform.linux];
+      case DecoderProfile.ffmpegThreads0:
+        return <DecoderPlatform>[DecoderPlatform.linux, DecoderPlatform.windows, DecoderPlatform.macos];
+      case DecoderProfile.dav1d:
+        return <DecoderPlatform>[DecoderPlatform.linux, DecoderPlatform.windows, DecoderPlatform.macos];
+      case DecoderProfile.mft:
+        return <DecoderPlatform>[DecoderPlatform.windows];
+      case DecoderProfile.cuda:
+        return <DecoderPlatform>[DecoderPlatform.linux, DecoderPlatform.windows];
+      case DecoderProfile.nvdec:
+        return <DecoderPlatform>[DecoderPlatform.linux, DecoderPlatform.windows];
+      case DecoderProfile.videoToolbox:
+        return <DecoderPlatform>[DecoderPlatform.macos];
+      case DecoderProfile.d3d12:
+        return <DecoderPlatform>[DecoderPlatform.windows];
+      case DecoderProfile.d3d11:
+        return <DecoderPlatform>[DecoderPlatform.windows];
+      case DecoderProfile.mdkVT:
+        return <DecoderPlatform>[DecoderPlatform.macos];
+    }
+  }
+
 }
 
 enum MdkLogVerbosity { off, error, warning, info, debug, all }
@@ -61,14 +187,45 @@ class TelestratorDefaults {
 }
 
 class DecoderConfig {
-  const DecoderConfig({required this.enabledProfiles});
+  const DecoderConfig({required this.enabledProfiles, required this.platform});
 
-  const DecoderConfig.fallbackLinux()
-    : enabledProfiles = const <DecoderProfile>[
+  final DecoderPlatform platform;
+
+  factory DecoderConfig.platformFallback() {
+    if (Platform.isLinux) {
+      return const DecoderConfig.fallbackLinux();
+    }
+    else if (Platform.isWindows) {
+      return const DecoderConfig.fallbackWindows();
+    }
+    else if (Platform.isMacOS) {
+      return const DecoderConfig.fallbackMacOS();
+    }
+    else {
+      throw UnimplementedError("Unsupported platform: ${Platform.operatingSystem}");
+    }
+  }
+
+   const DecoderConfig.fallbackLinux()
+    : platform = DecoderPlatform.linux, enabledProfiles = const <DecoderProfile>[
       DecoderProfile.vaapi,
       DecoderProfile.vaapiVpp,
       DecoderProfile.ffmpegThreads0,
       DecoderProfile.dav1d,
+    ];
+
+  const DecoderConfig.fallbackWindows()
+    : platform = DecoderPlatform.windows, enabledProfiles = const <DecoderProfile>[
+      DecoderProfile.mft,
+      DecoderProfile.d3d12,
+      DecoderProfile.d3d11,
+      DecoderProfile.ffmpegThreads0,
+    ];
+
+  const DecoderConfig.fallbackMacOS()
+    : platform = DecoderPlatform.macos, enabledProfiles = const <DecoderProfile>[
+      DecoderProfile.mdkVT,
+      DecoderProfile.videoToolbox,
     ];
 
   final List<DecoderProfile> enabledProfiles;
@@ -168,6 +325,8 @@ class WorkspaceSettingsBundle {
     required this.ignoredFolders,
     required this.capturePathsSettings,
     required this.pauseIngestScanDuringPreview,
+    required this.ingestProbeConcurrency,
+    required this.ingestThumbnailConcurrency,
     required this.playoutOutputSize,
     required this.osgWorkspaceConfig,
     required this.tagSemanticTypes,
@@ -185,6 +344,12 @@ class WorkspaceSettingsBundle {
   /// When true (default), background ingest scanning pauses while a clip plays
   /// in the dashboard preview. Full-screen playout always pauses ingest regardless.
   final bool pauseIngestScanDuringPreview;
+
+  /// Parallel ffprobe + stat passes per batch during the initial workspace directory scan.
+  final int ingestProbeConcurrency;
+
+  /// Parallel thumbnail [ffmpeg] jobs (each file may still run one probe if duration unknown).
+  final int ingestThumbnailConcurrency;
 
   /// Logical canvas for playout window sizing and OSG normalized coordinates.
   final PlayoutOutputSize playoutOutputSize;
