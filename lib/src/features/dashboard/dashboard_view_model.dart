@@ -1946,6 +1946,11 @@ class DashboardViewModel extends ChangeNotifier {
     }
     await repository.saveDefaultClipVolume(value);
     await _loadWorkspaceSettings();
+    // Apply to the active session as well so the user hears the change
+    // immediately.
+    final double clamped = PlaybackVolumeDefaults.clamp(value);
+    _clipVolume = clamped;
+    _preMuteClipVolume = clamped;
     notifyListeners();
   }
 
