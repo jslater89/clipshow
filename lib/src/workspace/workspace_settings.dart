@@ -24,6 +24,28 @@ abstract final class IngestionConcurrencyDefaults {
           : (value > thumbnailMax ? thumbnailMax : value);
 }
 
+/// Bounds for clip volume (0.0–1.0). Nudge step is the increment used by the
+/// Up/Down volume hotkeys.
+abstract final class PlaybackVolumeDefaults {
+  static const double min = 0.0;
+  static const double max = 1.0;
+  static const double step = 0.1;
+  static const double defaultVolume = 1.0;
+
+  static double clamp(double value) {
+    if (value.isNaN) {
+      return defaultVolume;
+    }
+    if (value < min) {
+      return min;
+    }
+    if (value > max) {
+      return max;
+    }
+    return value;
+  }
+}
+
 enum DecoderPlatform {
   linux, windows, macos;
 
@@ -330,6 +352,7 @@ class WorkspaceSettingsBundle {
     required this.playoutOutputSize,
     required this.osgWorkspaceConfig,
     required this.tagSemanticTypes,
+    required this.defaultClipVolume,
   });
 
   final TelestratorDefaults telestratorDefaults;
@@ -359,4 +382,8 @@ class WorkspaceSettingsBundle {
 
   /// Workspace-defined semantic tag types (for OSG slots and typed media tags).
   final List<TagSemanticType> tagSemanticTypes;
+
+  /// Initial clip volume (0.0–1.0) used when the workspace loads, before the
+  /// user adjusts via the volume hotkeys. Session adjustments are not persisted.
+  final double defaultClipVolume;
 }

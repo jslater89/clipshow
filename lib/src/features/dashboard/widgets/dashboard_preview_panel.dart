@@ -15,6 +15,7 @@ import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
+import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 class DashboardPreviewPanel extends StatefulWidget {
   const DashboardPreviewPanel({
@@ -136,6 +137,11 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                             onOsgPresetSlotToggle: workspaceRoot == null
                                 ? null
                                 : viewModel.togglePreviewOsgPresetSlot,
+                            onVolumeUpRequested: () => viewModel
+                                .nudgeClipVolume(PlaybackVolumeDefaults.step),
+                            onVolumeDownRequested: () => viewModel
+                                .nudgeClipVolume(-PlaybackVolumeDefaults.step),
+                            onMuteToggleRequested: viewModel.toggleClipMute,
                             child: Stack(
                               fit: StackFit.expand,
                               children: <Widget>[
@@ -160,6 +166,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                       : null,
                                   autoPlay: false,
                                   showControls: true,
+                                  volume: viewModel.effectiveClipVolume,
                                   onPositionChanged:
                                       viewModel.setPreviewPositionMs,
                                   onPlayingChanged: _onPreviewPlayingChanged,
@@ -194,6 +201,19 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                       text: viewModel.previewOsgRequirementFlashText,
                                       onDismissed: () => viewModel
                                           .clearPreviewOsgRequirementFlash(),
+                                    ),
+                                  ),
+                                if (viewModel.previewVolumeHudToken > 0)
+                                  Positioned(
+                                    right: pad12,
+                                    top: pad12,
+                                    child: TransientHudBanner(
+                                      key: ValueKey<int>(
+                                        viewModel.previewVolumeHudToken,
+                                      ),
+                                      text: viewModel.previewVolumeHudText,
+                                      onDismissed:
+                                          viewModel.clearPreviewVolumeHud,
                                     ),
                                   ),
                                 if (_showPreviewHelp)
@@ -537,6 +557,11 @@ class _PreviewHelpOverlay extends StatelessWidget {
                     "Shift + Left / Right": "Seek 15s",
                     "Alt + Left / Right": "Seek 0.1s",
                     "Home / End": "Jump To Start / End",
+                  }),
+                  SizedBox(height: gap10),
+                  _previewHotkeySection("Volume", <String, String>{
+                    "Up / Down": "Volume +/- 10%",
+                    "M": "Toggle Mute",
                   }),
                   if (showMarkHotkeys) ...<Widget>[
                     SizedBox(height: gap10),

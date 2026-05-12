@@ -65,6 +65,18 @@ class PreviewOsgPresetSlotIntent extends Intent {
   final OsgPresetSlot slot;
 }
 
+class PreviewVolumeUpIntent extends Intent {
+  const PreviewVolumeUpIntent();
+}
+
+class PreviewVolumeDownIntent extends Intent {
+  const PreviewVolumeDownIntent();
+}
+
+class PreviewToggleMuteIntent extends Intent {
+  const PreviewToggleMuteIntent();
+}
+
 class DashboardPreviewHotkeysLayer extends StatelessWidget {
   const DashboardPreviewHotkeysLayer({
     super.key,
@@ -76,6 +88,9 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
     this.onMarkOutRequested,
     this.onSaveClipRequested,
     this.onOsgPresetSlotToggle,
+    this.onVolumeUpRequested,
+    this.onVolumeDownRequested,
+    this.onMuteToggleRequested,
   });
 
   final Widget child;
@@ -86,6 +101,9 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
   final VoidCallback? onMarkOutRequested;
   final VoidCallback? onSaveClipRequested;
   final ValueChanged<OsgPresetSlot>? onOsgPresetSlotToggle;
+  final VoidCallback? onVolumeUpRequested;
+  final VoidCallback? onVolumeDownRequested;
+  final VoidCallback? onMuteToggleRequested;
 
   @override
   Widget build(BuildContext context) {
@@ -135,6 +153,15 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
           const SingleActivator(LogicalKeyboardKey.digit0):
               const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset5),
         },
+        if (onVolumeUpRequested != null)
+          const SingleActivator(LogicalKeyboardKey.arrowUp):
+              const PreviewVolumeUpIntent(),
+        if (onVolumeDownRequested != null)
+          const SingleActivator(LogicalKeyboardKey.arrowDown):
+              const PreviewVolumeDownIntent(),
+        if (onMuteToggleRequested != null)
+          const SingleActivator(LogicalKeyboardKey.keyM):
+              const PreviewToggleMuteIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -241,6 +268,24 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
                   return null;
                 },
               ),
+          PreviewVolumeUpIntent: CallbackAction<PreviewVolumeUpIntent>(
+            onInvoke: (_) {
+              onVolumeUpRequested?.call();
+              return null;
+            },
+          ),
+          PreviewVolumeDownIntent: CallbackAction<PreviewVolumeDownIntent>(
+            onInvoke: (_) {
+              onVolumeDownRequested?.call();
+              return null;
+            },
+          ),
+          PreviewToggleMuteIntent: CallbackAction<PreviewToggleMuteIntent>(
+            onInvoke: (_) {
+              onMuteToggleRequested?.call();
+              return null;
+            },
+          ),
         },
         child: Focus(focusNode: focusNode, autofocus: true, child: child),
       ),

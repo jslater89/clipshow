@@ -506,18 +506,21 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
               obsLastSuccessfulPingHms: _formatHms(_lastSuccessfulObsPingAt),
               scrollController: _dashboardScrollController,
             )
-          : PlayoutScreen(
-              clip: _activeClip!,
-              osgWorkspaceConfig: _viewModel.osgWorkspaceConfig,
-              workspaceRoot: _viewModel.workspacePath ?? "",
-              tagSemanticTypes: _viewModel.tagSemanticTypes,
-              telestratorDefaults: _viewModel.telestratorDefaults,
-              onResolveSemanticText: (int semanticTypeId) =>
-                  _viewModel.resolveSemanticTagText(
-                    _activeClip!,
-                    semanticTypeId,
-                  ),
-              onExitRequested: _exitPlayout,
+          : ChangeNotifierProvider<DashboardViewModel>.value(
+              value: _viewModel,
+              child: PlayoutScreen(
+                clip: _activeClip!,
+                osgWorkspaceConfig: _viewModel.osgWorkspaceConfig,
+                workspaceRoot: _viewModel.workspacePath ?? "",
+                tagSemanticTypes: _viewModel.tagSemanticTypes,
+                telestratorDefaults: _viewModel.telestratorDefaults,
+                onResolveSemanticText: (int semanticTypeId) =>
+                    _viewModel.resolveSemanticTagText(
+                      _activeClip!,
+                      semanticTypeId,
+                    ),
+                onExitRequested: _exitPlayout,
+              ),
             ),
     );
   }

@@ -1,5 +1,6 @@
 import "dart:async";
 import "dart:io";
+import "dart:math";
 
 import "package:flutter/material.dart";
 import "package:path/path.dart" as p;
@@ -196,9 +197,10 @@ class _OsgSinglePresetLayer extends StatelessWidget {
                                 : (semanticTextByTypeId[slot.semanticTypeId!] ??
                                     ""),
                         };
+                        final largestClamp = max(fh * 0.25, 6.0);
                         final double fontPx = (slot.fontSizeNorm * fh).clamp(
                           6.0,
-                          fh * 0.25,
+                          largestClamp,
                         );
                         final String? ff = slot.fontFamily;
                         return Positioned(

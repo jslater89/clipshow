@@ -2,8 +2,10 @@ import "dart:async";
 
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
+import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
+import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
 import "package:obs_clipshow/src/features/playout/osg_playout_layer.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
@@ -221,6 +223,7 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
   @override
   Widget build(BuildContext context) {
     final double edgeInset = scaleDimension(context, 16);
+    final DashboardViewModel viewModel = context.watch<DashboardViewModel>();
     return Scaffold(
       backgroundColor: Colors.black,
       body: PlayoutHotkeysLayer(
@@ -242,6 +245,11 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
         onDecreaseBrushRequested: _telestratorController.decreaseBrush,
         onIncreaseBrushRequested: _telestratorController.increaseBrush,
         onOsgPresetSlotToggle: _toggleOsgPreset,
+        onVolumeUpRequested: () =>
+            viewModel.nudgeClipVolume(PlaybackVolumeDefaults.step),
+        onVolumeDownRequested: () =>
+            viewModel.nudgeClipVolume(-PlaybackVolumeDefaults.step),
+        onMuteToggleRequested: viewModel.toggleClipMute,
         child: Stack(
           fit: StackFit.expand,
           children: <Widget>[
@@ -253,6 +261,7 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
               initialPositionMs: widget.clip.initialPositionMs,
               autoPlay: true,
               videoBoxFit: BoxFit.contain,
+              volume: viewModel.effectiveClipVolume,
             ),
             Positioned.fill(
               child: OsgPlayoutLayer(
@@ -480,6 +489,11 @@ class _PlayoutHelpOverlay extends StatelessWidget {
                     "Ctrl + Left / Right": "Seek 5s",
                     "Shift + Left / Right": "Seek 15s",
                     "Alt + Left / Right": "Seek 0.1s",
+                  }),
+                  SizedBox(height: gap10),
+                  _hotkeySection("Volume", <String, String>{
+                    "Up / Down": "Volume +/- 10%",
+                    "M": "Toggle Mute",
                   }),
                   SizedBox(height: gap10),
                   _hotkeySection("Telestrator", <String, String>{

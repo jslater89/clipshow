@@ -54,6 +54,7 @@ class ClipPlayerView extends StatefulWidget {
     this.onPlayingChanged,
     this.controller,
     this.videoBoxFit = BoxFit.contain,
+    this.volume = 1.0,
   });
 
   final String filePath;
@@ -76,6 +77,10 @@ class ClipPlayerView extends StatefulWidget {
 
   /// How the decoded video is fitted inside the player (e.g. [BoxFit.contain] vs [BoxFit.cover]).
   final BoxFit videoBoxFit;
+
+  /// Audio volume in the range 0.0–1.0. Applied on init and whenever it changes
+  /// (without reinitializing the underlying [VideoPlayerController]).
+  final double volume;
 
   @override
   State<ClipPlayerView> createState() => _ClipPlayerViewState();
@@ -140,6 +145,11 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         oldWidget.autoPlay != widget.autoPlay ||
         oldWidget.showControls != widget.showControls) {
       _reinitializeController(reason: "didUpdateWidget");
+    } else if (oldWidget.volume != widget.volume) {
+      final VideoPlayerController? controller = _controller;
+      if (controller != null && controller.value.isInitialized) {
+        unawaited(controller.setVolume(widget.volume.clamp(0.0, 1.0)));
+      }
     }
   }
 
@@ -186,6 +196,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         await controller.dispose();
         return;
       }
+      await controller.setVolume(widget.volume.clamp(0.0, 1.0));
       controller.addListener(_handlePlaybackProgress);
       if (widget.autoPlay) {
         await controller.play();
@@ -327,6 +338,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         await newController.dispose();
         return;
       }
+      await newController.setVolume(widget.volume.clamp(0.0, 1.0));
       _naturalEndPauseApplied = false;
       _reachedEnd = false;
       // Swap: detach the old listener before reassigning _controller so that

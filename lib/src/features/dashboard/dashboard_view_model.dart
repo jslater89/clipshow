@@ -125,6 +125,20 @@ class DashboardViewModel extends ChangeNotifier {
   int _previewOsgRequirementFlashToken = 0;
   String _previewOsgRequirementFlashText = "";
 
+  /// Session-only clip volume (0.0–1.0), shared between preview and playout.
+  /// Initialized once from [WorkspaceSettingsBundle.defaultClipVolume] on the
+  /// first workspace settings load; user adjustments via hotkeys live only
+  /// for the current app run.
+  double _clipVolume = PlaybackVolumeDefaults.defaultVolume;
+  bool _clipMuted = false;
+
+  /// Volume at the moment [toggleClipMute] was called, so unmuting restores
+  /// the exact prior level. Kept in sync with [_clipVolume] while unmuted.
+  double _preMuteClipVolume = PlaybackVolumeDefaults.defaultVolume;
+  bool _clipVolumeInitializedFromWorkspace = false;
+  int _previewVolumeHudToken = 0;
+  String _previewVolumeHudText = "";
+
   /// Bumps per [MediaListItem.stableKey] when that row’s tag attachments
   /// change in a way that affects OSG semantic resolution.
   final Map<String, int> _semanticTagSnapshotByItemKey = <String, int>{};
@@ -225,6 +239,77 @@ class DashboardViewModel extends ChangeNotifier {
   void _flashPreviewOsgRequirementMessage(String text) {
     _previewOsgRequirementFlashText = text;
     _previewOsgRequirementFlashToken++;
+    notifyListeners();
+  }
+
+  /// Volume currently configured for clip playback (preview + playout).
+  /// This is the user's intended level; if [clipMuted] is true the audible
+  /// value is 0 (see [effectiveClipVolume]).
+  double get clipVolume => _clipVolume;
+
+  bool get clipMuted => _clipMuted;
+
+  /// Volume passed to [ClipPlayerView] — zero when muted.
+  double get effectiveClipVolume => _clipMuted ? 0.0 : _clipVolume;
+
+  double get defaultClipVolume =>
+      _workspaceSettings?.defaultClipVolume ??
+      PlaybackVolumeDefaults.defaultVolume;
+
+  int get previewVolumeHudToken => _previewVolumeHudToken;
+
+  String get previewVolumeHudText => _previewVolumeHudText;
+
+  void clearPreviewVolumeHud() {
+    if (_previewVolumeHudToken == 0) {
+      return;
+    }
+    _previewVolumeHudToken = 0;
+    _previewVolumeHudText = "";
+    notifyListeners();
+  }
+
+  void _flashPreviewVolumeHud(String text) {
+    _previewVolumeHudText = text;
+    _previewVolumeHudToken++;
+  }
+
+  String _formatVolumePercent(double value) {
+    return "Volume ${(PlaybackVolumeDefaults.clamp(value) * 100).round()}%";
+  }
+
+  /// Nudge the shared session clip volume by [delta] (positive or negative,
+  /// typically [PlaybackVolumeDefaults.step]). Unmutes if currently muted.
+  void nudgeClipVolume(double delta) {
+    final double next = PlaybackVolumeDefaults.clamp(_clipVolume + delta);
+    final bool changedVolume = next != _clipVolume;
+    final bool wasMuted = _clipMuted;
+    _clipVolume = next;
+    _preMuteClipVolume = next;
+    if (wasMuted) {
+      _clipMuted = false;
+    }
+    if (!changedVolume && !wasMuted) {
+      _flashPreviewVolumeHud(_formatVolumePercent(_clipVolume));
+      notifyListeners();
+      return;
+    }
+    _flashPreviewVolumeHud(_formatVolumePercent(_clipVolume));
+    notifyListeners();
+  }
+
+  /// Toggle mute on the shared clip volume. Unmuting restores the level that
+  /// was active when mute was engaged.
+  void toggleClipMute() {
+    if (_clipMuted) {
+      _clipMuted = false;
+      _clipVolume = _preMuteClipVolume;
+      _flashPreviewVolumeHud(_formatVolumePercent(_clipVolume));
+    } else {
+      _preMuteClipVolume = _clipVolume;
+      _clipMuted = true;
+      _flashPreviewVolumeHud("Muted");
+    }
     notifyListeners();
   }
 
@@ -1465,6 +1550,21 @@ class DashboardViewModel extends ChangeNotifier {
     }
     _workspaceSettings = await repository.loadWorkspaceSettings();
     _syncIngestionConcurrencyFromWorkspace();
+    _maybeApplyInitialClipVolumeFromWorkspace();
+  }
+
+  void _maybeApplyInitialClipVolumeFromWorkspace() {
+    if (_clipVolumeInitializedFromWorkspace) {
+      return;
+    }
+    final WorkspaceSettingsBundle? bundle = _workspaceSettings;
+    if (bundle == null) {
+      return;
+    }
+    _clipVolume = PlaybackVolumeDefaults.clamp(bundle.defaultClipVolume);
+    _preMuteClipVolume = _clipVolume;
+    _clipMuted = false;
+    _clipVolumeInitializedFromWorkspace = true;
   }
 
   void _syncIngestionConcurrencyFromWorkspace() {
@@ -1835,6 +1935,16 @@ class DashboardViewModel extends ChangeNotifier {
       return;
     }
     await repository.saveIngestThumbnailConcurrency(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> saveDefaultClipVolume(double value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveDefaultClipVolume(value);
     await _loadWorkspaceSettings();
     notifyListeners();
   }

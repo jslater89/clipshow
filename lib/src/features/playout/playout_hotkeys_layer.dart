@@ -85,6 +85,18 @@ class PlayoutOsgPresetSlotIntent extends Intent {
   final OsgPresetSlot slot;
 }
 
+class PlayoutVolumeUpIntent extends Intent {
+  const PlayoutVolumeUpIntent();
+}
+
+class PlayoutVolumeDownIntent extends Intent {
+  const PlayoutVolumeDownIntent();
+}
+
+class PlayoutToggleMuteIntent extends Intent {
+  const PlayoutToggleMuteIntent();
+}
+
 class PlayoutHotkeysLayer extends StatelessWidget {
   const PlayoutHotkeysLayer({
     super.key,
@@ -101,6 +113,9 @@ class PlayoutHotkeysLayer extends StatelessWidget {
     this.onDecreaseBrushRequested,
     this.onIncreaseBrushRequested,
     this.onOsgPresetSlotToggle,
+    this.onVolumeUpRequested,
+    this.onVolumeDownRequested,
+    this.onMuteToggleRequested,
   });
 
   final ClipPlayerController controller;
@@ -116,6 +131,9 @@ class PlayoutHotkeysLayer extends StatelessWidget {
   final VoidCallback? onDecreaseBrushRequested;
   final VoidCallback? onIncreaseBrushRequested;
   final ValueChanged<OsgPresetSlot>? onOsgPresetSlotToggle;
+  final VoidCallback? onVolumeUpRequested;
+  final VoidCallback? onVolumeDownRequested;
+  final VoidCallback? onMuteToggleRequested;
 
   @override
   Widget build(BuildContext context) {
@@ -180,6 +198,15 @@ class PlayoutHotkeysLayer extends StatelessWidget {
           const SingleActivator(LogicalKeyboardKey.digit0):
               const PlayoutOsgPresetSlotIntent(OsgPresetSlot.preset5),
         },
+        if (onVolumeUpRequested != null)
+          const SingleActivator(LogicalKeyboardKey.arrowUp):
+              const PlayoutVolumeUpIntent(),
+        if (onVolumeDownRequested != null)
+          const SingleActivator(LogicalKeyboardKey.arrowDown):
+              const PlayoutVolumeDownIntent(),
+        if (onMuteToggleRequested != null)
+          const SingleActivator(LogicalKeyboardKey.keyM):
+              const PlayoutToggleMuteIntent(),
         const SingleActivator(LogicalKeyboardKey.escape): const DismissIntent(),
       },
       child: Actions(
@@ -325,6 +352,24 @@ class PlayoutHotkeysLayer extends StatelessWidget {
                   return null;
                 },
               ),
+          PlayoutVolumeUpIntent: CallbackAction<PlayoutVolumeUpIntent>(
+            onInvoke: (_) {
+              onVolumeUpRequested?.call();
+              return null;
+            },
+          ),
+          PlayoutVolumeDownIntent: CallbackAction<PlayoutVolumeDownIntent>(
+            onInvoke: (_) {
+              onVolumeDownRequested?.call();
+              return null;
+            },
+          ),
+          PlayoutToggleMuteIntent: CallbackAction<PlayoutToggleMuteIntent>(
+            onInvoke: (_) {
+              onMuteToggleRequested?.call();
+              return null;
+            },
+          ),
           DismissIntent: CallbackAction<DismissIntent>(
             onInvoke: (_) {
               onExitRequested();

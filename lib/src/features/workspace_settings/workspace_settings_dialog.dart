@@ -52,6 +52,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
   bool _initialized = false;
   late TelestratorDefaults _draftTelestratorDefaults;
   late List<DecoderProfile> _enabledDecoders;
+  late double _draftDefaultClipVolume;
   WebhookMethod _newWebhookMethod = WebhookMethod.post;
   WebhookPostBodyType _newWebhookPostBodyType = WebhookPostBodyType.json;
 
@@ -169,6 +170,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
           "${viewModel.ingestProbeConcurrency}";
       _ingestThumbnailConcurrencyController.text =
           "${viewModel.ingestThumbnailConcurrency}";
+      _draftDefaultClipVolume = PlaybackVolumeDefaults.clamp(
+        viewModel.defaultClipVolume,
+      );
       _initialized = true;
     }
 
@@ -547,6 +551,59 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
               Text(
                 "Future: decoder options list should be populated by platform/capability.",
                 style: theme.textTheme.bodySmall,
+              ),
+              Divider(height: scaleDimension(context, 24)),
+              _SectionTitle("Playback", theme),
+              SizedBox(height: scaleDimension(context, 8)),
+              Text(
+                "Default clip volume applied when the workspace loads. "
+                "Adjust during playback with Up/Down (\u00B110%) and M (mute); "
+                "those adjustments are session-only.",
+                style: theme.textTheme.bodySmall,
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  Expanded(
+                    child: Slider(
+                      value: _draftDefaultClipVolume,
+                      min: PlaybackVolumeDefaults.min,
+                      max: PlaybackVolumeDefaults.max,
+                      divisions: 20,
+                      label:
+                          "${(_draftDefaultClipVolume * 100).round()}%",
+                      onChanged: (double value) => setState(() {
+                        _draftDefaultClipVolume =
+                            PlaybackVolumeDefaults.clamp(value);
+                      }),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  SizedBox(
+                    width: scaleDimension(context, 64),
+                    child: Text(
+                      "${(_draftDefaultClipVolume * 100).round()}%",
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 12)),
+                  _AsyncFilledButton(
+                    label: "Save",
+                    onPressed: () async {
+                      await viewModel.saveDefaultClipVolume(
+                        _draftDefaultClipVolume,
+                      );
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Default clip volume saved."),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
               Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Ingestion & preview", theme),

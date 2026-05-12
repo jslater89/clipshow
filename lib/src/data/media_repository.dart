@@ -750,6 +750,7 @@ class MediaRepository {
     final OsgWorkspaceConfig osgWorkspaceConfig =
         await _loadOsgWorkspaceConfig();
     final List<TagSemanticType> semanticTypes = await listTagSemanticTypes();
+    final double defaultClipVolume = await _loadDefaultClipVolume();
     return WorkspaceSettingsBundle(
       telestratorDefaults: telestratorDefaults,
       decoderConfig: decoderConfig,
@@ -765,6 +766,7 @@ class MediaRepository {
       playoutOutputSize: playoutOutputSize,
       osgWorkspaceConfig: osgWorkspaceConfig,
       tagSemanticTypes: semanticTypes,
+      defaultClipVolume: defaultClipVolume,
     );
   }
 
@@ -1070,6 +1072,26 @@ class MediaRepository {
     await _putWorkspaceSetting(
       "ingestion.thumbnailConcurrency",
       "${IngestionConcurrencyDefaults.clampThumbnail(value)}",
+    );
+  }
+
+  Future<double> _loadDefaultClipVolume() async {
+    final String? raw = await _getWorkspaceSetting("playback.defaultClipVolume");
+    if (raw == null) {
+      return PlaybackVolumeDefaults.defaultVolume;
+    }
+    final double? parsed = double.tryParse(raw);
+    if (parsed == null) {
+      return PlaybackVolumeDefaults.defaultVolume;
+    }
+    return PlaybackVolumeDefaults.clamp(parsed);
+  }
+
+  Future<void> saveDefaultClipVolume(double value) async {
+    final double clamped = PlaybackVolumeDefaults.clamp(value);
+    await _putWorkspaceSetting(
+      "playback.defaultClipVolume",
+      clamped.toString(),
     );
   }
 

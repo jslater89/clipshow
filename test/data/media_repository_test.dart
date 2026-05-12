@@ -846,6 +846,10 @@ void main() {
           settings.ingestThumbnailConcurrency,
           IngestionConcurrencyDefaults.thumbnailDefault,
         );
+        expect(
+          settings.defaultClipVolume,
+          PlaybackVolumeDefaults.defaultVolume,
+        );
 
         await repository.savePauseIngestScanDuringPreview(false);
         expect(
@@ -871,6 +875,23 @@ void main() {
         expect(
           clamped.ingestThumbnailConcurrency,
           IngestionConcurrencyDefaults.thumbnailMin,
+        );
+
+        await repository.saveDefaultClipVolume(0.4);
+        final WorkspaceSettingsBundle volumeTuned =
+            await repository.loadWorkspaceSettings();
+        expect(volumeTuned.defaultClipVolume, closeTo(0.4, 1e-9));
+
+        await repository.saveDefaultClipVolume(2.0);
+        expect(
+          (await repository.loadWorkspaceSettings()).defaultClipVolume,
+          PlaybackVolumeDefaults.max,
+        );
+
+        await repository.saveDefaultClipVolume(-1.0);
+        expect(
+          (await repository.loadWorkspaceSettings()).defaultClipVolume,
+          PlaybackVolumeDefaults.min,
         );
 
         await repository.saveObsSceneSwitchConfig(null);
