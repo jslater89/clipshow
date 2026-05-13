@@ -293,9 +293,11 @@ class _OsgSinglePresetLayerState extends State<_OsgSinglePresetLayer>
                         textAlign: osgSlotTextAlignToFlutterTextAlign(
                           slot.textAlign,
                         ),
-                        maxLines: slot.textSource == OsgTextSource.annotation
-                            ? 12
-                            : 3,
+                        maxLines: switch (slot.textSource) {
+                          OsgTextSource.annotation => 12,
+                          OsgTextSource.fixed => 12,
+                          OsgTextSource.semantic => 3,
+                        },
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: Color(slot.textColorArgb),

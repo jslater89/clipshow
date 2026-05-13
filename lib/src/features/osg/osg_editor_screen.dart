@@ -1,5 +1,6 @@
 import "dart:async";
 import "dart:io";
+import "dart:typed_data";
 
 import "package:file_picker/file_picker.dart";
 import "package:flutter/material.dart";
@@ -16,6 +17,7 @@ import "package:obs_clipshow/src/features/osg/osg_template_aspect.dart";
 import "package:obs_clipshow/src/features/osg/widgets/osg_preset_canvas_preview.dart";
 import "package:obs_clipshow/src/features/osg/widgets/osg_semantic_type_icon_picker.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/osg/osg_preset_pack_zip.dart";
 import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
 import "package:obs_clipshow/src/widgets/rgba_color_picker.dart";
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
@@ -285,6 +287,183 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
     });
   }
 
+  Future<int?> _promptCopyPresetSource(
+    BuildContext context,
+    int excludeIndex,
+  ) {
+    return showDialog<int>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: const Text("Copy Settings From"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (int i = 0; i < 5; i++)
+                  if (i != excludeIndex)
+                    ListTile(
+                      title: Text(
+                        "Preset ${OsgPresetSlot.values[i].playoutHotkeyDigitLabel}",
+                      ),
+                      onTap: () => Navigator.pop(ctx, i),
+                    ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _copyPresetFromAnother(
+    BuildContext context,
+    int targetIndex,
+  ) async {
+    final int? source = await _promptCopyPresetSource(context, targetIndex);
+    if (!context.mounted || source == null) {
+      return;
+    }
+    final OsgPreset src = _draftOsg.workspacePresets[source];
+    final OsgPreset clone = OsgPreset.fromJson(
+      Map<String, Object?>.from(src.toJson()),
+    );
+    _replacePreset(targetIndex, clone);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Copied settings from preset "
+            "${OsgPresetSlot.values[source].playoutHotkeyDigitLabel}.",
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _exportOsgPresetPack(BuildContext context) async {
+    final Uint8List bytes = buildOsgPresetPackZip(
+      workspaceRoot: widget.workspaceRoot,
+      config: _draftOsg,
+    );
+    final String stamp = DateTime.now().toUtc().toIso8601String().replaceAll(
+      RegExp(r"[:.-]"),
+      "",
+    );
+    final String? path = await FilePicker.saveFile(
+      dialogTitle: "Export OSG presets",
+      fileName: "osg_presets_$stamp.zip",
+      type: FileType.custom,
+      allowedExtensions: const <String>["zip"],
+    );
+    if (!context.mounted || path == null) {
+      return;
+    }
+    try {
+      await File(path).writeAsBytes(bytes, flush: true);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Exported to $path")),
+        );
+      }
+    } on Object catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Export failed: $e")),
+        );
+      }
+    }
+  }
+
+  Future<void> _importOsgPresetPack(BuildContext context) async {
+    final FilePickerResult? result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const <String>["zip"],
+      withData: true,
+    );
+    if (!context.mounted || result == null || result.files.isEmpty) {
+      return;
+    }
+    final PlatformFile f = result.files.single;
+    Uint8List? bytes = f.bytes;
+    if (bytes == null && f.path != null) {
+      try {
+        bytes = await File(f.path!).readAsBytes();
+      } on Object catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Could not read file: $e")),
+          );
+        }
+        return;
+      }
+    }
+    if (bytes == null || bytes.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Empty or unreadable ZIP.")),
+        );
+      }
+      return;
+    }
+    final OsgPresetPackImportResult r = await importOsgPresetPackFromZipBytes(
+      workspaceRoot: widget.workspaceRoot,
+      zipBytes: bytes,
+    );
+    if (!context.mounted) {
+      return;
+    }
+    if (!r.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            r.warnings.isEmpty ? "Import failed." : r.warnings.join(" "),
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _draftOsg = r.config;
+    });
+    if (!context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          r.warnings.isEmpty
+              ? "Imported OSG presets from ZIP."
+              : "Imported OSG presets (${r.warnings.length} warning(s)).",
+        ),
+      ),
+    );
+    if (r.warnings.isNotEmpty && context.mounted) {
+      await showDialog<void>(
+        context: context,
+        builder: (BuildContext ctx) => AlertDialog(
+          title: const Text("Import Warnings"),
+          content: SingleChildScrollView(
+            child: Text(r.warnings.join("\n")),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Close"),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final DashboardViewModel vm = context.watch<DashboardViewModel>();
@@ -292,6 +471,16 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
       appBar: AppBar(
         title: const Text("On-screen graphics"),
         actions: <Widget>[
+          IconButton(
+            tooltip: "Export OSG presets (ZIP)",
+            icon: const Icon(Icons.folder_zip_outlined),
+            onPressed: () => unawaited(_exportOsgPresetPack(context)),
+          ),
+          IconButton(
+            tooltip: "Import OSG presets (ZIP)",
+            icon: const Icon(Icons.unarchive_outlined),
+            onPressed: () => unawaited(_importOsgPresetPack(context)),
+          ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text("Done"),
@@ -635,64 +824,76 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
-            SegmentedButton<OsgTemplateBackgroundKind>(
-              segments: const <ButtonSegment<OsgTemplateBackgroundKind>>[
-                ButtonSegment<OsgTemplateBackgroundKind>(
-                  value: OsgTemplateBackgroundKind.image,
-                  label: Text("Image"),
-                  icon: Icon(Icons.image_outlined, size: 18),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[
+                SegmentedButton<OsgTemplateBackgroundKind>(
+                  segments: const <ButtonSegment<OsgTemplateBackgroundKind>>[
+                    ButtonSegment<OsgTemplateBackgroundKind>(
+                      value: OsgTemplateBackgroundKind.image,
+                      label: Text("Image"),
+                      icon: Icon(Icons.image_outlined, size: 18),
+                    ),
+                    ButtonSegment<OsgTemplateBackgroundKind>(
+                      value: OsgTemplateBackgroundKind.solid,
+                      label: Text("Color"),
+                      icon: Icon(Icons.format_color_fill, size: 18),
+                    ),
+                  ],
+                  selected: <OsgTemplateBackgroundKind>{
+                    preset.templateBackgroundKind,
+                  },
+                  onSelectionChanged: (Set<OsgTemplateBackgroundKind> next) {
+                    if (next.isEmpty) {
+                      return;
+                    }
+                    final OsgTemplateBackgroundKind k = next.single;
+                    if (k == OsgTemplateBackgroundKind.image) {
+                      _replacePreset(
+                        index,
+                        preset.copyWith(
+                          templateBackgroundKind: k,
+                          templateSolidWidthPx: 0,
+                          templateSolidHeightPx: 0,
+                        ),
+                      );
+                      return;
+                    }
+                    int w = preset.templateSolidWidthPx;
+                    int h = preset.templateSolidHeightPx;
+                    if (w <= 0 || h <= 0) {
+                      final double? a = preset.templatePixelAspect;
+                      if (a != null && a > 1e-9) {
+                        h = 720;
+                        w = (a * h).round().clamp(8, 999999);
+                      } else {
+                        final (int fw, int fh) = osgSolidTemplatePixelsForFrame(
+                          preset.frame,
+                          vm.playoutOutputSize,
+                        );
+                        w = fw;
+                        h = fh;
+                      }
+                    }
+                    _replacePreset(
+                      index,
+                      preset.copyWith(
+                        templateBackgroundKind: k,
+                        templateSolidWidthPx: w,
+                        templateSolidHeightPx: h,
+                        templatePixelAspect: w / h,
+                      ),
+                    );
+                  },
                 ),
-                ButtonSegment<OsgTemplateBackgroundKind>(
-                  value: OsgTemplateBackgroundKind.solid,
-                  label: Text("Color"),
-                  icon: Icon(Icons.format_color_fill, size: 18),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () => unawaited(
+                    _copyPresetFromAnother(context, index),
+                  ),
+                  child: const Text("Copy From…"),
                 ),
               ],
-              selected: <OsgTemplateBackgroundKind>{
-                preset.templateBackgroundKind,
-              },
-              onSelectionChanged: (Set<OsgTemplateBackgroundKind> next) {
-                if (next.isEmpty) {
-                  return;
-                }
-                final OsgTemplateBackgroundKind k = next.single;
-                if (k == OsgTemplateBackgroundKind.image) {
-                  _replacePreset(
-                    index,
-                    preset.copyWith(
-                      templateBackgroundKind: k,
-                      templateSolidWidthPx: 0,
-                      templateSolidHeightPx: 0,
-                    ),
-                  );
-                  return;
-                }
-                int w = preset.templateSolidWidthPx;
-                int h = preset.templateSolidHeightPx;
-                if (w <= 0 || h <= 0) {
-                  final double? a = preset.templatePixelAspect;
-                  if (a != null && a > 1e-9) {
-                    h = 720;
-                    w = (a * h).round().clamp(8, 999999);
-                  } else {
-                    final (int fw, int fh) = osgSolidTemplatePixelsForFrame(
-                      preset.frame,
-                      vm.playoutOutputSize,
-                    );
-                    w = fw;
-                    h = fh;
-                  }
-                }
-                _replacePreset(
-                  index,
-                  preset.copyWith(
-                    templateBackgroundKind: k,
-                    templateSolidWidthPx: w,
-                    templateSolidHeightPx: h,
-                    templatePixelAspect: w / h,
-                  ),
-                );
-              },
             ),
             const SizedBox(height: 8),
             Wrap(
@@ -1217,7 +1418,7 @@ class _OsgSlotRowState extends State<_OsgSlotRow> {
             ],
           ),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Expanded(
                 flex: 2,
@@ -1255,8 +1456,14 @@ class _OsgSlotRowState extends State<_OsgSlotRow> {
                         "fixed_${widget.presetIndex}_${widget.slotIndex}",
                       ),
                       initialValue: slot.fixedText,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      minLines: 2,
+                      maxLines: 12,
+                      textAlignVertical: TextAlignVertical.top,
                       decoration: const InputDecoration(
                         labelText: "Fixed text",
+                        alignLabelWithHint: true,
                         isDense: true,
                       ),
                       onChanged: (String v) =>
