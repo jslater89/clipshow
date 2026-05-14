@@ -113,6 +113,7 @@ class DashboardViewModel extends ChangeNotifier {
   int? _clipsOfMasterFilterMediaId;
   WorkspaceSettingsBundle? _workspaceSettings;
   bool _dashboardPreviewPlaybackActive = false;
+  DateTime? _previewPlayerInitNotBefore;
   DashboardMediaPaneTab _mediaPaneTab = DashboardMediaPaneTab.manage;
   final List<ShelfTagEntry> _captureTags = <ShelfTagEntry>[];
   bool _obsCaptureRecording = false;
@@ -1895,6 +1896,31 @@ class DashboardViewModel extends ChangeNotifier {
 
   void setPlayoutActive(bool active) {
     _ingestionService.setPlayoutActive(active);
+    if (active) {
+      _previewPlayerInitNotBefore = null;
+    } else {
+      _previewPlayerInitNotBefore = DateTime.now().add(
+        _kPreviewPlayerInitDelayAfterPlayout,
+      );
+    }
+  }
+
+  static const Duration _kPreviewPlayerInitDelayAfterPlayout = Duration(
+    milliseconds: 450,
+  );
+
+  /// Lets the dashboard preview [ClipPlayerView] wait briefly after playout ends
+  /// so the prior player can finish native teardown before a new decoder opens.
+  Future<void> awaitPreviewPlayerInitGate() async {
+    final DateTime? until = _previewPlayerInitNotBefore;
+    if (until == null) {
+      return;
+    }
+    final DateTime now = DateTime.now();
+    if (until.isAfter(now)) {
+      await Future<void>.delayed(until.difference(now));
+    }
+    _previewPlayerInitNotBefore = null;
   }
 
   void setPreviewPlaying(bool playing) {

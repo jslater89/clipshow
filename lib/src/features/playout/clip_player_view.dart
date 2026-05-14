@@ -55,6 +55,7 @@ class ClipPlayerView extends StatefulWidget {
     this.controller,
     this.videoBoxFit = BoxFit.contain,
     this.volume = 1.0,
+    this.beforeVideoInitialize,
   });
 
   final String filePath;
@@ -77,6 +78,10 @@ class ClipPlayerView extends StatefulWidget {
 
   /// How the decoded video is fitted inside the player (e.g. [BoxFit.contain] vs [BoxFit.cover]).
   final BoxFit videoBoxFit;
+
+  /// When non-null, awaited at the start of each video controller init (after
+  /// dispose). Used e.g. to stagger dashboard preview init after playout teardown.
+  final Future<void> Function()? beforeVideoInitialize;
 
   /// Audio volume in the range 0.0–1.0. Applied on init and whenever it changes
   /// (without reinitializing the underlying [VideoPlayerController]).
@@ -166,6 +171,22 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     setState(() {
       _errorMessage = null;
     });
+
+    final Future<void> Function()? gate = widget.beforeVideoInitialize;
+    if (gate != null) {
+      try {
+        await gate();
+      } catch (error, stackTrace) {
+        _logger.warning(
+          "beforeVideoInitialize failed: $error",
+          error,
+          stackTrace,
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+    }
 
     try {
       final VideoPlayerController controller = VideoPlayerController.file(

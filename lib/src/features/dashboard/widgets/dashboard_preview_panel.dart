@@ -148,6 +148,8 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                 ClipPlayerView(
                                   clickTogglesPlayback: true,
                                   controller: _previewPlayerController,
+                                  beforeVideoInitialize:
+                                      viewModel.awaitPreviewPlayerInitGate,
                                   filePath: workspaceRoot == null
                                       ? selectedItem.filePath
                                       : WorkspaceMediaPaths.absoluteMasterPath(
