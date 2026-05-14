@@ -1,0 +1,12 @@
+---
+description: Dart string and UI copy conventions for obs_clipshow
+globs: lib/**/*.dart
+alwaysApply: false
+---
+
+# Dart Style (This Repo)
+
+- Prefer **double-quoted** string literals.
+- Prefer **Title Case** for user-visible labels and menu items. Keep **sentence case** (or platform default) only for top-level scaffold titles and similar very top-level chrome if that matches existing screens.
+- Match surrounding files for imports, naming, and widget structure; do not introduce a second style in the same feature.
+- Respect `analysis_options.yaml` and `flutter_lints`; do not disable or ignore lints in passing edits unless the user asks.

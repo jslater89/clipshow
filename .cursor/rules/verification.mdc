@@ -1,0 +1,8 @@
+---
+description: Run analyzer (and tests when relevant) after substantive edits
+alwaysApply: true
+---
+
+# Verification
+
+After non-trivial Dart changes, run **`dart analyze`** on touched paths or the whole package before finishing. If the area has **`flutter_test`** coverage, run the relevant tests or `flutter test` when the change affects behavior under test. Fix analyzer errors introduced by the edit (including constructor/catch mistakes easy to miss in large widgets).

@@ -1,0 +1,13 @@
+---
+description: OSG preset JSON schema, migrations, and pack export
+globs:
+  - lib/src/osg/**/*.dart
+  - lib/src/features/osg/**/*.dart
+alwaysApply: false
+---
+
+# OSG Preset Persistence
+
+- Serialized presets use **`schemaVersion`** (see `osgPresetSchemaVersion` in `osg_models.dart`). If JSON shape or required fields change, bump the version and implement decode migration for older versions when applicable.
+- If new fields affect **ZIP preset packs** (`osg_preset_pack_zip.dart` or related), verify export and import round-trip and asset paths.
+- After model changes, update **editor** controls and any **playout / preview** layers that read the new fields so draft and live behavior stay aligned.

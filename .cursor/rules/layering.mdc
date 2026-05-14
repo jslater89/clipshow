@@ -1,0 +1,14 @@
+---
+description: Where UI, data, workspace, and OSG model code belong
+globs: lib/**/*.dart
+alwaysApply: false
+---
+
+# Layering
+
+- **`lib/src/features/**`**: Screens, widgets, feature view models. Orchestrate user actions; keep files focused on one feature where possible.
+- **`lib/src/data/**`**: Repositories, persistence, filesystem and DB access. View models call into here instead of duplicating IO or query logic.
+- **`lib/src/workspace/**`**: Workspace-level settings and configuration shared across features.
+- **`lib/src/osg/**`**: Shared OSG domain models and serialization (`osg_models.dart`, etc.). Editor and playout both consume these types.
+
+Avoid new “grab bag” coupling: if something touches OBS, SQLite, or paths, prefer extending an existing repository or service rather than growing unrelated widgets.

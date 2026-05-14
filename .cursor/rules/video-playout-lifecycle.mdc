@@ -1,0 +1,15 @@
+---
+description: Async video teardown, preview vs playout, no blocking scene switches
+globs:
+  - lib/src/features/playout/**/*.dart
+  - lib/src/features/dashboard/dashboard_view_model.dart
+  - lib/src/features/dashboard/widgets/dashboard_preview*.dart
+alwaysApply: false
+---
+
+# Video / Playout Lifecycle
+
+- **Do not block** leaving playout or switching OBS scenes on full `VideoPlayerController` teardown. Teardown can finish asynchronously; UI should still transition promptly.
+- **Avoid decoder races**: starting a new `VideoPlayerController.initialize()` while another player for the same machine is still disposing can freeze or glitch (especially dashboard preview right after playout). If adding another player path, consider staggering (e.g. gate before init) and always `mounted` checks after any `await`.
+- Playout `ClipPlayerView` and dashboard preview may differ: preview-only hooks (e.g. delayed init) must not change playout behavior unless intentional.
+- Relevant files beyond this glob: `dashboard_preview_panel.dart`, `dashboard_view_model.dart`, `clip_player_view.dart`.
