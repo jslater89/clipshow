@@ -16,7 +16,9 @@ import "package:obs_clipshow/src/features/playout/playout_screen.dart";
 import "package:obs_clipshow/src/features/workspace_settings/workspace_settings_dialog.dart";
 import "package:obs_clipshow/src/obs/obs_service.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/util/reveal_file_in_folder.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
+import "package:path/path.dart" as p;
 
 enum PlayoutWindowMode { windowed, fullscreen }
 
@@ -49,6 +51,9 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   Rect? _prePlayoutBounds;
   bool _wasMaximizedBeforePlayout = false;
   PlayoutClip? _activeClip;
+  Completer<void>? _playoutFirstFrameCompleter;
+  bool _pendingPlayoutRecord = false;
+  static const Duration _playoutFirstFrameTimeout = Duration(seconds: 30);
   Timer? _obsPingTimer;
   String? _obsConfigKey;
   bool _obsPingInFlight = false;
@@ -198,7 +203,9 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     );
   }
 
-  Future<void> _enterPlayout(PlayoutClip clip) async {
+  Future<void> _enterPlayout(PlayoutClip clip, {bool record = false}) async {
+    _pendingPlayoutRecord = record;
+    _playoutFirstFrameCompleter = Completer<void>();
     _viewModel.setPlayoutActive(true);
     if (_dashboardScrollController.hasClients) {
       _lastDashboardScrollOffset = _dashboardScrollController.offset;
@@ -213,10 +220,54 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     setState(() {
       _activeClip = clip;
     });
+    final Completer<void>? gate = _playoutFirstFrameCompleter;
+    if (gate != null) {
+      try {
+        await gate.future.timeout(_playoutFirstFrameTimeout);
+      } on TimeoutException {
+        _logger.warning(
+          "Playout first frame not ready within "
+          "${_playoutFirstFrameTimeout.inSeconds}s; switching OBS anyway.",
+        );
+        _completePlayoutFirstFrameGate();
+      }
+    }
+    if (!mounted || _activeClip == null) {
+      return;
+    }
     await _switchToVideoScene();
+    if (_pendingPlayoutRecord) {
+      final String? recordError = await _viewModel.startPlayoutRecord();
+      if (recordError != null) {
+        _showAppSnackBar(recordError);
+      }
+    }
+    _pendingPlayoutRecord = false;
+  }
+
+  void _onPlayoutFirstFrameReady() {
+    _completePlayoutFirstFrameGate();
+  }
+
+  void _completePlayoutFirstFrameGate() {
+    final Completer<void>? gate = _playoutFirstFrameCompleter;
+    if (gate != null && !gate.isCompleted) {
+      gate.complete();
+    }
+    _playoutFirstFrameCompleter = null;
   }
 
   Future<void> _exitPlayout() async {
+    _completePlayoutFirstFrameGate();
+    _pendingPlayoutRecord = false;
+    String? exportedPath;
+    String? exportError;
+    if (_viewModel.obsPlayoutRecordActive) {
+      final PlayoutRecordStopResult result =
+          await _viewModel.stopPlayoutRecordAndCopy();
+      exportedPath = result.destPath;
+      exportError = result.errorMessage;
+    }
     await _switchToFaceScene();
     await windowManager.setFullScreen(false);
     await windowManager.setTitleBarStyle(TitleBarStyle.normal);
@@ -245,6 +296,44 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     });
     _viewModel.setPlayoutActive(false);
     unawaited(_restoreDashboardScrollOffset());
+    if (exportedPath != null) {
+      _showPlayoutExportSuccessSnackBar(exportedPath);
+    } else if (exportError != null) {
+      _showAppSnackBar(exportError);
+    }
+  }
+
+  void _showAppSnackBar(String message) {
+    final BuildContext? ctx = _navigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showPlayoutExportSuccessSnackBar(String absolutePath) {
+    final BuildContext? ctx = _navigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) {
+      return;
+    }
+    final String fileName = p.basename(absolutePath);
+    ScaffoldMessenger.of(ctx).showSnackBar(
+      SnackBar(
+        content: Text("Exported to $fileName"),
+        action: SnackBarAction(
+          label: "Reveal",
+          onPressed: () {
+            unawaited(() async {
+              try {
+                await revealFileInFolder(absolutePath);
+              } catch (e) {
+                _showAppSnackBar("Could not open file manager: $e");
+              }
+            }());
+          },
+        ),
+      ),
+    );
   }
 
   Future<void> _unlockAspectRatio() async {
@@ -500,7 +589,8 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       home: _activeClip == null
           ? DashboardScreen(
               viewModel: _viewModel,
-              onPlayClip: _enterPlayout,
+              onPlayClip: (PlayoutClip clip) => _enterPlayout(clip),
+              onRecordClip: (PlayoutClip clip) => _enterPlayout(clip, record: true),
               onWorkspaceSettingsRequested: _showWorkspaceSettings,
               obsConnectionHealthy: _obsConnectionHealthy,
               obsLastSuccessfulPingHms: _formatHms(_lastSuccessfulObsPingAt),
@@ -520,6 +610,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
                       semanticTypeId,
                     ),
                 onExitRequested: _exitPlayout,
+                onFirstFrameReady: _onPlayoutFirstFrameReady,
               ),
             ),
     );

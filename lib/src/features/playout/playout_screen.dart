@@ -34,6 +34,7 @@ class PlayoutScreen extends StatefulWidget {
     required this.telestratorDefaults,
     required this.onResolveSemanticText,
     required this.onExitRequested,
+    this.onFirstFrameReady,
   });
 
   final PlayoutClip clip;
@@ -43,6 +44,7 @@ class PlayoutScreen extends StatefulWidget {
   final TelestratorDefaults telestratorDefaults;
   final OsgSemanticResolve onResolveSemanticText;
   final Future<void> Function() onExitRequested;
+  final VoidCallback? onFirstFrameReady;
 
   @override
   State<PlayoutScreen> createState() => _PlayoutScreenState();
@@ -262,6 +264,7 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
               autoPlay: true,
               videoBoxFit: BoxFit.contain,
               volume: viewModel.effectiveClipVolume,
+              onFirstFrameReady: widget.onFirstFrameReady,
             ),
             Positioned.fill(
               child: OsgPlayoutLayer(

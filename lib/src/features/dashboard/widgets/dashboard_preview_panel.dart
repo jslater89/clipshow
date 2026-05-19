@@ -21,10 +21,12 @@ class DashboardPreviewPanel extends StatefulWidget {
   const DashboardPreviewPanel({
     super.key,
     required this.onPlayClip,
+    required this.onRecordClip,
     required this.focusNode,
   });
 
   final void Function(PlayoutClip clip) onPlayClip;
+  final void Function(PlayoutClip clip) onRecordClip;
   final FocusNode focusNode;
 
   @override
@@ -428,6 +430,30 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                     icon: const Icon(Icons.delete_outline),
                     label: const Text("Trash File"),
                   ),
+                FilledButton.icon(
+                  onPressed:
+                      selectedItem == null ||
+                          previewIssue != MediaIssue.none ||
+                          workspaceRoot == null ||
+                          viewModel.obsSceneSwitchConfig?.enabled != true ||
+                          viewModel.obsCaptureRecording
+                      ? null
+                      : () => widget.onRecordClip(
+                          toPlayoutClip(
+                            selectedItem,
+                            workspaceRoot: workspaceRoot,
+                            initialOffsetMs: viewModel.previewPositionMs,
+                            osgPresetVisibleInitial:
+                                viewModel.previewOsgPresetVisibility,
+                            semanticTagSnapshotVersion: viewModel
+                                .semanticTagSnapshotForItem(selectedItem),
+                            semanticTypeIdsOnMedia: viewModel
+                                .semanticTypeIdsOnMedia(selectedItem),
+                          ),
+                        ),
+                  icon: const Icon(Icons.fiber_manual_record),
+                  label: const Text("Record"),
+                ),
                 FilledButton.icon(
                   onPressed:
                       selectedItem == null ||

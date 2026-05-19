@@ -15,10 +15,12 @@ class DashboardBody extends StatefulWidget {
     super.key,
     this.scrollController,
     required this.onPlayClip,
+    required this.onRecordClip,
   });
 
   final ScrollController? scrollController;
   final void Function(PlayoutClip clip) onPlayClip;
+  final void Function(PlayoutClip clip) onRecordClip;
 
   @override
   State<DashboardBody> createState() => _DashboardBodyState();
@@ -167,6 +169,7 @@ class _DashboardBodyState extends State<DashboardBody> {
                                 height: previewHeight,
                                 child: DashboardPreviewPanel(
                                   onPlayClip: widget.onPlayClip,
+                                  onRecordClip: widget.onRecordClip,
                                   focusNode: _previewFocusNode,
                                 ),
                               ),

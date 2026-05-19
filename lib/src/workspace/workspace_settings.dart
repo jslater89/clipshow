@@ -310,6 +310,30 @@ class CapturePathsSettings {
   final String outputRelativeDir;
 }
 
+/// OBS record-during-playout staging and copy destination (workspace-relative).
+class PlayoutRecordPathsSettings {
+  static const String defaultStagingRelativeDir = "recordings/export";
+  static const String defaultOutputRelativeDir = "export";
+
+  const PlayoutRecordPathsSettings({
+    required this.stagingRelativeDir,
+    required this.outputRelativeDir,
+  });
+
+  factory PlayoutRecordPathsSettings.fallback() {
+    return const PlayoutRecordPathsSettings(
+      stagingRelativeDir: defaultStagingRelativeDir,
+      outputRelativeDir: defaultOutputRelativeDir,
+    );
+  }
+
+  /// Where OBS writes the in-progress file during Record playout.
+  final String stagingRelativeDir;
+
+  /// Finished file is copied here on exit (not ingested when ignored).
+  final String outputRelativeDir;
+}
+
 enum WebhookMethod { get, post }
 
 enum WebhookPostBodyType { form, json }
@@ -346,6 +370,7 @@ class WorkspaceSettingsBundle {
     required this.webhookSceneSwitchConfigs,
     required this.ignoredFolders,
     required this.capturePathsSettings,
+    required this.playoutRecordPathsSettings,
     required this.pauseIngestScanDuringPreview,
     required this.ingestProbeConcurrency,
     required this.ingestThumbnailConcurrency,
@@ -363,6 +388,7 @@ class WorkspaceSettingsBundle {
   final List<WebhookSceneSwitchConfig> webhookSceneSwitchConfigs;
   final List<String> ignoredFolders;
   final CapturePathsSettings capturePathsSettings;
+  final PlayoutRecordPathsSettings playoutRecordPathsSettings;
 
   /// When true (default), background ingest scanning pauses while a clip plays
   /// in the dashboard preview. Full-screen playout always pauses ingest regardless.

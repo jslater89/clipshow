@@ -56,6 +56,7 @@ class ClipPlayerView extends StatefulWidget {
     this.videoBoxFit = BoxFit.contain,
     this.volume = 1.0,
     this.beforeVideoInitialize,
+    this.onFirstFrameReady,
   });
 
   final String filePath;
@@ -82,6 +83,11 @@ class ClipPlayerView extends StatefulWidget {
   /// When non-null, awaited at the start of each video controller init (after
   /// dispose). Used e.g. to stagger dashboard preview init after playout teardown.
   final Future<void> Function()? beforeVideoInitialize;
+
+  /// Called once per successful init after the first video frame is scheduled
+  /// to paint (post-frame). Also invoked on init failure so callers are not
+  /// blocked indefinitely.
+  final VoidCallback? onFirstFrameReady;
 
   /// Audio volume in the range 0.0–1.0. Applied on init and whenever it changes
   /// (without reinitializing the underlying [VideoPlayerController]).
@@ -126,6 +132,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   /// platform EOS/stopped state where seeks are ignored until the controller is
   /// recreated ([_restartPlaybackFrom]).
   bool _naturalEndPauseApplied = false;
+  bool _firstFrameReadyNotified = false;
 
   static const Duration _naturalEndPauseLead = Duration(milliseconds: 100);
 
@@ -163,8 +170,34 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     _targetSeekPosition = null;
     _reachedEnd = false;
     _naturalEndPauseApplied = false;
+    _firstFrameReadyNotified = false;
     await _disposeController();
     await _initializeController();
+  }
+
+  void _notifyFirstFrameReady() {
+    if (_firstFrameReadyNotified) {
+      return;
+    }
+    _firstFrameReadyNotified = true;
+    widget.onFirstFrameReady?.call();
+  }
+
+  void _scheduleFirstFrameReadyAfterPaint() {
+    if (_firstFrameReadyNotified) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _firstFrameReadyNotified) {
+        return;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        _notifyFirstFrameReady();
+      });
+    });
   }
 
   Future<void> _initializeController() async {
@@ -224,6 +257,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       }
       if (mounted) {
         setState(() {});
+        _scheduleFirstFrameReadyAfterPaint();
       }
     } catch (error) {
       _logger.severe(
@@ -233,6 +267,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         setState(() {
           _errorMessage = "Unable to load selected media.";
         });
+        _notifyFirstFrameReady();
       }
     }
   }

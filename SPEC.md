@@ -36,7 +36,8 @@ The application operates in two mutually exclusive UI states to prevent broadcas
 
 ### Workspace settings (capture)
 * **OBS:** Configured **Video** / **Face** scenes (names), connection host/port/password, plus optional **Capture** scene (program scene switched before recording when set).
-* **Capture paths:** **Recording folder** (relative, default `recordings`) is kept in **ignored folders** so partial files do not spam ingest; **output folder** (relative, empty = workspace root) receives the copy after recording stops. **Output** must not lie inside the **recording** directory tree (validated in app).
+* **Capture paths:** **Recording folder** (relative, default `recordings`) is kept in **ignored folders** so partial files do not spam ingest; **output folder** (relative, empty = workspace root) receives the copy after recording stops and the staging file is removed. **Output** must not lie inside the **recording** directory tree (validated in app).
+* **Playout record paths:** **Staging** (default `recordings/export`) and **output** (default `export`) for Record playout; both ignored when under the workspace. **Output** must not lie inside **staging**.
 
 ### Live OBS validation (capture mode)
 * Configure recording/output folders; confirm the recording path (e.g. `recordings`) appears in **ignored folders** when applicable.
@@ -50,16 +51,25 @@ The application operates in two mutually exclusive UI states to prevent broadcas
     1. Dashboard is replaced by the playout surface (no dashboard chrome).
     2. The window is sized for **16:9**, **title bar hidden**, and **windowed** by default (**fullscreen** exists as an alternate code path, not the default). Prior window bounds are remembered for restore on exit.
     3. The player loads the master file, seeks to the clip **in** time, and applies range behavior by **seeking** and **progress/clamp logic** (pause/hold at the **out** point)—there is **no** separate `setRange` API; range is enforced in the player layer.
-    4. **Scene switching:** For each **enabled** profile, the app either connects to OBS and sends **`SetCurrentProgramScene`** to the configured **Video** scene name, and/or invokes configured **webhook** URLs with a **`video`** token. If no profile is enabled, scene switching is skipped (logged only).
+    4. The player loads and seeks; after the **first video frame** is scheduled to paint, **scene switching** runs: for each **enabled** profile, the app connects to OBS and sends **`SetCurrentProgramScene`** to the configured **Video** scene name, and/or invokes configured **webhook** URLs with a **`video`** token. If no profile is enabled, scene switching is skipped (logged only). **Record playout** starts OBS recording immediately after that scene switch (not before).
     5. Playback runs (autoplay); a telestrator layer may sit above the video when enabled.
 * **Overlay:** When the telestrator is enabled, a transparent stack with **`CustomPaint`** receives pan gestures for strokes (when disabled, pointer events pass through to the video stack).
 * **End of clip behavior:** At the configured **out** time (or end of file when no out point), playback **pauses** and the frame **holds** so the operator can keep drawing or talking over the image.
 * **Reversion sequence:**
     1. Operator presses **`Escape`** (handled in playout).
-    2. **Scene switching:** **`SetCurrentProgramScene`** to the configured **Face** scene name and/or webhooks with a **`face`** token (same rules as enter).
-    3. Window state is restored (fullscreen off, title bar restored, aspect constraint cleared, bounds/maximize restored as applicable).
-    4. Playout is torn down (telestrator strokes are discarded with the widget tree).
-    5. Dashboard returns; **scroll position** is restored when possible.
+    2. **Record playout only:** If a Record session is active, **`StopRecord`**, wait for the file on disk, copy to the configured **playout output** folder, restore OBS’s **recording directory**—**before** switching away from the Video scene.
+    3. **Scene switching:** **`SetCurrentProgramScene`** to the configured **Face** scene name and/or webhooks with a **`face`** token (same rules as enter).
+    4. Window state is restored (fullscreen off, title bar restored, aspect constraint cleared, bounds/maximize restored as applicable).
+    5. Playout is torn down (telestrator strokes are discarded with the widget tree).
+    6. Dashboard returns; **scroll position** is restored when possible.
+
+### Record playout (OBS export)
+* **Purpose:** Produce a shareable video file (OBS-encoded program output) from a clip or master playout session—OSGs, telestrator, and live voiceover via the OBS audio chain—without offline ffmpeg rendering.
+* **Trigger:** **Record** on the dashboard preview action bar (same selection rules as **Playout**; requires an **enabled** OBS profile). Does **not** switch to the Capture scene; records while the **Video** scene is program.
+* **Paths (workspace-relative, separate from Capture):** Default staging **`recordings/export`** (OBS writes in-progress files); default output **`export`** (finished file copied on exit). Paths are auto-added to **ignored folders** when saved unless already covered by an existing ignored prefix (e.g. **`recordings/`** covers **`recordings/export`**). Output must not lie inside the staging tree.
+* **OBS sequence:** After first-frame-ready + **Video** scene: **`SetRecordDirectory`** (staging), **`StartRecord`**. On **`Escape`**: **`StopRecord`** → copy to output (staging file removed) → restore record directory → **Face** scene + window restore.
+* **Post-export:** SnackBar with **Reveal** to open the file in the system file manager. No library ingest or tag application.
+* **Conflicts:** Blocked when Capture recording is active, a playout record session is already active, or OBS reports record already active.
 
 ## 6. Core Data Model
 Metadata lives in SQLite; masters and clips are normalized.
@@ -98,7 +108,8 @@ Logical “clip” fields map as: **master path** via join to master row; **titl
 * **Ingestion logging:** Structured logging for workspace restore, ingest lifecycle, file events, and dashboard updates.
 * **Thumbnail pipeline:** `ffprobe` + `ffmpeg`, sidecar **`<video>.thumb.jpg`**, cleanup on delete, thumbs in the file list.
 * **Dashboard layout:** Header plus **left** file list and **right** Preview/Capture column; preview vs tagging split; capture tab.
-* **OBS capture mode:** Preview vs Capture tab; **`SetRecordDirectory`**, optional capture scene, **`StartRecord`** / **`StopRecord`**, copy from staging to output, tags on new master; restore OBS record directory after stop.
+* **OBS capture mode:** Preview vs Capture tab; **`SetRecordDirectory`**, optional capture scene, **`StartRecord`** / **`StopRecord`**, copy from staging to output (staging file removed), tags on new master; restore OBS record directory after stop.
+* **Record playout export:** Preview **Record** button; OBS record during Video-scene playout; copy to playout output on exit; ignored folders; reveal-in-folder SnackBar.
 * **Tagging and organization:** Clips in SQLite with **in/out**, tags, optional display names; saved clips and saved-tag workflows.
 * **Filters, search, and autocomplete:** **Untagged** filter and tag filter chips; with **no** filters applied, all matching items are shown (there is no separate **All** chip). Filename/path search and tag search autocomplete.
 * **Preview/playout player:** Shared **`ClipPlayerView`** and hotkey layers for dashboard preview and playout.

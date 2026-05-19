@@ -68,6 +68,29 @@ class ObsCaptureService {
   ObsWebSocket? _client;
   String? _previousRecordDirectory;
 
+  /// Whether OBS is currently writing a record output.
+  Future<bool> isObsRecordActive() async {
+    final ObsWebSocket client = await _ensureClient();
+    final RecordStatusResponse status = await client.record.getRecordStatus();
+    return status.outputActive;
+  }
+
+  /// Record playout program output without changing the current program scene.
+  Future<void> startPlayoutRecording({required String stagingAbsolute}) async {
+    final ObsWebSocket client = await _ensureClient();
+    if (await isObsRecordActive()) {
+      throw StateError("OBS is already recording.");
+    }
+    final RecordDirectoryResponse prev = await client.config
+        .getRecordDirectory();
+    _previousRecordDirectory = prev.recordDirectory;
+    await Directory(stagingAbsolute).create(recursive: true);
+    _logger.info("OBS SetRecordDirectory (playout) -> $stagingAbsolute");
+    await client.config.setRecordDirectory(stagingAbsolute);
+    await client.record.startRecord();
+    _logger.info("OBS StartRecord issued (playout).");
+  }
+
   Future<void> startRecording({
     required String workspaceAbsolute,
     required CapturePathsSettings paths,
@@ -156,7 +179,7 @@ class ObsCaptureService {
   }
 }
 
-/// Copies a finished recording into the ingest-visible output directory.
+/// Copies a finished recording into [outputDirAbsolute], then removes the staging file.
 Future<String> copyCaptureToOutputDir({
   required String stagingFileAbsolute,
   required String outputDirAbsolute,
@@ -182,5 +205,15 @@ Future<String> copyCaptureToOutputDir({
   await src.copy(dest);
   final int outBytes = (await File(dest).stat()).size;
   _captureCopyLogger.fine("Copied capture to $dest ($outBytes bytes)");
+  if (dest != normalizedStaging) {
+    try {
+      await src.delete();
+      _captureCopyLogger.fine("Removed staging file $normalizedStaging");
+    } catch (e, st) {
+      _captureCopyLogger.warning(
+        "Copied to $dest but could not remove staging file: $e\n$st",
+      );
+    }
+  }
   return dest;
 }

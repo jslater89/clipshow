@@ -7,6 +7,7 @@ import 'package:obs_clipshow/src/media/media_clip.dart';
 import 'package:obs_clipshow/src/media/media_list_item.dart';
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/workspace/ignored_path_utils.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
 class MediaRepository {
@@ -741,6 +742,8 @@ class MediaRepository {
         await _loadWebhookSceneSwitchConfigs();
     final List<String> ignoredFolders = await listIgnoredFolders();
     final CapturePathsSettings capturePaths = await _loadCapturePathsSettings();
+    final PlayoutRecordPathsSettings playoutRecordPaths =
+        await _loadPlayoutRecordPathsSettings();
     final bool pauseIngestScanDuringPreview =
         await _loadPauseIngestScanDuringPreview();
     final int ingestProbeConcurrency = await _loadIngestProbeConcurrency();
@@ -760,6 +763,7 @@ class MediaRepository {
       webhookSceneSwitchConfigs: webhooks,
       ignoredFolders: ignoredFolders,
       capturePathsSettings: capturePaths,
+      playoutRecordPathsSettings: playoutRecordPaths,
       pauseIngestScanDuringPreview: pauseIngestScanDuringPreview,
       ingestProbeConcurrency: ingestProbeConcurrency,
       ingestThumbnailConcurrency: ingestThumbnailConcurrency,
@@ -1121,21 +1125,57 @@ class MediaRepository {
     await ensureRecordingRelativeDirIgnored(recording);
   }
 
+  Future<PlayoutRecordPathsSettings> _loadPlayoutRecordPathsSettings() async {
+    final String staging =
+        (await _getWorkspaceSetting("playout.record.stagingRelativeDir"))
+            ?.trim() ??
+        PlayoutRecordPathsSettings.defaultStagingRelativeDir;
+    final String output =
+        (await _getWorkspaceSetting("playout.record.outputRelativeDir"))
+            ?.trim() ??
+        PlayoutRecordPathsSettings.defaultOutputRelativeDir;
+    return PlayoutRecordPathsSettings(
+      stagingRelativeDir: staging.isEmpty
+          ? PlayoutRecordPathsSettings.defaultStagingRelativeDir
+          : staging,
+      outputRelativeDir: output.isEmpty
+          ? PlayoutRecordPathsSettings.defaultOutputRelativeDir
+          : output,
+    );
+  }
+
+  Future<void> savePlayoutRecordPathsSettings(
+    PlayoutRecordPathsSettings value,
+  ) async {
+    final String staging = value.stagingRelativeDir.trim().isEmpty
+        ? PlayoutRecordPathsSettings.defaultStagingRelativeDir
+        : value.stagingRelativeDir.trim();
+    final String output = value.outputRelativeDir.trim().isEmpty
+        ? PlayoutRecordPathsSettings.defaultOutputRelativeDir
+        : value.outputRelativeDir.trim();
+    await _putWorkspaceSetting("playout.record.stagingRelativeDir", staging);
+    await _putWorkspaceSetting("playout.record.outputRelativeDir", output);
+    await ensureRecordingRelativeDirIgnored(staging);
+    await ensureRecordingRelativeDirIgnored(output);
+  }
+
   /// Ensures [relativePath] is listed under ignored folders when non-empty (workspace-relative).
+  ///
+  /// Skips insert when an existing ignored folder already covers [relativePath]
+  /// (e.g. `recordings/` covers `recordings/export`).
   Future<void> ensureRecordingRelativeDirIgnored(String relativePath) async {
-    final String normalized = _normalizeRelativeDir(relativePath);
+    final String normalized = IgnoredPathUtils.normalizeRelative(relativePath);
     if (normalized.isEmpty) {
       return;
     }
-    await addIgnoredFolder(normalized);
-  }
-
-  String _normalizeRelativeDir(String raw) {
-    String path = raw.trim().replaceAll("\\", "/");
-    while (path.startsWith("/")) {
-      path = path.substring(1);
+    final List<String> existing = await listIgnoredFolders();
+    if (IgnoredPathUtils.isPathCoveredByAnyIgnoredFolder(
+      relativePath: normalized,
+      ignoredFolders: existing,
+    )) {
+      return;
     }
-    return path;
+    await addIgnoredFolder(normalized);
   }
 
   Future<MasterMediaFile?> getMasterByFilePath(

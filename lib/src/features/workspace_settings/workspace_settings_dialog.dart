@@ -32,6 +32,10 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       TextEditingController();
   final TextEditingController _captureOutputDirController =
       TextEditingController();
+  final TextEditingController _playoutRecordStagingController =
+      TextEditingController();
+  final TextEditingController _playoutRecordOutputController =
+      TextEditingController();
   final TextEditingController _ignoredFolderController =
       TextEditingController();
   final TextEditingController _webhookNameController = TextEditingController();
@@ -66,6 +70,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     _obsCaptureSceneController.dispose();
     _captureRecordingDirController.dispose();
     _captureOutputDirController.dispose();
+    _playoutRecordStagingController.dispose();
+    _playoutRecordOutputController.dispose();
     _ignoredFolderController.dispose();
     _webhookNameController.dispose();
     _webhookUrlController.dispose();
@@ -159,6 +165,11 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       final CapturePathsSettings capturePaths = viewModel.capturePathsSettings;
       _captureRecordingDirController.text = capturePaths.recordingRelativeDir;
       _captureOutputDirController.text = capturePaths.outputRelativeDir;
+      final PlayoutRecordPathsSettings playoutRecordPaths =
+          viewModel.playoutRecordPathsSettings;
+      _playoutRecordStagingController.text =
+          playoutRecordPaths.stagingRelativeDir;
+      _playoutRecordOutputController.text = playoutRecordPaths.outputRelativeDir;
       _draftTelestratorDefaults = viewModel.telestratorDefaults;
       _enabledDecoders = List<DecoderProfile>.from(
         viewModel.decoderConfig.enabledProfiles,
@@ -841,7 +852,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 },
               ),
               SizedBox(height: scaleDimension(context, 24)),
-              Text("OBS Capture Paths", style: theme.textTheme.titleMedium),
+              Text("OBS Paths", style: theme.textTheme.titleMedium),
               SizedBox(height: scaleDimension(context, 8)),
               Row(
                 children: <Widget>[
@@ -849,9 +860,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                     child: TextField(
                       controller: _captureRecordingDirController,
                       decoration: const InputDecoration(
-                        labelText: "Recording Folder (relative)",
-                        helperText:
-                            "OBS writes here; ignored by ingest while recording.",
+                        labelText: "Capture Recording (relative)",
+                        helperText: "Capture staging; ignored by ingest.",
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -861,9 +871,19 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                     child: TextField(
                       controller: _captureOutputDirController,
                       decoration: const InputDecoration(
-                        labelText: "Output Folder (relative)",
-                        helperText:
-                            "Empty = workspace root. Finished files are copied here.",
+                        labelText: "Capture Output (relative)",
+                        helperText: "Empty = workspace root after capture.",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  Expanded(
+                    child: TextField(
+                      controller: _playoutRecordStagingController,
+                      decoration: const InputDecoration(
+                        labelText: "Playout Record (relative)",
+                        helperText: "OBS writes during Record playout.",
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -871,17 +891,38 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 ],
               ),
               SizedBox(height: scaleDimension(context, 8)),
+              TextField(
+                controller: _playoutRecordOutputController,
+                decoration: const InputDecoration(
+                  labelText: "Playout Output (relative)",
+                  helperText:
+                      "Finished Record playout files are copied here. Both playout folders are ignored by ingest when under the workspace.",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
               _AsyncFilledButton(
-                label: "Save Capture Paths",
+                label: "Save Paths",
                 onPressed: () async {
-                  await viewModel.saveCapturePathsSettings(
-                    CapturePathsSettings(
+                  final String? error = await viewModel.saveObsPathsSettings(
+                    capture: CapturePathsSettings(
                       recordingRelativeDir: _captureRecordingDirController.text
                           .trim(),
                       outputRelativeDir: _captureOutputDirController.text
                           .trim(),
                     ),
+                    playoutRecord: PlayoutRecordPathsSettings(
+                      stagingRelativeDir: _playoutRecordStagingController.text
+                          .trim(),
+                      outputRelativeDir: _playoutRecordOutputController.text
+                          .trim(),
+                    ),
                   );
+                  if (error != null && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(error)),
+                    );
+                  }
                 },
               ),
               SizedBox(height: scaleDimension(context, 24)),

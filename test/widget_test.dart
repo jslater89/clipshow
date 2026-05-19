@@ -32,6 +32,7 @@ void main() {
         home: DashboardScreen(
           viewModel: viewModel,
           onPlayClip: (_) {},
+          onRecordClip: (_) {},
           onWorkspaceSettingsRequested: () {},
           obsConnectionHealthy: true,
           obsLastSuccessfulPingHms: "15:00:00",
@@ -72,6 +73,7 @@ void main() {
         home: DashboardScreen(
           viewModel: viewModel,
           onPlayClip: (_) {},
+          onRecordClip: (_) {},
           onWorkspaceSettingsRequested: () {},
           obsConnectionHealthy: true,
           obsLastSuccessfulPingHms: "15:00:00",

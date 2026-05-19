@@ -50,9 +50,11 @@ void _configureLogging(FvpLogVerbosity fvpLogVerbosity) {
 Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
   final WorkspacePreferences prefs = WorkspacePreferences();
   final String? workspacePath = await prefs.loadWorkspacePath();
-  if (workspacePath == null || workspacePath.isEmpty) {
+  final pathExists = workspacePath != null && workspacePath.isNotEmpty && await Directory(workspacePath).exists();
+  if (!pathExists) {
+    final fallbackSettings = DecoderConfig.platformFallback();
     return _StartupVideoSettings(
-      decoderOptions: <String>[DecoderProfile.vaapiVpp.fvpArgument],
+      decoderOptions: fallbackSettings.enabledProfiles.map((DecoderProfile profile) => profile.fvpArgument).toList(),
       logVerbosity: MdkLogVerbosity.warning,
       fvpLogVerbosity: FvpLogVerbosity.warning,
     );

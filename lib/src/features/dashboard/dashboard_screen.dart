@@ -11,6 +11,7 @@ class DashboardScreen extends StatelessWidget {
     super.key,
     required this.viewModel,
     required this.onPlayClip,
+    required this.onRecordClip,
     required this.onWorkspaceSettingsRequested,
     required this.obsConnectionHealthy,
     required this.obsLastSuccessfulPingHms,
@@ -19,6 +20,7 @@ class DashboardScreen extends StatelessWidget {
 
   final DashboardViewModel viewModel;
   final void Function(PlayoutClip clip) onPlayClip;
+  final void Function(PlayoutClip clip) onRecordClip;
   final VoidCallback onWorkspaceSettingsRequested;
   final bool? obsConnectionHealthy;
   final String? obsLastSuccessfulPingHms;
@@ -45,6 +47,7 @@ class DashboardScreen extends StatelessWidget {
               Expanded(
                 child: DashboardBody(
                   onPlayClip: onPlayClip,
+                  onRecordClip: onRecordClip,
                   scrollController: scrollController,
                 ),
               ),

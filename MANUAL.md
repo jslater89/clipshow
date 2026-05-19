@@ -12,7 +12,7 @@ Playout is dedicated playback of a master or a saved clip in a 16:9–locked win
 
 While playout is active, the telestrator lets you draw on top of the picture for analysis or emphasis; the drawing layer sits above the player and does not produce a rendered output file by itself.
 
-Optionally, from the dashboard Capture flow you can start and stop OBS recording into a staging folder, then copy the finished file into an output location so the library ingests it once without picking up partial recordings.
+Optionally, from the dashboard Capture flow you can start and stop OBS recording into a staging folder, then copy the finished file into an output location and remove the staging copy so the library ingests it once without duplicates or partial recordings in the staging tree.
 
 ---
 
@@ -169,7 +169,7 @@ You need a **workspace** open and an **enabled** OBS profile in Workspace settin
 
 ### 7.1 Why a `recordings` folder (or similar) appears
 
-While **Start Recording** is active, Clipshow tells OBS to use a **recording** directory **inside your workspace**—the path configured under Capture paths (§10), often a folder such as `recordings/`. OBS’s global “recording path” is temporarily pointed there so the growing file lands under your project. That folder is normally **ignored** by the library scanner so half-written takes do not show up as masters. When you **Stop And Save**, Clipshow stops the encoder, waits for the file on disk to settle, then **copies** the result into your **output** folder (§10—commonly the workspace root or another non-ignored location). Ingestion only indexes the copy; partial files stay quarantined in the recording tree. Afterward Clipshow **restores OBS’s recording directory** to whatever it was before this session and closes the capture WebSocket client, so your everyday OBS layout is not permanently changed.
+While **Start Recording** is active, Clipshow tells OBS to use a **recording** directory **inside your workspace**—the path configured under Capture paths (§10), often a folder such as `recordings/`. OBS’s global “recording path” is temporarily pointed there so the growing file lands under your project. That folder is normally **ignored** by the library scanner so half-written takes do not show up as masters. When you **Stop And Save**, Clipshow stops the encoder, waits for the file on disk to settle, then **copies** the result into your **output** folder (§10—commonly the workspace root or another non-ignored location) and **deletes** the staging copy so you do not keep duplicates. Ingestion only indexes the output copy; partial files still in the recording tree while a take is in progress stay quarantined there until stop completes. Afterward Clipshow **restores OBS’s recording directory** to whatever it was before this session and closes the capture WebSocket client, so your everyday OBS layout is not permanently changed.
 
 Capture also supports keyboard triggers: press **R** to start recording and **S** to stop and save.
 
@@ -191,9 +191,11 @@ Add tags with the field and **Add**; tags can be edited while a recording is in 
 
 From the dashboard, use **Playout** in Manage or the play control on a file row. The dashboard UI is replaced by the player until you leave.
 
+Use **Record** on the preview action bar (next to **Playout**) when you want OBS to write a finished file while you run the same playout session—see §8.7.
+
 ### 8.2 OBS and the broadcast chain
 
-When integrations are enabled, entering Playout switches OBS’s **program** scene to the one you configured for showing this application; leaving Playout (`Escape`) switches back to your configured “live” scene and restores the dashboard (scroll position is restored when possible). The same transitions can also invoke **HTTP webhooks** you configured in Workspace settings so companion automation stays in step. None of this runs if OBS or webhooks are disabled—you can still use Playout as a local fullscreen reviewer.
+When integrations are enabled, entering Playout switches OBS’s **program** scene to the one you configured for showing this application **after** the playout player has loaded and painted its first frame (so window capture is less likely to show a black or empty frame). Leaving Playout (`Escape`) switches back to your configured “live” scene and restores the dashboard (scroll position is restored when possible). The same transitions can also invoke **HTTP webhooks** you configured in Workspace settings so companion automation stays in step. None of this runs if OBS or webhooks are disabled—you can still use Playout as a local fullscreen reviewer.
 
 ### 8.3 Window and layout
 
@@ -237,6 +239,20 @@ While Playout is active you can draw on top of the picture for commentary—stro
 Leaving Playout clears the canvas for the next session.
 
 > Screenshot (placeholder): Playout with arrows or circles drawn over the video.
+
+### 8.7 Record playout export
+
+**Record** starts normal playout (OSGs, telestrator) and tells OBS to **record program output** after the same first-frame gate, then the Video scene switch, while you run the clip. When you press **Escape**, Clipshow stops OBS, copies the file into your configured **playout output** folder (and removes the staging copy), restores OBS’s recording directory, then switches back to your live scene. Recording runs in **real time** (a 30-second clip takes about 30 seconds plus stop/copy time).
+
+**Requirements:** An **enabled** OBS profile in Workspace settings (§10). Capture mode cannot be recording at the same time; OBS must not already be recording on its own.
+
+**Paths:** Under **OBS Paths** in Workspace settings, **Playout Record** is where OBS writes the growing file (default `recordings/export`). **Playout Output** is where the finished copy lands (default `export`). Both folders are added to **ignored folders** automatically so exports are not ingested into the library. Capture paths are separate—Capture still uses **Capture Recording** / **Capture Output**.
+
+**Audio and picture:** Whatever your **Video** scene sends to program—including window capture of Clipshow and your mic if routed in OBS—is what the file contains. Route commentary in OBS, not only in Clipshow.
+
+**After export:** A SnackBar offers **Reveal** to show the file in your file manager.
+
+> Screenshot (placeholder): Preview bar with Record and Playout buttons.
 
 ---
 
@@ -305,7 +321,7 @@ Scene switching is modeled as **profiles**: one **OBS** connection (host, port, 
 
 Under **OBS**, set the WebSocket address and the **program** scene names Clipshow should select for “video” (showing this app), “face” (your live/camera layout), and optionally **capture** (switched before OBS recording starts in Capture mode—§7). Save applies that block.
 
-**OBS Capture paths** are the workspace-relative **recording** and **output** folders used in Capture mode: OBS writes the growing file under **recording** (typically ignored by ingestion); **Stop And Save** copies the finished file into **output** (empty means the workspace root). Output must not sit inside the recording tree—the UI rejects bad combinations. This is the settings-side view of the same paths explained in §7.
+**OBS Paths** (one row, three fields): **Capture Recording** and **Capture Output** for Capture mode (§7)—OBS writes under recording; **Stop And Save** copies into output (empty output = workspace root). **Playout Record** is staging for **Record** playout (§8.7); default `recordings/export`. A second field, **Playout Output**, is where finished Record exports are copied (default `export`). Playout output must not sit inside playout staging. **Save Paths** persists capture and playout folders together; each path under the workspace is auto-added to **ignored folders** when not already covered by an existing ignored path (for example, if `recordings/` is ignored, `recordings/export` is not added separately).
 
 Under **Webhooks**, add HTTP endpoints that fire on the same playout enter/exit transitions as OBS (method, URL, and body/query shape). Saved webhooks appear in the profile list with their own enable switches. The payload value is always a fixed token—**video** when entering Playout and **face** when leaving—under your chosen query parameter or JSON/form key (not your OBS scene names).
 
@@ -327,7 +343,7 @@ Apply changes using the dialog’s save actions; invalid capture/output pairings
 
 Under **Export workspace** in Workspace settings (§10.6), **Export JSON** opens a save dialog (default name `workspace_export.json`). The app writes a single JSON document with top-level keys `**workspacePath`** (absolute root you have open), `**settings`**, and `**mediaItems**`—one media object per master or clip currently in the library.
 
-The **settings** object mirrors what lives in the workspace database: telestrator defaults, decoder profile names and verbosity levels, OBS WebSocket configuration (including scene names), webhook definitions, capture recording/output paths, and ignored-folder entries. **Media items** include workspace-relative paths, display overrides, sorted tag lists, and for clips the in/out millisecond range.
+The **settings** object mirrors what lives in the workspace database: telestrator defaults, decoder profile names and verbosity levels, OBS WebSocket configuration (including scene names), webhook definitions, capture and playout record paths, and ignored-folder entries. **Media items** include workspace-relative paths, display overrides, sorted tag lists, and for clips the in/out millisecond range.
 
 Video files are **not** copied or embedded; the export is metadata only. Treat the file as **sensitive** if your OBS block includes a password—it is serialized in plain text. Use the export for backups, migration notes, or external tooling that understands this shape.
 

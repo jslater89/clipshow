@@ -17,6 +17,7 @@ import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/obs/capture_path_utils.dart";
+import "package:obs_clipshow/src/obs/playout_record_path_utils.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/obs/obs_capture_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -28,6 +29,14 @@ import "package:obs_clipshow/src/workspace/workspace_trash.dart";
 
 /// Manage (library prep) vs OBS Capture pane on the dashboard right column.
 enum DashboardMediaPaneTab { manage, capture }
+
+/// Result of stopping a Record playout session.
+class PlayoutRecordStopResult {
+  const PlayoutRecordStopResult({this.destPath, this.errorMessage});
+
+  final String? destPath;
+  final String? errorMessage;
+}
 
 bool _semanticTagAttachmentSnapshotsEqual(
   List<MediaTagAttachment> a,
@@ -119,6 +128,8 @@ class DashboardViewModel extends ChangeNotifier {
   bool _obsCaptureRecording = false;
   ObsCaptureService? _obsCaptureSession;
   String? _captureStatusMessage;
+  bool _obsPlayoutRecordActive = false;
+  ObsCaptureService? _obsPlayoutRecordSession;
   final Set<String> _loadedSystemFontFamilies = <String>{};
 
   OsgPresetVisibility _previewOsgPresetVisibility =
@@ -197,6 +208,10 @@ class DashboardViewModel extends ChangeNotifier {
   CapturePathsSettings get capturePathsSettings =>
       _workspaceSettings?.capturePathsSettings ??
       CapturePathsSettings.fallback();
+  PlayoutRecordPathsSettings get playoutRecordPathsSettings =>
+      _workspaceSettings?.playoutRecordPathsSettings ??
+      PlayoutRecordPathsSettings.fallback();
+  bool get obsPlayoutRecordActive => _obsPlayoutRecordActive;
   bool get pauseIngestScanDuringPreview =>
       _workspaceSettings?.pauseIngestScanDuringPreview ?? true;
 
@@ -530,6 +545,151 @@ class DashboardViewModel extends ChangeNotifier {
     await _ingestionService.refreshIgnoredFolders();
     await _loadWorkspaceSettings();
     notifyListeners();
+  }
+
+  Future<void> savePlayoutRecordPathsSettings(
+    PlayoutRecordPathsSettings value,
+  ) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.savePlayoutRecordPathsSettings(value);
+    await _ingestionService.refreshIgnoredFolders();
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  /// Persists capture and playout record paths after validation.
+  ///
+  /// Returns an error message when validation fails; null on success.
+  Future<String?> saveObsPathsSettings({
+    required CapturePathsSettings capture,
+    required PlayoutRecordPathsSettings playoutRecord,
+  }) async {
+    final String? workspaceRoot = _workspacePath;
+    if (workspaceRoot == null) {
+      return "No workspace open.";
+    }
+    final String captureRec = CapturePathUtils.normalizedRecordingDir(
+      workspaceAbsolute: workspaceRoot,
+      settings: capture,
+    );
+    final String captureOut = CapturePathUtils.normalizedOutputDir(
+      workspaceAbsolute: workspaceRoot,
+      settings: capture,
+    );
+    if (CapturePathUtils.isOutputInsideRecordingTree(
+      recordingDirAbsolute: captureRec,
+      outputDirAbsolute: captureOut,
+    )) {
+      return "Capture output folder cannot be inside the capture recording folder.";
+    }
+    final String playoutStaging = PlayoutRecordPathUtils.normalizedStagingDir(
+      workspaceAbsolute: workspaceRoot,
+      settings: playoutRecord,
+    );
+    final String playoutOut = PlayoutRecordPathUtils.normalizedOutputDir(
+      workspaceAbsolute: workspaceRoot,
+      settings: playoutRecord,
+    );
+    if (PlayoutRecordPathUtils.isOutputInsideStagingTree(
+      stagingDirAbsolute: playoutStaging,
+      outputDirAbsolute: playoutOut,
+    )) {
+      return "Playout output folder cannot be inside the playout record staging folder.";
+    }
+    await saveCapturePathsSettings(capture);
+    await savePlayoutRecordPathsSettings(playoutRecord);
+    return null;
+  }
+
+  /// Starts OBS recording for the current playout session.
+  ///
+  /// Returns null on success, or a user-facing error message.
+  Future<String?> startPlayoutRecord() async {
+    final String? workspaceRoot = _workspacePath;
+    final ObsSceneSwitchConfig? obsCfg = obsSceneSwitchConfig;
+    if (workspaceRoot == null) {
+      return "No workspace open.";
+    }
+    if (obsCfg == null || !obsCfg.enabled) {
+      return "Enable OBS in Workspace Settings.";
+    }
+    if (_obsCaptureSession != null || _obsCaptureRecording) {
+      return "Stop Capture mode recording before Record playout.";
+    }
+    if (_obsPlayoutRecordSession != null || _obsPlayoutRecordActive) {
+      return "A playout record session is already active.";
+    }
+    final ObsCaptureService service = ObsCaptureService(
+      url: "ws://${obsCfg.serverAddress}:${obsCfg.port}",
+      password: obsCfg.password.isEmpty ? null : obsCfg.password,
+    );
+    _obsPlayoutRecordSession = service;
+    _obsPlayoutRecordActive = true;
+    notifyListeners();
+    try {
+      if (await service.isObsRecordActive()) {
+        await service.restoreObsRecordDirectoryAndClose();
+        _obsPlayoutRecordSession = null;
+        _obsPlayoutRecordActive = false;
+        notifyListeners();
+        return "OBS is already recording. Stop recording in OBS first.";
+      }
+      final PlayoutRecordPathsSettings paths = playoutRecordPathsSettings;
+      final String stagingAbs = PlayoutRecordPathUtils.normalizedStagingDir(
+        workspaceAbsolute: workspaceRoot,
+        settings: paths,
+      );
+      await service.startPlayoutRecording(stagingAbsolute: stagingAbs);
+      return null;
+    } catch (e, st) {
+      _logger.warning("startPlayoutRecord failed: $e\n$st");
+      await service.restoreObsRecordDirectoryAndClose();
+      _obsPlayoutRecordSession = null;
+      _obsPlayoutRecordActive = false;
+      notifyListeners();
+      return "Failed to start recording: $e";
+    }
+  }
+
+  /// Stops playout recording, copies to the configured output folder, restores OBS.
+  Future<PlayoutRecordStopResult> stopPlayoutRecordAndCopy() async {
+    final String? workspaceRoot = _workspacePath;
+    final ObsCaptureService? service = _obsPlayoutRecordSession;
+    if (workspaceRoot == null || service == null) {
+      return const PlayoutRecordStopResult(
+        errorMessage: "No playout recording to stop.",
+      );
+    }
+    final PlayoutRecordPathsSettings paths = playoutRecordPathsSettings;
+    String? destPath;
+    try {
+      final String? stagingPath = await service.stopRecordingStagingPath();
+      if (stagingPath == null) {
+        return const PlayoutRecordStopResult(
+          errorMessage: "Could not resolve recorded file path from OBS.",
+        );
+      }
+      final String outputDirAbs = PlayoutRecordPathUtils.normalizedOutputDir(
+        workspaceAbsolute: workspaceRoot,
+        settings: paths,
+      );
+      destPath = await copyCaptureToOutputDir(
+        stagingFileAbsolute: stagingPath,
+        outputDirAbsolute: outputDirAbs,
+      );
+      return PlayoutRecordStopResult(destPath: destPath);
+    } catch (e, st) {
+      _logger.warning("stopPlayoutRecordAndCopy failed: $e\n$st");
+      return PlayoutRecordStopResult(errorMessage: "Record export failed: $e");
+    } finally {
+      await service.restoreObsRecordDirectoryAndClose();
+      _obsPlayoutRecordSession = null;
+      _obsPlayoutRecordActive = false;
+      notifyListeners();
+    }
   }
 
   Future<void> startObsCapture() async {
@@ -1774,6 +1934,12 @@ class DashboardViewModel extends ChangeNotifier {
           "recordingRelativeDir":
               settings.capturePathsSettings.recordingRelativeDir,
           "outputRelativeDir": settings.capturePathsSettings.outputRelativeDir,
+        },
+        "playoutRecordPaths": <String, Object?>{
+          "stagingRelativeDir":
+              settings.playoutRecordPathsSettings.stagingRelativeDir,
+          "outputRelativeDir":
+              settings.playoutRecordPathsSettings.outputRelativeDir,
         },
         "ignoredFolders": settings.ignoredFolders,
         "playoutOutput": <String, Object?>{

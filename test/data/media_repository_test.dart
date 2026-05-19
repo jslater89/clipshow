@@ -833,6 +833,14 @@ void main() {
           settings.capturePathsSettings.recordingRelativeDir,
           CapturePathsSettings.defaultRecordingRelativeDir,
         );
+        expect(
+          settings.playoutRecordPathsSettings.stagingRelativeDir,
+          PlayoutRecordPathsSettings.defaultStagingRelativeDir,
+        );
+        expect(
+          settings.playoutRecordPathsSettings.outputRelativeDir,
+          PlayoutRecordPathsSettings.defaultOutputRelativeDir,
+        );
         expect(settings.webhookSceneSwitchConfigs, hasLength(2));
         expect(settings.webhookSceneSwitchConfigs.first.enabled, isTrue);
         expect(settings.webhookSceneSwitchConfigs.last.enabled, isFalse);
@@ -898,6 +906,30 @@ void main() {
         final WorkspaceSettingsBundle disabled = await repository
             .loadWorkspaceSettings();
         expect(disabled.obsSceneSwitchConfig, isNull);
+
+        await repository.savePlayoutRecordPathsSettings(
+          const PlayoutRecordPathsSettings(
+            stagingRelativeDir: "custom/staging",
+            outputRelativeDir: "custom/out",
+          ),
+        );
+        final List<String> ignoredAfterPlayout =
+            await repository.listIgnoredFolders();
+        expect(ignoredAfterPlayout, contains("custom/staging"));
+        expect(ignoredAfterPlayout, contains("custom/out"));
+
+        await repository.addIgnoredFolder("recordings");
+        await repository.savePlayoutRecordPathsSettings(
+          const PlayoutRecordPathsSettings(
+            stagingRelativeDir: "recordings/export",
+            outputRelativeDir: "export",
+          ),
+        );
+        final List<String> ignoredAfterNestedPlayout =
+            await repository.listIgnoredFolders();
+        expect(ignoredAfterNestedPlayout, contains("recordings"));
+        expect(ignoredAfterNestedPlayout, isNot(contains("recordings/export")));
+        expect(ignoredAfterNestedPlayout, contains("export"));
 
         await database.close();
       },
