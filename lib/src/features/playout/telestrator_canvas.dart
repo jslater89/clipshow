@@ -28,13 +28,15 @@ class TelestratorCanvas extends StatelessWidget {
               controller.endStroke();
             },
             onPanCancel: controller.endStroke,
-            child: CustomPaint(
-              painter: _TelestratorPainter(
-                strokes: controller.strokes,
-                lineScale: lineScale,
-              ),
-              child: const SizedBox.expand(),
-            ),
+            child: controller.hasPaintedStrokes
+                ? CustomPaint(
+                    painter: _TelestratorPainter(
+                      strokes: controller.strokes,
+                      lineScale: lineScale,
+                    ),
+                    child: const SizedBox.expand(),
+                  )
+                : const SizedBox.expand(),
           ),
         );
       },

@@ -32,6 +32,9 @@ class TelestratorController extends ChangeNotifier {
   List<TelestratorStroke> get strokes =>
       List<TelestratorStroke>.unmodifiable(_strokes);
 
+  /// True while a stroke is in progress or any stroke remains on the canvas.
+  bool get hasPaintedStrokes => _strokes.isNotEmpty;
+
   void toggleEnabled() {
     _isEnabled = !_isEnabled;
     notifyListeners();

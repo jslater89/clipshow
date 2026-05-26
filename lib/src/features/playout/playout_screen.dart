@@ -265,19 +265,13 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
               videoBoxFit: BoxFit.contain,
               volume: viewModel.effectiveClipVolume,
               onFirstFrameReady: widget.onFirstFrameReady,
-            ),
-            Positioned.fill(
-              child: OsgPlayoutLayer(
+              videoAreaOverlay: _PlayoutVideoAreaOverlay(
                 clip: widget.clip,
-                config: widget.osgWorkspaceConfig,
+                osgWorkspaceConfig: widget.osgWorkspaceConfig,
                 workspaceRoot: widget.workspaceRoot,
-                resolveSemantic: widget.onResolveSemanticText,
-                visible: _osgPresetVisible,
-              ),
-            ),
-            Positioned.fill(
-              child: TelestratorCanvas(
-                controller: _telestratorController,
+                onResolveSemanticText: widget.onResolveSemanticText,
+                osgPresetVisible: _osgPresetVisible,
+                telestratorController: _telestratorController,
               ),
             ),
             Positioned(
@@ -313,6 +307,47 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// OSG and telestrator share the letterboxed video rect (see [ClipPlayerView.videoAreaOverlay]).
+class _PlayoutVideoAreaOverlay extends StatelessWidget {
+  const _PlayoutVideoAreaOverlay({
+    required this.clip,
+    required this.osgWorkspaceConfig,
+    required this.workspaceRoot,
+    required this.onResolveSemanticText,
+    required this.osgPresetVisible,
+    required this.telestratorController,
+  });
+
+  final PlayoutClip clip;
+  final OsgWorkspaceConfig osgWorkspaceConfig;
+  final String workspaceRoot;
+  final OsgSemanticResolve onResolveSemanticText;
+  final OsgPresetVisibility osgPresetVisible;
+  final TelestratorController telestratorController;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        if (workspaceRoot.trim().isNotEmpty)
+          OsgPlayoutLayer(
+            key: ValueKey<String>(
+              "${clip.mediaType.name}-${clip.mediaId}",
+            ),
+            clip: clip,
+            config: osgWorkspaceConfig,
+            workspaceRoot: workspaceRoot,
+            resolveSemantic: onResolveSemanticText,
+            visible: osgPresetVisible,
+          ),
+        TelestratorCanvas(controller: telestratorController),
+      ],
     );
   }
 }

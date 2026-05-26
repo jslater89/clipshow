@@ -536,6 +536,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _navigatorKey,
+      debugShowCheckedModeBanner: false,
       title: "Vanalyst Playout",
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(

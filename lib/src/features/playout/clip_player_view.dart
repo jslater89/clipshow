@@ -529,40 +529,40 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
                     intrinsic: intrinsic,
                     fit: widget.videoBoxFit,
                   );
-                  final bool showVideoOverlay = widget.videoAreaOverlay !=
-                          null &&
-                      videoRect.width > 0 &&
-                      videoRect.height > 0;
+                  final bool hasVideoRect =
+                      videoRect.width > 0 && videoRect.height > 0;
+                  if (!hasVideoRect) {
+                    return const SizedBox.shrink();
+                  }
                   return Stack(
                     fit: StackFit.expand,
                     clipBehavior: Clip.none,
                     children: <Widget>[
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: widget.clickTogglesPlayback
-                            ? _togglePlayPause
-                            : null,
-                        child: Center(
-                          child: FittedBox(
-                            fit: widget.videoBoxFit,
-                            child: SizedBox(
-                              width: intrinsic.width,
-                              height: intrinsic.height,
-                              child: VideoPlayer(controller),
-                            ),
+                      Positioned.fromRect(
+                        rect: videoRect,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: widget.clickTogglesPlayback
+                              ? _togglePlayPause
+                              : null,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            clipBehavior: Clip.none,
+                            children: <Widget>[
+                              FittedBox(
+                                fit: widget.videoBoxFit,
+                                child: SizedBox(
+                                  width: intrinsic.width,
+                                  height: intrinsic.height,
+                                  child: VideoPlayer(controller),
+                                ),
+                              ),
+                              if (widget.videoAreaOverlay != null)
+                                widget.videoAreaOverlay!,
+                            ],
                           ),
                         ),
                       ),
-                      if (showVideoOverlay)
-                        Positioned(
-                          left: videoRect.left,
-                          top: videoRect.top,
-                          width: videoRect.width,
-                          height: videoRect.height,
-                          child: ClipRect(
-                            child: widget.videoAreaOverlay!,
-                          ),
-                        ),
                     ],
                   );
                 },

@@ -12,6 +12,25 @@ import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
 
 typedef OsgSemanticResolve = Future<String?> Function(int semanticTypeId);
 
+/// Applies visibility motion without [Opacity] / [Transform] when they would be no-ops.
+Widget osgWrapVisibilityMotion({
+  required ({double opacity, Offset offset}) vis,
+  required Widget child,
+}) {
+  final double opacity = vis.opacity.clamp(0.0, 1.0);
+  if (opacity <= 0) {
+    return const SizedBox.shrink();
+  }
+  Widget result = child;
+  if (vis.offset != Offset.zero) {
+    result = Transform.translate(offset: vis.offset, child: result);
+  }
+  if (opacity < 1.0) {
+    result = Opacity(opacity: opacity, child: result);
+  }
+  return result;
+}
+
 /// Renders up to five OSG presets in normalized 0..1 coordinates over the canvas.
 class OsgPlayoutLayer extends StatefulWidget {
   const OsgPlayoutLayer({
@@ -201,6 +220,9 @@ class _OsgSinglePresetLayerState extends State<_OsgSinglePresetLayer>
     if (!useSolid && !imageOk) {
       return const SizedBox.shrink();
     }
+    if (!widget.visible && _controller.value == 0) {
+      return const SizedBox.shrink();
+    }
     final String? absPath = !useSolid && imageOk
         ? p.normalize(
             p.join(
@@ -311,7 +333,14 @@ class _OsgSinglePresetLayerState extends State<_OsgSinglePresetLayer>
               }),
             ],
           );
-          final Widget framed = Stack(
+          final Widget graphic = cornerR <= 0
+              ? templateStack
+              : ClipRRect(
+                  borderRadius: BorderRadius.circular(cornerR),
+                  clipBehavior: Clip.antiAlias,
+                  child: templateStack,
+                );
+          return Stack(
             clipBehavior: Clip.none,
             children: <Widget>[
               Positioned(
@@ -319,22 +348,9 @@ class _OsgSinglePresetLayerState extends State<_OsgSinglePresetLayer>
                 top: top,
                 width: fw,
                 height: fh,
-                child: cornerR <= 0
-                    ? templateStack
-                    : ClipRRect(
-                        borderRadius: BorderRadius.circular(cornerR),
-                        clipBehavior: Clip.antiAlias,
-                        child: templateStack,
-                      ),
+                child: osgWrapVisibilityMotion(vis: vis, child: graphic),
               ),
             ],
-          );
-          return Opacity(
-            opacity: vis.opacity.clamp(0.0, 1.0),
-            child: Transform.translate(
-              offset: vis.offset,
-              child: framed,
-            ),
           );
         },
       ),
