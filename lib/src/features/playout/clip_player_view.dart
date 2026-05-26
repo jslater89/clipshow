@@ -1,5 +1,6 @@
-import "dart:io";
 import "dart:async";
+import "dart:io";
+import "dart:math" as math;
 
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
@@ -282,9 +283,13 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       _reachedEnd = true;
     }
 
+    final int currentMs = controller.value.position.inMilliseconds;
+    if (currentMs < widget.startTimeMs) {
+      controller.seekTo(Duration(milliseconds: widget.startTimeMs));
+    }
+
     final int? endMs = widget.endTimeMs;
     if (endMs != null) {
-      final int currentMs = controller.value.position.inMilliseconds;
       if (currentMs > endMs) {
         if (controller.value.isPlaying) {
           controller.pause();
@@ -418,6 +423,43 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     return done;
   }
 
+  Duration _clampSeekPosition(
+    Duration position,
+    VideoPlayerController controller,
+  ) {
+    final Duration clipStart = Duration(milliseconds: widget.startTimeMs);
+    Duration next = position;
+    if (next < clipStart) {
+      next = clipStart;
+    }
+
+    final int? endMs = widget.endTimeMs;
+    if (endMs != null) {
+      final Duration clipEnd = Duration(milliseconds: endMs);
+      if (next > clipEnd) {
+        next = clipEnd;
+      }
+    } else {
+      final Duration duration = controller.value.duration;
+      if (duration > Duration.zero && next > duration) {
+        next = duration;
+      }
+    }
+    return next;
+  }
+
+  Future<void> _seekToClamped(Duration position) => _enqueueSeek(() async {
+    final VideoPlayerController? controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+    _naturalEndPauseApplied = false;
+    _reachedEnd = false;
+    final Duration next = _clampSeekPosition(position, controller);
+    await controller.seekTo(next);
+    _targetSeekPosition = next;
+  });
+
   Future<void> _seekBy(Duration offset) => _enqueueSeek(() async {
     final VideoPlayerController? controller = _controller;
     if (controller == null || !controller.value.isInitialized) {
@@ -426,21 +468,10 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     _naturalEndPauseApplied = false;
     _reachedEnd = false;
 
-    final Duration duration = controller.value.duration;
-    final Duration clipStart = Duration(milliseconds: widget.startTimeMs);
-    Duration next = controller.value.position + offset;
-    if (next < clipStart) {
-      next = clipStart;
-    }
-
-    if (widget.endTimeMs != null) {
-      final Duration clipEnd = Duration(milliseconds: widget.endTimeMs!);
-      if (next > clipEnd) {
-        next = clipEnd;
-      }
-    } else if (duration > Duration.zero && next > duration) {
-      next = duration;
-    }
+    final Duration next = _clampSeekPosition(
+      controller.value.position + offset,
+      controller,
+    );
 
     await controller.seekTo(next);
     _targetSeekPosition = next;
@@ -592,10 +623,13 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          VideoProgressIndicator(
-            controller,
+          _ClipBoundedProgressIndicator(
+            controller: controller,
+            startTimeMs: widget.startTimeMs,
+            endTimeMs: widget.endTimeMs,
             allowScrubbing: true,
             padding: EdgeInsets.symmetric(vertical: progressVerticalPad),
+            onScrub: _seekToClamped,
           ),
           Row(
             children: <Widget>[
@@ -661,5 +695,199 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       return "$hours:${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
     }
     return "${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
+  }
+}
+
+/// Progress bar scoped to clip in/out when bounds are set; otherwise matches
+/// [VideoProgressIndicator] over the full file.
+class _ClipBoundedProgressIndicator extends StatefulWidget {
+  const _ClipBoundedProgressIndicator({
+    required this.controller,
+    required this.startTimeMs,
+    required this.endTimeMs,
+    required this.allowScrubbing,
+    required this.padding,
+    required this.onScrub,
+  });
+
+  final VideoPlayerController controller;
+  final int startTimeMs;
+  final int? endTimeMs;
+  final bool allowScrubbing;
+  final EdgeInsets padding;
+  final Future<void> Function(Duration position) onScrub;
+
+  bool get _hasClipBounds => startTimeMs > 0 || endTimeMs != null;
+
+  @override
+  State<_ClipBoundedProgressIndicator> createState() =>
+      _ClipBoundedProgressIndicatorState();
+}
+
+class _ClipBoundedProgressIndicatorState
+    extends State<_ClipBoundedProgressIndicator> {
+  bool _controllerWasPlaying = false;
+
+  VideoPlayerController get _controller => widget.controller;
+
+  void _handleControllerUpdate() {
+    setState(() {});
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_handleControllerUpdate);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_handleControllerUpdate);
+    super.dispose();
+  }
+
+  int _clipEndMs() {
+    final int? endMs = widget.endTimeMs;
+    if (endMs != null) {
+      return endMs;
+    }
+    return _controller.value.duration.inMilliseconds;
+  }
+
+  int _clipSpanMs() {
+    return math.max(0, _clipEndMs() - widget.startTimeMs);
+  }
+
+  double _playedFraction() {
+    if (!_controller.value.isInitialized) {
+      return 0;
+    }
+    if (!widget._hasClipBounds) {
+      final int durationMs = _controller.value.duration.inMilliseconds;
+      if (durationMs <= 0) {
+        return 0;
+      }
+      return _controller.value.position.inMilliseconds / durationMs;
+    }
+    final int spanMs = _clipSpanMs();
+    if (spanMs <= 0) {
+      return 0;
+    }
+    final int relativeMs =
+        _controller.value.position.inMilliseconds - widget.startTimeMs;
+    return (relativeMs / spanMs).clamp(0.0, 1.0);
+  }
+
+  double _bufferedFraction() {
+    if (!_controller.value.isInitialized) {
+      return 0;
+    }
+    final int durationMs = _controller.value.duration.inMilliseconds;
+    if (durationMs <= 0) {
+      return 0;
+    }
+    final int maxBufferedMs = _controller.value.buffered
+        .map((DurationRange range) => range.end.inMilliseconds)
+        .fold(0, math.max);
+    if (!widget._hasClipBounds) {
+      return maxBufferedMs / durationMs;
+    }
+    final int spanMs = _clipSpanMs();
+    if (spanMs <= 0) {
+      return 0;
+    }
+    final int relativeBufferedMs = maxBufferedMs - widget.startTimeMs;
+    return (relativeBufferedMs / spanMs).clamp(0.0, 1.0);
+  }
+
+  Future<void> _seekToRelative(double relative) async {
+    if (!_controller.value.isInitialized) {
+      return;
+    }
+    final Duration target;
+    if (!widget._hasClipBounds) {
+      target = _controller.value.duration * relative.clamp(0.0, 1.0);
+    } else {
+      final int spanMs = _clipSpanMs();
+      final int targetMs =
+          widget.startTimeMs + (relative.clamp(0.0, 1.0) * spanMs).round();
+      target = Duration(milliseconds: targetMs);
+    }
+    await widget.onScrub(target);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const VideoProgressColors colors = VideoProgressColors();
+    final Widget progressIndicator;
+    if (_controller.value.isInitialized) {
+      progressIndicator = Stack(
+        fit: StackFit.passthrough,
+        children: <Widget>[
+          LinearProgressIndicator(
+            value: _bufferedFraction(),
+            valueColor: AlwaysStoppedAnimation<Color>(colors.bufferedColor),
+            backgroundColor: colors.backgroundColor,
+          ),
+          LinearProgressIndicator(
+            value: _playedFraction(),
+            valueColor: AlwaysStoppedAnimation<Color>(colors.playedColor),
+            backgroundColor: Colors.transparent,
+          ),
+        ],
+      );
+    } else {
+      progressIndicator = LinearProgressIndicator(
+        valueColor: AlwaysStoppedAnimation<Color>(colors.playedColor),
+        backgroundColor: colors.backgroundColor,
+      );
+    }
+
+    final Widget paddedProgressIndicator = Padding(
+      padding: widget.padding,
+      child: progressIndicator,
+    );
+
+    if (!widget.allowScrubbing) {
+      return paddedProgressIndicator;
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      child: paddedProgressIndicator,
+      onHorizontalDragStart: (DragStartDetails details) {
+        if (!_controller.value.isInitialized) {
+          return;
+        }
+        _controllerWasPlaying = _controller.value.isPlaying;
+        if (_controllerWasPlaying) {
+          _controller.pause();
+        }
+      },
+      onHorizontalDragUpdate: (DragUpdateDetails details) {
+        if (!_controller.value.isInitialized) {
+          return;
+        }
+        final RenderBox box = context.findRenderObject()! as RenderBox;
+        final Offset tapPos = box.globalToLocal(details.globalPosition);
+        final double relative = tapPos.dx / box.size.width;
+        unawaited(_seekToRelative(relative));
+      },
+      onHorizontalDragEnd: (DragEndDetails details) {
+        if (_controllerWasPlaying &&
+            _controller.value.position != _controller.value.duration) {
+          unawaited(_controller.play());
+        }
+      },
+      onTapDown: (TapDownDetails details) {
+        if (!_controller.value.isInitialized) {
+          return;
+        }
+        final RenderBox box = context.findRenderObject()! as RenderBox;
+        final Offset tapPos = box.globalToLocal(details.globalPosition);
+        final double relative = tapPos.dx / box.size.width;
+        unawaited(_seekToRelative(relative));
+      },
+    );
   }
 }

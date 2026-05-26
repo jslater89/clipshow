@@ -493,11 +493,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       title: "Enabled (priority order)",
                       child: ReorderableListView(
                         shrinkWrap: true,
-                        onReorder: (int oldIndex, int newIndex) {
+                        onReorderItem: (int oldIndex, int newIndex) {
                           setState(() {
-                            if (newIndex > oldIndex) {
-                              newIndex -= 1;
-                            }
                             final DecoderProfile moved = _enabledDecoders
                                 .removeAt(oldIndex);
                             _enabledDecoders.insert(newIndex, moved);

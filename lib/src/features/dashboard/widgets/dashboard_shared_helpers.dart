@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "package:obs_clipshow/src/features/osg/widgets/osg_semantic_type_icon_catalog.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
@@ -118,7 +119,7 @@ Widget shelfTagChipLabel(ShelfTagEntry e, List<TagSemanticType> semanticTypes) {
       children: <InlineSpan>[
         WidgetSpan(
           alignment: PlaceholderAlignment.middle,
-          child: Icon(IconData(cp, fontFamily: "MaterialIcons"), size: 16),
+          child: Icon(osgMaterialIconFromCodePoint(cp), size: 16),
         ),
         TextSpan(text: " ${e.name}"),
       ],
@@ -139,7 +140,7 @@ Widget mediaTagAttachmentChipLabel(MediaTagAttachment a) {
       children: <InlineSpan>[
         WidgetSpan(
           alignment: PlaceholderAlignment.middle,
-          child: Icon(IconData(cp, fontFamily: "MaterialIcons"), size: 16),
+          child: Icon(osgMaterialIconFromCodePoint(cp), size: 16),
         ),
         TextSpan(text: " ${a.tagName}"),
       ],

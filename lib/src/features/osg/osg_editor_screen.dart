@@ -15,6 +15,7 @@ import "package:obs_clipshow/src/features/osg/osg_editor_geometry.dart";
 import "package:obs_clipshow/src/features/osg/osg_editor_pixel_rect.dart";
 import "package:obs_clipshow/src/features/osg/osg_template_aspect.dart";
 import "package:obs_clipshow/src/features/osg/widgets/osg_preset_canvas_preview.dart";
+import "package:obs_clipshow/src/features/osg/widgets/osg_semantic_type_icon_catalog.dart";
 import "package:obs_clipshow/src/features/osg/widgets/osg_semantic_type_icon_picker.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/osg/osg_preset_pack_zip.dart";

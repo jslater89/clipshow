@@ -12,6 +12,7 @@ import "package:obs_clipshow/src/features/dashboard/dashboard_screen.dart";
 import "package:obs_clipshow/src/workspace/workspace_preferences.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
+import "package:obs_clipshow/src/features/playout/playout_framework_compositing_strip.dart";
 import "package:obs_clipshow/src/features/playout/playout_screen.dart";
 import "package:obs_clipshow/src/features/workspace_settings/workspace_settings_dialog.dart";
 import "package:obs_clipshow/src/obs/obs_service.dart";
@@ -60,6 +61,8 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   bool? _obsConnectionHealthy;
   DateTime? _lastSuccessfulObsPingAt;
   double _uiScale = 1;
+  final PlayoutRootCompositingOverlay _playoutRootCompositingOverlay =
+      PlayoutRootCompositingOverlay();
 
   @override
   void initState() {
@@ -89,6 +92,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
 
   @override
   void dispose() {
+    _playoutRootCompositingOverlay.unmount();
     _viewModel.removeListener(_handleViewModelChanged);
     _obsPingTimer?.cancel();
     unawaited(_obsService.close());
@@ -220,6 +224,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     setState(() {
       _activeClip = clip;
     });
+    _schedulePlayoutCompositingOverlayMount();
     final Completer<void>? gate = _playoutFirstFrameCompleter;
     if (gate != null) {
       try {
@@ -247,6 +252,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
 
   void _onPlayoutFirstFrameReady() {
     _completePlayoutFirstFrameGate();
+    _playoutRootCompositingOverlay.mountFromNavigator(_navigatorKey);
   }
 
   void _completePlayoutFirstFrameGate() {
@@ -258,6 +264,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   }
 
   Future<void> _exitPlayout() async {
+    _playoutRootCompositingOverlay.unmount();
     _completePlayoutFirstFrameGate();
     _pendingPlayoutRecord = false;
     String? exportedPath;
@@ -342,6 +349,19 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     } catch (error) {
       _logger.warning("Unable to reset window aspect ratio constraint: $error");
     }
+  }
+
+  void _schedulePlayoutCompositingOverlayMount() {
+    if (!kPlayoutFrameworkRootCompositingStrip) {
+      return;
+    }
+    _playoutRootCompositingOverlay.resetMountAttempts();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _activeClip == null) {
+        return;
+      }
+      _playoutRootCompositingOverlay.mountFromNavigator(_navigatorKey);
+    });
   }
 
   Future<void> _applyPlayoutWindowMode(PlayoutOutputSize output) async {
@@ -537,7 +557,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     return MaterialApp(
       navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
-      title: "Vanalyst Playout",
+      title: "Clipshow",
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.blueGrey,

@@ -20,9 +20,8 @@ Future<void> main() async {
       await _loadStartupVideoSettings();
   fvp.registerWith(
     options: <String, Object>{
-      "platforms": <String>["windows", "linux"],
-      if (Platform.isLinux)
-        "video.decoders": startupSettings.decoderOptions,
+      "platforms": <String>["windows", "linux", "macos"],
+      "video.decoders": startupSettings.decoderOptions,
       // MDK player buffer: min ms when low + max ms cap (reduces PulseAudio underruns).
       "player": <String, String>{"buffer": "2000+60000"},
       // Applied after fvp's internal "log":"all"; overrides MDK global log level.

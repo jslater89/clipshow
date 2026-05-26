@@ -107,7 +107,3 @@ class _OsgSemanticTypeIconPickerDialogState
     );
   }
 }
-
-IconData osgMaterialIconFromCodePoint(int codePoint) {
-  return IconData(codePoint, fontFamily: "MaterialIcons");
-}
