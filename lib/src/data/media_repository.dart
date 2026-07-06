@@ -10,7 +10,6 @@ import 'package:obs_clipshow/src/media/tag_set.dart';
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
-import "package:obs_clipshow/src/osg/osg_mode_key_color.dart";
 import "package:obs_clipshow/src/workspace/ignored_path_utils.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
@@ -938,7 +937,6 @@ class MediaRepository {
     final List<TagSemanticType> semanticTypes = await listTagSemanticTypes();
     final List<OsgBakeRecipe> osgBakeRecipes = await _loadOsgBakeRecipes();
     final double defaultClipVolume = await _loadDefaultClipVolume();
-    final int osgModeKeyColorArgb = await _loadOsgModeKeyColorArgb();
     final bool osgModeEnabled = await _loadOsgModeEnabled();
     return WorkspaceSettingsBundle(
       telestratorDefaults: telestratorDefaults,
@@ -958,7 +956,6 @@ class MediaRepository {
       tagSemanticTypes: semanticTypes,
       osgBakeRecipes: osgBakeRecipes,
       defaultClipVolume: defaultClipVolume,
-      osgModeKeyColorArgb: osgModeKeyColorArgb,
       osgModeEnabled: osgModeEnabled,
     );
   }
@@ -1279,25 +1276,6 @@ class MediaRepository {
     await _putWorkspaceSetting(
       "playback.defaultClipVolume",
       clamped.toString(),
-    );
-  }
-
-  Future<int> _loadOsgModeKeyColorArgb() async {
-    final String? raw = await _getWorkspaceSetting("osgMode.keyColorArgb");
-    if (raw == null || raw.trim().isEmpty) {
-      return OsgModeKeyColorSettings.defaultKeyColorArgb;
-    }
-    final int? parsed = int.tryParse(raw.trim());
-    if (parsed == null) {
-      return OsgModeKeyColorSettings.defaultKeyColorArgb;
-    }
-    return parsed | 0xFF000000;
-  }
-
-  Future<void> saveOsgModeKeyColorArgb(int argb) async {
-    await _putWorkspaceSetting(
-      "osgMode.keyColorArgb",
-      "${argb | 0xFF000000}",
     );
   }
 

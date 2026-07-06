@@ -385,7 +385,6 @@ class WorkspaceSettingsBundle {
     required this.tagSemanticTypes,
     required this.osgBakeRecipes,
     required this.defaultClipVolume,
-    required this.osgModeKeyColorArgb,
     required this.osgModeEnabled,
   });
 
@@ -425,8 +424,6 @@ class WorkspaceSettingsBundle {
   /// user adjusts via the volume hotkeys. Session adjustments are not persisted.
   final double defaultClipVolume;
 
-  /// Opaque fill behind OSG Mode graphics for OBS Color Key window capture.
-  final int osgModeKeyColorArgb;
 
   /// When false, Enter OSG Mode is unavailable regardless of tag sets or OBS.
   final bool osgModeEnabled;

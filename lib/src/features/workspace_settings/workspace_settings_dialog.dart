@@ -8,7 +8,6 @@ import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/osg/osg_editor_screen.dart";
 import "package:obs_clipshow/src/osg/osg_bake_models.dart";
-import "package:obs_clipshow/src/osg/osg_mode_key_color.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/widgets/rgba_color_picker.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -21,7 +20,8 @@ class WorkspaceSettingsDialog extends StatefulWidget {
       _WorkspaceSettingsDialogState();
 }
 
-class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
+class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _obsAddressController = TextEditingController();
   final TextEditingController _obsPortController = TextEditingController();
   final TextEditingController _obsPasswordController = TextEditingController();
@@ -55,12 +55,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       TextEditingController();
   final TextEditingController _ingestThumbnailConcurrencyController =
       TextEditingController();
-  final TextEditingController _osgModeKeyColorHexController =
-      TextEditingController();
 
+  late TabController _tabController;
   bool _initialized = false;
-  bool _osgModeKeyColorSuggestBusy = false;
-  String? _osgModeKeyColorValidation;
   late TelestratorDefaults _draftTelestratorDefaults;
   late List<DecoderProfile> _enabledDecoders;
   late double _draftDefaultClipVolume;
@@ -68,7 +65,14 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
   WebhookPostBodyType _newWebhookPostBodyType = WebhookPostBodyType.json;
 
   @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
   void dispose() {
+    _tabController.dispose();
     _obsAddressController.dispose();
     _obsPortController.dispose();
     _obsPasswordController.dispose();
@@ -89,9 +93,12 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     _playoutOutputHeightController.dispose();
     _ingestProbeConcurrencyController.dispose();
     _ingestThumbnailConcurrencyController.dispose();
-    _osgModeKeyColorHexController.dispose();
     super.dispose();
   }
+
+  double _gap(BuildContext context) => scaleDimension(context, 12);
+
+  double _sectionDivider(BuildContext context) => scaleDimension(context, 32);
 
   void _showIngestConcurrencySnack(String message) {
     if (!mounted) {
@@ -100,85 +107,6 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Future<void> _applyOsgModeKeyColor(DashboardViewModel viewModel) async {
-    final int? parsed = tryParseHexArgb(_osgModeKeyColorHexController.text);
-    if (parsed == null) {
-      setState(() {
-        _osgModeKeyColorValidation =
-            "Enter a valid #RRGGBB or #AARRGGBB color.";
-      });
-      return;
-    }
-    final int opaque = parsed | 0xFF000000;
-    final OsgKeyColorAnalysis analysis =
-        await viewModel.validateOsgModeKeyColor(opaque);
-    if (!analysis.isSafe) {
-      setState(() {
-        _osgModeKeyColorValidation =
-            "Too close to an OSG graphic color. Use Suggest Safe Key Color or pick another.";
-      });
-      return;
-    }
-    await viewModel.saveOsgModeKeyColorArgb(opaque);
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _osgModeKeyColorHexController.text = formatHexArgb(opaque);
-      _osgModeKeyColorValidation = null;
-    });
-    _showIngestConcurrencySnack(
-      "OSG Mode key color saved. Set the same color in OBS Color Key on the Window Capture source.",
-    );
-  }
-
-  Future<void> _suggestOsgModeKeyColor(DashboardViewModel viewModel) async {
-    if (viewModel.workspacePath == null) {
-      _showIngestConcurrencySnack("Open a workspace first.");
-      return;
-    }
-    setState(() {
-      _osgModeKeyColorSuggestBusy = true;
-      _osgModeKeyColorValidation = null;
-    });
-    final OsgKeyColorSuggestion suggestion =
-        await viewModel.suggestOsgModeKeyColor();
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _osgModeKeyColorSuggestBusy = false;
-      _osgModeKeyColorHexController.text =
-          formatHexArgb(suggestion.suggestedKeyColorArgb);
-      if (suggestion.analysis.isSafe) {
-        _osgModeKeyColorValidation =
-            "Suggested key clears your enabled presets "
-            "(min RGB distance ${suggestion.analysis.minDistanceRgb.toStringAsFixed(0)}). "
-            "Try OBS Similarity ≤ ${suggestion.analysis.recommendedObsSimilarityMax}.";
-      } else {
-        _osgModeKeyColorValidation =
-            "No ideal key found; review presets or pick a custom color.";
-      }
-    });
-  }
-
-  Future<void> _pickOsgModeKeyColor() async {
-    final int current =
-        tryParseHexArgb(_osgModeKeyColorHexController.text) ??
-        OsgModeKeyColorSettings.defaultKeyColorArgb;
-    final int? picked = await showRgbaColorPickerDialog(
-      context,
-      initialArgb: current | 0xFF000000,
-    );
-    if (picked == null || !mounted) {
-      return;
-    }
-    setState(() {
-      _osgModeKeyColorHexController.text = formatHexArgb(picked | 0xFF000000);
-      _osgModeKeyColorValidation = null;
-    });
   }
 
   Future<void> _submitIngestConcurrencySettings(
@@ -273,8 +201,6 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       _draftDefaultClipVolume = PlaybackVolumeDefaults.clamp(
         viewModel.defaultClipVolume,
       );
-      _osgModeKeyColorHexController.text =
-          formatHexArgb(viewModel.osgModeKeyColorArgb);
       _initialized = true;
     }
 
@@ -286,19 +212,37 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     return AlertDialog(
       title: const Text("Workspace Settings"),
       content: SizedBox(
-        width: scaleDimension(context, 900),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
+        width: scaleDimension(context, 1080),
+        height: MediaQuery.sizeOf(context).height * 0.85,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabs: const <Tab>[
+                Tab(text: "Workspace and Canvas"),
+                Tab(text: "On-Screen Graphics"),
+                Tab(text: "Scene Switch"),
+              ],
+            ),
+            SizedBox(height: _gap(context)),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: <Widget>[
+                  _scrollTab(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
               _SectionTitle("Playout canvas size", theme),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Text(
                 "Logical resolution for playout and on-screen graphics (pixels). "
                 "The playout window fits this aspect ratio within your display.",
                 style: theme.textTheme.bodySmall,
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: <Widget>[
@@ -354,9 +298,322 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              Divider(height: scaleDimension(context, 24)),
+              Divider(height: _sectionDivider(context)),
+              _SectionTitle("Playback", theme),
+              SizedBox(height: _gap(context)),
+              Text(
+                "Default clip volume applied when the workspace loads. "
+                "Adjust during playback with Up/Down (\u00B110%) and M (mute); "
+                "those adjustments are session-only.",
+                style: theme.textTheme.bodySmall,
+              ),
+              SizedBox(height: _gap(context)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  Expanded(
+                    child: Slider(
+                      value: _draftDefaultClipVolume,
+                      min: PlaybackVolumeDefaults.min,
+                      max: PlaybackVolumeDefaults.max,
+                      divisions: 20,
+                      label:
+                          "${(_draftDefaultClipVolume * 100).round()}%",
+                      onChanged: (double value) => setState(() {
+                        _draftDefaultClipVolume =
+                            PlaybackVolumeDefaults.clamp(value);
+                      }),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  SizedBox(
+                    width: scaleDimension(context, 64),
+                    child: Text(
+                      "${(_draftDefaultClipVolume * 100).round()}%",
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 12)),
+                  _AsyncFilledButton(
+                    label: "Save",
+                    onPressed: () async {
+                      await viewModel.saveDefaultClipVolume(
+                        _draftDefaultClipVolume,
+                      );
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Default clip volume saved."),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+              Divider(height: _sectionDivider(context)),
+              _SectionTitle("Decoder config", theme),
+              SizedBox(height: _gap(context)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: DropdownButtonFormField<MdkLogVerbosity>(
+                      initialValue: viewModel.mdkLogVerbosity,
+                      decoration: const InputDecoration(
+                        labelText: "Mdk Log Verbosity",
+                        border: OutlineInputBorder(),
+                      ),
+                      items: MdkLogVerbosity.values
+                          .map(
+                            (MdkLogVerbosity value) =>
+                                DropdownMenuItem<MdkLogVerbosity>(
+                                  value: value,
+                                  child: Text(value.name),
+                                ),
+                          )
+                          .toList(),
+                      onChanged: (MdkLogVerbosity? value) {
+                        if (value == null) {
+                          return;
+                        }
+                        unawaited(viewModel.saveMdkLogVerbosity(value));
+                      },
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 12)),
+                  Expanded(
+                    child: DropdownButtonFormField<FvpLogVerbosity>(
+                      initialValue: viewModel.fvpLogVerbosity,
+                      decoration: const InputDecoration(
+                        labelText: "Fvp Log Verbosity (Dart Logger)",
+                        border: OutlineInputBorder(),
+                      ),
+                      items: FvpLogVerbosity.values
+                          .map(
+                            (FvpLogVerbosity value) =>
+                                DropdownMenuItem<FvpLogVerbosity>(
+                                  value: value,
+                                  child: Text(value.name),
+                                ),
+                          )
+                          .toList(),
+                      onChanged: (FvpLogVerbosity? value) {
+                        if (value == null) {
+                          return;
+                        }
+                        unawaited(viewModel.saveFvpLogVerbosity(value));
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: _gap(context)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: _cardWithTitle(
+                      title: "Enabled (priority order)",
+                      child: ReorderableListView(
+                        shrinkWrap: true,
+                        onReorderItem: (int oldIndex, int newIndex) {
+                          setState(() {
+                            final DecoderProfile moved = _enabledDecoders
+                                .removeAt(oldIndex);
+                            _enabledDecoders.insert(newIndex, moved);
+                          });
+                        },
+                        children: _enabledDecoders
+                            .map(
+                              (DecoderProfile profile) => ListTile(
+                                key: ValueKey<String>(
+                                  "decoder-${profile.name}",
+                                ),
+                                
+                                title: Text(profile.label),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.arrow_forward),
+                                  tooltip: "Disable",
+                                  onPressed: () => setState(() {
+                                    _enabledDecoders.remove(profile);
+                                  }),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  Expanded(
+                    child: _cardWithTitle(
+                      title: "Available",
+                      child: Column(
+                        children: availableDecoders
+                            .map(
+                              (DecoderProfile profile) => ListTile(
+                                
+                                title: Text(profile.label),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.arrow_back),
+                                  tooltip: "Enable",
+                                  onPressed: () => setState(() {
+                                    _enabledDecoders.add(profile);
+                                  }),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: _gap(context)),
+              _AsyncFilledButton(
+                label: "Apply Decoder Settings",
+                onPressed: () async {
+                  await viewModel.saveDecoderConfig(
+                    DecoderConfig(enabledProfiles: _enabledDecoders, platform: DecoderPlatform.get()),
+                  );
+                },
+              ),
+              SizedBox(height: scaleDimension(context, 6)),
+              Text(
+                "Future: decoder options list should be populated by platform/capability.",
+                style: theme.textTheme.bodySmall,
+              ),
+              Divider(height: _sectionDivider(context)),
+              _SectionTitle("Ingestion & preview", theme),
+              SizedBox(height: _gap(context)),
+              SwitchListTile(
+                title: const Text("Pause Background Ingest During Manage Playback"),
+                subtitle: Text(
+                  "When enabled, scanning and ffprobe pause while a clip plays in the dashboard preview to avoid disk contention on slow storage (e.g. USB HDD). Full-screen playout always pauses ingest regardless of this setting. Turn off if media lives on a fast internal or external SSD.",
+                  style: theme.textTheme.bodySmall,
+                ),
+                value: viewModel.pauseIngestScanDuringPreview,
+                onChanged: (bool value) =>
+                    unawaited(viewModel.savePauseIngestScanDuringPreview(value)),
+              ),
+              SizedBox(height: scaleDimension(context, 12)),
+              Text(
+                "Ffprobe batch size (${IngestionConcurrencyDefaults.probeMin}–${IngestionConcurrencyDefaults.probeMax}): "
+                "parallel duration probes per batch while scanning the workspace—higher can speed a cold scan on fast storage; lower reduces CPU and disk contention. "
+                "Thumbnail concurrency (${IngestionConcurrencyDefaults.thumbnailMin}–${IngestionConcurrencyDefaults.thumbnailMax}): "
+                "parallel ffmpeg jobs for sidecar JPEGs—lower if ingest pegs the CPU; raise on fast disks when thumbs lag. ",
+                style: theme.textTheme.bodySmall,
+              ),
+              SizedBox(height: _gap(context)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Expanded(
+                    child: TextField(
+                      controller: _ingestProbeConcurrencyController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: <TextInputFormatter>[
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: "Ffprobe Batch Size",
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) => unawaited(
+                        _submitIngestConcurrencySettings(viewModel),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  Expanded(
+                    child: TextField(
+                      controller: _ingestThumbnailConcurrencyController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: <TextInputFormatter>[
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: "Thumbnail Concurrency",
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) => unawaited(
+                        _submitIngestConcurrencySettings(viewModel),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  FilledButton(
+                    onPressed: () => unawaited(
+                      _submitIngestConcurrencySettings(viewModel),
+                    ),
+                    child: const Text("Save"),
+                  ),
+                ],
+              ),
+              Divider(height: _sectionDivider(context)),
+              _SectionTitle("Ignored folders", theme),
+              SizedBox(height: _gap(context)),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: TextField(
+                      controller: _ignoredFolderController,
+                      decoration: const InputDecoration(
+                        labelText: "Relative folder path",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  _AsyncFilledButton(
+                    label: "Add",
+                    onPressed: () async {
+                      final String value = _ignoredFolderController.text.trim();
+                      if (value.isEmpty) {
+                        return;
+                      }
+                      await viewModel.addIgnoredFolder(value);
+                      _ignoredFolderController.clear();
+                    },
+                  ),
+                ],
+              ),
+              SizedBox(height: _gap(context)),
+              Wrap(
+                spacing: scaleDimension(context, 8),
+                runSpacing: scaleDimension(context, 8),
+                children: viewModel.ignoredFolders
+                    .map(
+                      (String folder) => InputChip(
+                        label: Text(folder),
+                        onDeleted: () =>
+                            unawaited(viewModel.removeIgnoredFolder(folder)),
+                      ),
+                    )
+                    .toList(),
+              ),
+              Divider(height: _sectionDivider(context)),
+              _SectionTitle("Export workspace", theme),
+              SizedBox(height: _gap(context)),
+              _AsyncFilledButton(
+                label: "Export JSON",
+                icon: Icons.download,
+                onPressed: () async {
+                  await viewModel.exportWorkspace();
+                },
+              ),
+                      ],
+                    ),
+                  ),
+                  _scrollTab(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
               _SectionTitle("Telestrator settings", theme),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -413,7 +670,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -464,7 +721,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               _AsyncFilledButton(
                 label: "Apply Telestrator Settings",
                 onPressed: () async {
@@ -473,14 +730,14 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   );
                 },
               ),
-              Divider(height: scaleDimension(context, 24)),
-               _SectionTitle("On-screen graphics", theme),
-              SizedBox(height: scaleDimension(context, 8)),
+              Divider(height: _sectionDivider(context)),
+              _SectionTitle("On-screen graphics", theme),
+              SizedBox(height: _gap(context)),
               Text(
                 "Templates, semantic types, and preset slots (hotkeys 8 / 9 / 0 in playout).",
                 style: theme.textTheme.bodySmall,
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text("OSG Mode Enabled"),
@@ -493,7 +750,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 onChanged: (bool value) =>
                     unawaited(viewModel.saveOsgModeEnabled(value)),
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               FilledButton.tonal(
                 onPressed: viewModel.workspacePath == null
                     ? null
@@ -531,86 +788,15 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       },
                 child: const Text("Open on-screen graphics editor…"),
               ),
-              SizedBox(height: scaleDimension(context, 12)),
-              Text(
-                "OSG Mode uses a solid key color behind graphics for OBS Window Capture. "
-                "Add a Color Key filter on the capture source using the same color.",
-                style: theme.textTheme.bodySmall,
-              ),
-              SizedBox(height: scaleDimension(context, 8)),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Container(
-                    width: scaleDimension(context, 40),
-                    height: scaleDimension(context, 40),
-                    decoration: BoxDecoration(
-                      color: Color(
-                        tryParseHexArgb(_osgModeKeyColorHexController.text) ??
-                            OsgModeKeyColorSettings.defaultKeyColorArgb,
-                      ),
-                      border: Border.all(color: theme.dividerColor),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                  SizedBox(width: scaleDimension(context, 8)),
-                  Expanded(
-                    child: TextField(
-                      controller: _osgModeKeyColorHexController,
-                      decoration: InputDecoration(
-                        labelText: "OSG Mode Key Color",
-                        hintText: formatHexArgb(
-                          OsgModeKeyColorSettings.defaultKeyColorArgb,
-                        ),
-                        border: const OutlineInputBorder(),
-                        helperText: _osgModeKeyColorValidation,
-                      ),
-                      inputFormatters: <TextInputFormatter>[
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r"[#0-9A-Fa-f]"),
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(width: scaleDimension(context, 8)),
-                  OutlinedButton(
-                    onPressed: _pickOsgModeKeyColor,
-                    child: const Text("Choose…"),
-                  ),
-                ],
-              ),
-              SizedBox(height: scaleDimension(context, 8)),
-              Wrap(
-                spacing: scaleDimension(context, 8),
-                runSpacing: scaleDimension(context, 8),
-                children: <Widget>[
-                  FilledButton.tonal(
-                    onPressed: _osgModeKeyColorSuggestBusy
-                        ? null
-                        : () => unawaited(_suggestOsgModeKeyColor(viewModel)),
-                    child: _osgModeKeyColorSuggestBusy
-                        ? SizedBox(
-                            width: scaleDimension(context, 18),
-                            height: scaleDimension(context, 18),
-                            child: const CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text("Suggest Safe Key Color"),
-                  ),
-                  _AsyncFilledButton(
-                    label: "Apply OSG Mode Key Color",
-                    onPressed: () => _applyOsgModeKeyColor(viewModel),
-                  ),
-                ],
-              ),
-              Divider(height: scaleDimension(context, 24)),
+              Divider(height: _sectionDivider(context)),
               _SectionTitle("Bake recipes", theme),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Text(
                 "Named OSG timing sets applied when baking a clip to a "
                 "video file (Bake in the preview bar).",
                 style: theme.textTheme.bodySmall,
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               if (viewModel.osgBakeRecipes.isEmpty)
                 Text(
                   "No bake recipes yet.",
@@ -622,7 +808,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       .map(
                         (OsgBakeRecipe recipe) => ListTile(
                           contentPadding: EdgeInsets.zero,
-                          dense: true,
+                          
                           title: Text(recipe.name),
                           subtitle: Text(
                             recipe.cues
@@ -654,269 +840,18 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       )
                       .toList(),
                 ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               FilledButton.tonal(
                 onPressed: () => unawaited(_addBakeRecipe(viewModel)),
                 child: const Text("Add Bake Recipe…"),
               ),
-              Divider(height: scaleDimension(context, 24)),
-              _SectionTitle("Decoder config", theme),
-              SizedBox(height: scaleDimension(context, 8)),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Expanded(
-                    child: DropdownButtonFormField<MdkLogVerbosity>(
-                      initialValue: viewModel.mdkLogVerbosity,
-                      decoration: const InputDecoration(
-                        labelText: "Mdk Log Verbosity",
-                        border: OutlineInputBorder(),
-                      ),
-                      items: MdkLogVerbosity.values
-                          .map(
-                            (MdkLogVerbosity value) =>
-                                DropdownMenuItem<MdkLogVerbosity>(
-                                  value: value,
-                                  child: Text(value.name),
-                                ),
-                          )
-                          .toList(),
-                      onChanged: (MdkLogVerbosity? value) {
-                        if (value == null) {
-                          return;
-                        }
-                        unawaited(viewModel.saveMdkLogVerbosity(value));
-                      },
-                    ),
-                  ),
-                  SizedBox(width: scaleDimension(context, 12)),
-                  Expanded(
-                    child: DropdownButtonFormField<FvpLogVerbosity>(
-                      initialValue: viewModel.fvpLogVerbosity,
-                      decoration: const InputDecoration(
-                        labelText: "Fvp Log Verbosity (Dart Logger)",
-                        border: OutlineInputBorder(),
-                      ),
-                      items: FvpLogVerbosity.values
-                          .map(
-                            (FvpLogVerbosity value) =>
-                                DropdownMenuItem<FvpLogVerbosity>(
-                                  value: value,
-                                  child: Text(value.name),
-                                ),
-                          )
-                          .toList(),
-                      onChanged: (FvpLogVerbosity? value) {
-                        if (value == null) {
-                          return;
-                        }
-                        unawaited(viewModel.saveFvpLogVerbosity(value));
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: scaleDimension(context, 8)),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Expanded(
-                    child: _cardWithTitle(
-                      title: "Enabled (priority order)",
-                      child: ReorderableListView(
-                        shrinkWrap: true,
-                        onReorderItem: (int oldIndex, int newIndex) {
-                          setState(() {
-                            final DecoderProfile moved = _enabledDecoders
-                                .removeAt(oldIndex);
-                            _enabledDecoders.insert(newIndex, moved);
-                          });
-                        },
-                        children: _enabledDecoders
-                            .map(
-                              (DecoderProfile profile) => ListTile(
-                                key: ValueKey<String>(
-                                  "decoder-${profile.name}",
-                                ),
-                                dense: true,
-                                title: Text(profile.label),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.arrow_forward),
-                                  tooltip: "Disable",
-                                  onPressed: () => setState(() {
-                                    _enabledDecoders.remove(profile);
-                                  }),
-                                ),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: scaleDimension(context, 8)),
-                  Expanded(
-                    child: _cardWithTitle(
-                      title: "Available",
-                      child: Column(
-                        children: availableDecoders
-                            .map(
-                              (DecoderProfile profile) => ListTile(
-                                dense: true,
-                                title: Text(profile.label),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.arrow_back),
-                                  tooltip: "Enable",
-                                  onPressed: () => setState(() {
-                                    _enabledDecoders.add(profile);
-                                  }),
-                                ),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: scaleDimension(context, 8)),
-              _AsyncFilledButton(
-                label: "Apply Decoder Settings",
-                onPressed: () async {
-                  await viewModel.saveDecoderConfig(
-                    DecoderConfig(enabledProfiles: _enabledDecoders, platform: DecoderPlatform.get()),
-                  );
-                },
-              ),
-              SizedBox(height: scaleDimension(context, 6)),
-              Text(
-                "Future: decoder options list should be populated by platform/capability.",
-                style: theme.textTheme.bodySmall,
-              ),
-              Divider(height: scaleDimension(context, 24)),
-              _SectionTitle("Playback", theme),
-              SizedBox(height: scaleDimension(context, 8)),
-              Text(
-                "Default clip volume applied when the workspace loads. "
-                "Adjust during playback with Up/Down (\u00B110%) and M (mute); "
-                "those adjustments are session-only.",
-                style: theme.textTheme.bodySmall,
-              ),
-              SizedBox(height: scaleDimension(context, 8)),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: <Widget>[
-                  Expanded(
-                    child: Slider(
-                      value: _draftDefaultClipVolume,
-                      min: PlaybackVolumeDefaults.min,
-                      max: PlaybackVolumeDefaults.max,
-                      divisions: 20,
-                      label:
-                          "${(_draftDefaultClipVolume * 100).round()}%",
-                      onChanged: (double value) => setState(() {
-                        _draftDefaultClipVolume =
-                            PlaybackVolumeDefaults.clamp(value);
-                      }),
-                    ),
-                  ),
-                  SizedBox(width: scaleDimension(context, 8)),
-                  SizedBox(
-                    width: scaleDimension(context, 64),
-                    child: Text(
-                      "${(_draftDefaultClipVolume * 100).round()}%",
-                      textAlign: TextAlign.right,
-                    ),
-                  ),
-                  SizedBox(width: scaleDimension(context, 12)),
-                  _AsyncFilledButton(
-                    label: "Save",
-                    onPressed: () async {
-                      await viewModel.saveDefaultClipVolume(
-                        _draftDefaultClipVolume,
-                      );
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text("Default clip volume saved."),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                ],
-              ),
-              Divider(height: scaleDimension(context, 24)),
-              _SectionTitle("Ingestion & preview", theme),
-              SizedBox(height: scaleDimension(context, 8)),
-              SwitchListTile(
-                title: const Text("Pause Background Ingest During Manage Playback"),
-                subtitle: Text(
-                  "When enabled, scanning and ffprobe pause while a clip plays in the dashboard preview to avoid disk contention on slow storage (e.g. USB HDD). Full-screen playout always pauses ingest regardless of this setting. Turn off if media lives on a fast internal or external SSD.",
-                  style: theme.textTheme.bodySmall,
-                ),
-                value: viewModel.pauseIngestScanDuringPreview,
-                onChanged: (bool value) =>
-                    unawaited(viewModel.savePauseIngestScanDuringPreview(value)),
-              ),
-              SizedBox(height: scaleDimension(context, 12)),
-              Text(
-                "Ffprobe batch size (${IngestionConcurrencyDefaults.probeMin}–${IngestionConcurrencyDefaults.probeMax}): "
-                "parallel duration probes per batch while scanning the workspace—higher can speed a cold scan on fast storage; lower reduces CPU and disk contention. "
-                "Thumbnail concurrency (${IngestionConcurrencyDefaults.thumbnailMin}–${IngestionConcurrencyDefaults.thumbnailMax}): "
-                "parallel ffmpeg jobs for sidecar JPEGs—lower if ingest pegs the CPU; raise on fast disks when thumbs lag. ",
-                style: theme.textTheme.bodySmall,
-              ),
-              SizedBox(height: scaleDimension(context, 8)),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: <Widget>[
-                  Expanded(
-                    child: TextField(
-                      controller: _ingestProbeConcurrencyController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: <TextInputFormatter>[
-                        FilteringTextInputFormatter.digitsOnly,
                       ],
-                      decoration: const InputDecoration(
-                        labelText: "Ffprobe Batch Size",
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onSubmitted: (_) => unawaited(
-                        _submitIngestConcurrencySettings(viewModel),
-                      ),
                     ),
                   ),
-                  SizedBox(width: scaleDimension(context, 8)),
-                  Expanded(
-                    child: TextField(
-                      controller: _ingestThumbnailConcurrencyController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: <TextInputFormatter>[
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: "Thumbnail Concurrency",
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onSubmitted: (_) => unawaited(
-                        _submitIngestConcurrencySettings(viewModel),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: scaleDimension(context, 8)),
-                  FilledButton(
-                    onPressed: () => unawaited(
-                      _submitIngestConcurrencySettings(viewModel),
-                    ),
-                    child: const Text("Save"),
-                  ),
-                ],
-              ),
-              Divider(height: scaleDimension(context, 24)),
-              _SectionTitle("Scene switch settings", theme),
-              SizedBox(height: scaleDimension(context, 8)),
+                  _scrollTab(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
               _cardWithTitle(
                 title: "Profiles",
                 child: Column(
@@ -930,7 +865,6 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     if (viewModel.obsSceneSwitchConfig != null)
                       ListTile(
-                        dense: true,
                         leading: const Icon(Icons.videocam),
                         title: const Text("OBS"),
                         subtitle: Text(
@@ -957,7 +891,6 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       ),
                     ...viewModel.webhookSceneSwitchConfigs.map(
                       (WebhookSceneSwitchConfig item) => ListTile(
-                        dense: true,
                         leading: const Icon(Icons.link),
                         title: Text(item.name),
                         subtitle: Text(item.url),
@@ -991,7 +924,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
               ),
               SizedBox(height: scaleDimension(context, 16)),
               Text("OBS", style: theme.textTheme.titleMedium),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -1017,7 +950,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -1051,7 +984,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               TextField(
                 controller: _obsCaptureSceneController,
                 decoration: const InputDecoration(
@@ -1061,7 +994,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   border: OutlineInputBorder(),
                 ),
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               TextField(
                 controller: _obsOsgSceneController,
                 decoration: const InputDecoration(
@@ -1072,7 +1005,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   border: OutlineInputBorder(),
                 ),
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               _AsyncFilledButton(
                 label: "Save OBS",
                 onPressed: () async {
@@ -1094,7 +1027,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
               ),
               SizedBox(height: scaleDimension(context, 24)),
               Text("OBS Paths", style: theme.textTheme.titleMedium),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -1131,7 +1064,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               TextField(
                 controller: _playoutRecordOutputController,
                 decoration: const InputDecoration(
@@ -1141,7 +1074,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   border: OutlineInputBorder(),
                 ),
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               _AsyncFilledButton(
                 label: "Save Paths",
                 onPressed: () async {
@@ -1168,7 +1101,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
               ),
               SizedBox(height: scaleDimension(context, 24)),
               Text("Webhooks", style: theme.textTheme.titleMedium),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -1193,7 +1126,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ),
                 ],
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -1273,7 +1206,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   ],
                 ],
               ),
-              SizedBox(height: scaleDimension(context, 8)),
+              SizedBox(height: _gap(context)),
               _AsyncFilledButton(
                 label: "Add Webhook",
                 onPressed: () async {
@@ -1298,60 +1231,13 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                   _webhookUrlController.clear();
                 },
               ),
-              Divider(height: scaleDimension(context, 24)),
-              _SectionTitle("Ignored folders", theme),
-              SizedBox(height: scaleDimension(context, 8)),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: TextField(
-                      controller: _ignoredFolderController,
-                      decoration: const InputDecoration(
-                        labelText: "Relative folder path",
-                        border: OutlineInputBorder(),
-                      ),
+                      ],
                     ),
-                  ),
-                  SizedBox(width: scaleDimension(context, 8)),
-                  _AsyncFilledButton(
-                    label: "Add",
-                    onPressed: () async {
-                      final String value = _ignoredFolderController.text.trim();
-                      if (value.isEmpty) {
-                        return;
-                      }
-                      await viewModel.addIgnoredFolder(value);
-                      _ignoredFolderController.clear();
-                    },
                   ),
                 ],
               ),
-              SizedBox(height: scaleDimension(context, 8)),
-              Wrap(
-                spacing: scaleDimension(context, 8),
-                runSpacing: scaleDimension(context, 8),
-                children: viewModel.ignoredFolders
-                    .map(
-                      (String folder) => InputChip(
-                        label: Text(folder),
-                        onDeleted: () =>
-                            unawaited(viewModel.removeIgnoredFolder(folder)),
-                      ),
-                    )
-                    .toList(),
-              ),
-              Divider(height: scaleDimension(context, 24)),
-              _SectionTitle("Export workspace", theme),
-              SizedBox(height: scaleDimension(context, 8)),
-              _AsyncFilledButton(
-                label: "Export JSON",
-                icon: Icons.download,
-                onPressed: () async {
-                  await viewModel.exportWorkspace();
-                },
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
       actions: <Widget>[
@@ -1361,6 +1247,10 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
         ),
       ],
     );
+  }
+
+  Widget _scrollTab(Widget child) {
+    return SingleChildScrollView(child: child);
   }
 
   Future<void> _addBakeRecipe(DashboardViewModel viewModel) async {
@@ -1422,12 +1312,12 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: EdgeInsets.all(scaleDimension(context, 8)),
+        padding: EdgeInsets.all(scaleDimension(context, 12)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(title),
-            SizedBox(height: scaleDimension(context, 8)),
+            SizedBox(height: _gap(context)),
             child,
           ],
         ),
