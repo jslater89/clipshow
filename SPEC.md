@@ -1,7 +1,7 @@
 # Product Specification: Vanalyst Playout & Telestration Client
 
 ## 1. System Overview
-A custom, local desktop application built to serve as a unified media manager, video playout engine, and telestrator for a solo-operated live broadcast. The application interfaces with **OBS Studio** via WebSockets. **Optional HTTP webhooks** can also be called on playout enter/exit (fixed `video` / `face` scene tokens) for external automation. It operates based on a "Workspace" concept, automatically tracking local media files and allowing the operator to cue highlights, trigger scene transitions, and draw over video playback from a single pane of glass without cluttering the OBS source list.
+A custom, local desktop application built to serve as a unified media manager, video playout engine, and telestrator for a solo-operated live broadcast. The application interfaces with **OBS Studio** via WebSockets. **Optional HTTP webhooks** can also be called on playout enter/exit (fixed `video` / `face` / `osg` scene tokens) for external automation. It operates based on a "Workspace" concept, automatically tracking local media files and allowing the operator to cue highlights, trigger scene transitions, and draw over video playback from a single pane of glass without cluttering the OBS source list.
 
 ## 2. Technology Stack
 * **Framework:** Flutter (targeting desktop OS: Windows/Linux)
@@ -13,10 +13,11 @@ A custom, local desktop application built to serve as a unified media manager, v
 * **Windowing:** `window_manager` for aspect ratio, optional fullscreen, title bar visibility, bounds restore
 
 ## 3. OBS Studio Configuration Requirements
-The application expects a practical OBS scene layout; **Video** and **Face** scene names are configurable in workspace settings (defaults below).
+The application expects a practical OBS scene layout; **Video**, **Face**, and **OSG** scene names are configurable in workspace settings (defaults below).
 * **WebSocket server:** OBS WebSocket plugin enabled (default port **4455**, password as configured in the app).
 * **Scene: "Face Scene" (default name):** Primary camera and microphone inputs.
-* **Scene: "Video Scene" (default name):** A source that shows the app (e.g. Window Capture on the Flutter window), scaled to fit the program canvas (e.g. 1920×1080).
+* **Scene: "Video Scene" (default name):** A source that shows the app (e.g. Window Capture on the Flutter window), scaled to fit the program canvas (e.g. 1920×1080). Used during clip playout.
+* **Scene: "OSG Scene" (default name):** Window Capture on the same app window during **OSG Mode** (graphics-only, transparent background). Place a background layer under the capture (e.g. Face camera or nested Face scene) so transparency composites correctly.
 
 ## 4. Workspace Management
 * **Definition:** A Workspace is a root directory on the local file system containing all media assets for a specific project or match.
@@ -24,18 +25,18 @@ The application expects a practical OBS scene layout; **Video** and **Face** sce
 * **Background ingestion:** A file watcher plus scanning keeps the database in sync with the workspace tree. New video files under the workspace (respecting **ignored** paths such as the capture **recording** staging folder) get a **master** row; deletes and changes are reflected without a manual refresh.
 
 ## 5. Application UI States
-The application operates in two mutually exclusive UI states to prevent broadcast errors.
+The application operates in mutually exclusive UI states to prevent broadcast errors.
 
 ### State 1: Dashboard (Management Mode)
-* **Purpose:** Media ingestion, tagging, and preparation. Not broadcasted.
+* **Purpose:** Media ingestion, tagging, tag-set preparation, and OSG priming. Not broadcasted.
 * **Layout structure:**
     * **Workspace header (top):** Current workspace path, open-folder and **Workspace settings** actions, and optional **OBS connection** status when an OBS profile is enabled.
     * **Main row:** A **left** column and a **right** column.
     * **Files (left card):** At the top of this card: **tag search** (with autocomplete to add filter chips), **filename or full-workspace path search** (toggleable), an **Untagged** filter chip, and **active tag filter** chips. Below that, the scrollable list of master files and saved clips (thumbnails, play actions, etc.).
-    * **Right column (tabs):** **Preview** — video preview (top) and a resizable split to the **tagging** panel (bottom): mark in/out, optional display name, tags, and save-clip flow. **Capture** — **OBS Capture Mode** in place of Preview+tagging: start/stop recording via WebSocket, **recording folder** (under workspace, ignored during writes) and **output folder** (empty = workspace root); after stop, the finished file is **copied** to the output folder so ingestion sees it once; tags from the panel are applied to the new **master** at stop time.
+    * **Right column (tabs):** **Manage** — video preview (top) and a resizable split to the **tagging** panel (bottom): mark in/out, optional display name, tags, and save-clip flow. **Tag Sets** — create and tag **bare tag sets** (no video), assign quick slots (keys 1–5 in OSG Mode), and **Enter OSG Mode**. **Capture** — **OBS Capture Mode** in place of Preview+tagging: start/stop recording via WebSocket, **recording folder** (under workspace, ignored during writes) and **output folder** (empty = workspace root); after stop, the finished file is **copied** to the output folder so ingestion sees it once; tags from the panel are applied to the new **master** at stop time.
 
 ### Workspace settings (capture)
-* **OBS:** Configured **Video** / **Face** scenes (names), connection host/port/password, plus optional **Capture** scene (program scene switched before recording when set).
+* **OBS:** Configured **Video** / **Face** / **OSG** scenes (names), connection host/port/password, plus optional **Capture** scene (program scene switched before recording when set).
 * **Capture paths:** **Recording folder** (relative, default `recordings`) is kept in **ignored folders** so partial files do not spam ingest; **output folder** (relative, empty = workspace root) receives the copy after recording stops and the staging file is removed. **Output** must not lie inside the **recording** directory tree (validated in app).
 * **Playout record paths:** **Staging** (default `recordings/export`) and **output** (default `export`) for Record playout; both ignored when under the workspace. **Output** must not lie inside **staging**.
 
@@ -63,6 +64,16 @@ The application operates in two mutually exclusive UI states to prevent broadcas
     5. Playout is torn down (telestrator strokes are discarded with the widget tree).
     6. Dashboard returns; **scroll position** is restored when possible.
 
+### State 3: OSG Mode (graphics mode)
+* **Purpose:** Graphics-only output driven by a **tag set** (semantic tags + workspace OSG presets). No video decoder. Transparent window background for OBS Window Capture on the **OSG** scene.
+* **Trigger:** **Enter OSG Mode** on the Dashboard **Tag Sets** tab (requires configured **OSG** scene name and at least one tag set).
+* **Execution sequence:**
+    1. Dashboard is replaced by the OSG Mode surface (transparent background).
+    2. Same window sizing rules as playout (16:9, hidden title bar).
+    3. After the first frame paints, OBS switches to the **OSG** scene (and/or webhooks with **`osg`** token).
+    4. Operator toggles OSG presets with **6–0** and switches tag sets with **1–5** (quick slots configured on the Tag Sets tab).
+* **Reversion:** **`Escape`** → **Face** scene + Dashboard restore (same window restore as playout exit).
+
 ### Record playout (OBS export)
 * **Purpose:** Produce a shareable video file (OBS-encoded program output) from a clip or master playout session—OSGs, telestrator, and live voiceover via the OBS audio chain—without offline ffmpeg rendering.
 * **Trigger:** **Record** on the dashboard preview action bar (same selection rules as **Playout**; requires an **enabled** OBS profile). Does **not** switch to the Capture scene; records while the **Video** scene is program.
@@ -81,7 +92,8 @@ Metadata lives in SQLite; masters and clips are normalized.
     * **`display_name_override`:** Optional operator label for the clip in lists (separate from filename).
     * **`in_ms` / `out_ms`:** Integers; **in** is required; **out** nullable (open-ended segment).
     * **`created_at_ms`:** Creation time.
-* **Tags:** Normalized **`tags`** table and **`media_tags`** linking **masters** or **clips** to tag names for filtering and organization.
+* **Tags:** Normalized **`tags`** table and **`media_tags`** linking **masters**, **clips**, or **tag sets** to tag names for filtering, organization, and OSG semantic resolution.
+* **Tag set (`tag_sets`):** Named, video-less entity with optional **`annotations`** and tag attachments (same **`media_tags`** pattern as clips). Used to drive OSG Mode without a master file.
 
 Logical “clip” fields map as: **master path** via join to master row; **title** from **`display_name_override`** or derived display rules; **tags** via **`media_tags`**; range from **`in_ms` / `out_ms`**.
 

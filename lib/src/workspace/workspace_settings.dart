@@ -263,6 +263,7 @@ class ObsSceneSwitchConfig {
     required this.videoScene,
     required this.faceScene,
     required this.captureScene,
+    required this.osgScene,
   });
 
   factory ObsSceneSwitchConfig.fallback() {
@@ -274,6 +275,7 @@ class ObsSceneSwitchConfig {
       videoScene: "Video Scene",
       faceScene: "Face Scene",
       captureScene: "",
+      osgScene: "OSG Scene",
     );
   }
 
@@ -286,6 +288,9 @@ class ObsSceneSwitchConfig {
 
   /// Empty string disables switching before capture.
   final String captureScene;
+
+  /// Empty string disables OSG Mode scene switching.
+  final String osgScene;
 }
 
 /// Paths relative to workspace root (POSIX-style segments). Used for OBS staging copy workflow.

@@ -4,6 +4,7 @@ import "package:provider/provider.dart";
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_widgets.dart";
+import "package:obs_clipshow/src/features/osg_mode/osg_mode_session.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 
 class DashboardScreen extends StatelessWidget {
@@ -12,6 +13,7 @@ class DashboardScreen extends StatelessWidget {
     required this.viewModel,
     required this.onPlayClip,
     required this.onRecordClip,
+    required this.onEnterOsgMode,
     required this.onWorkspaceSettingsRequested,
     required this.obsConnectionHealthy,
     required this.obsLastSuccessfulPingHms,
@@ -21,6 +23,7 @@ class DashboardScreen extends StatelessWidget {
   final DashboardViewModel viewModel;
   final void Function(PlayoutClip clip) onPlayClip;
   final void Function(PlayoutClip clip) onRecordClip;
+  final void Function(OsgModeSession session) onEnterOsgMode;
   final VoidCallback onWorkspaceSettingsRequested;
   final bool? obsConnectionHealthy;
   final String? obsLastSuccessfulPingHms;
@@ -48,6 +51,7 @@ class DashboardScreen extends StatelessWidget {
                 child: DashboardBody(
                   onPlayClip: onPlayClip,
                   onRecordClip: onRecordClip,
+                  onEnterOsgMode: onEnterOsgMode,
                   scrollController: scrollController,
                 ),
               ),

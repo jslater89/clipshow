@@ -12,7 +12,7 @@ class AppDatabase {
     return databaseFactoryFfi.openDatabase(
       workspace.databasePath,
       options: OpenDatabaseOptions(
-        version: 10,
+        version: 11,
         onConfigure: (Database db) async {
           await db.execute("PRAGMA foreign_keys = ON;");
         },
@@ -37,6 +37,7 @@ class AppDatabase {
             ON master_media_files(modified_at_ms DESC);
           """);
           await _createClipAndTagTables(db);
+          await _createTagSetsTable(db);
           await _createWorkspaceSettingsTables(db);
           await db.rawInsert(
             "INSERT OR IGNORE INTO ignored_folders (relative_path) VALUES (?)",
@@ -82,6 +83,9 @@ class AppDatabase {
           if (oldVersion < 10) {
             await _addAnnotationsColumnsIfMissing(db);
           }
+          if (oldVersion < 11) {
+            await _upgradeToV11TagSets(db);
+          }
         },
       ),
     );
@@ -120,7 +124,7 @@ class AppDatabase {
     await db.execute("""
       CREATE TABLE media_tags (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        media_type TEXT NOT NULL CHECK(media_type IN ('master', 'clip')),
+        media_type TEXT NOT NULL CHECK(media_type IN ('master', 'clip', 'tag_set')),
         media_id INTEGER NOT NULL,
         tag_id INTEGER NOT NULL,
         semantic_type_id INTEGER,
@@ -142,6 +146,88 @@ class AppDatabase {
     """);
   }
 
+  Future<void> _createTagSetsTable(Database db) async {
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS tag_sets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        annotations TEXT,
+        created_at_ms INTEGER NOT NULL
+      );
+    """);
+    await db.execute("""
+      CREATE INDEX idx_tag_sets_created_at_ms
+      ON tag_sets(created_at_ms DESC);
+    """);
+  }
+
+  Future<void> _upgradeToV11TagSets(Database db) async {
+    await _createTagSetsTable(db);
+    await _addObsOsgSceneColumnIfMissing(db);
+    await _rebuildMediaTagsForTagSetSupport(db);
+  }
+
+  Future<void> _addObsOsgSceneColumnIfMissing(Database db) async {
+    final List<Map<String, Object?>> tables = await db.rawQuery("""
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name = 'scene_switch_profiles'
+      """);
+    if (tables.isEmpty) {
+      return;
+    }
+    final List<Map<String, Object?>> columns = await db.rawQuery(
+      "PRAGMA table_info(scene_switch_profiles);",
+    );
+    final bool hasColumn = columns.any(
+      (Map<String, Object?> row) => row["name"] == "obs_osg_scene",
+    );
+    if (!hasColumn) {
+      await db.execute("""
+        ALTER TABLE scene_switch_profiles
+        ADD COLUMN obs_osg_scene TEXT;
+      """);
+    }
+  }
+
+  Future<void> _rebuildMediaTagsForTagSetSupport(Database db) async {
+    final List<Map<String, Object?>> tables = await db.rawQuery("""
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name = 'media_tags'
+      """);
+    if (tables.isEmpty) {
+      return;
+    }
+    await db.execute("PRAGMA foreign_keys = OFF;");
+    await db.transaction((Transaction txn) async {
+      await txn.execute("""
+        CREATE TABLE media_tags_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          media_type TEXT NOT NULL CHECK(media_type IN ('master', 'clip', 'tag_set')),
+          media_id INTEGER NOT NULL,
+          tag_id INTEGER NOT NULL,
+          semantic_type_id INTEGER,
+          FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+          FOREIGN KEY(semantic_type_id) REFERENCES tag_semantic_types(id) ON DELETE SET NULL,
+          UNIQUE(media_type, media_id, tag_id)
+        );
+      """);
+      await txn.execute("""
+        INSERT INTO media_tags_new (
+          id, media_type, media_id, tag_id, semantic_type_id
+        )
+        SELECT id, media_type, media_id, tag_id, semantic_type_id
+        FROM media_tags;
+      """);
+      await txn.execute("DROP TABLE media_tags;");
+      await txn.execute("ALTER TABLE media_tags_new RENAME TO media_tags;");
+      await txn.execute("""
+        CREATE INDEX idx_media_tags_media_ref
+        ON media_tags(media_type, media_id);
+      """);
+    });
+    await db.execute("PRAGMA foreign_keys = ON;");
+  }
+
   Future<void> _createWorkspaceSettingsTables(Database db) async {
     await db.execute("""
       CREATE TABLE workspace_settings (
@@ -161,6 +247,7 @@ class AppDatabase {
         obs_video_scene TEXT,
         obs_face_scene TEXT,
         obs_capture_scene TEXT,
+        obs_osg_scene TEXT,
         webhook_url TEXT,
         webhook_method TEXT CHECK(webhook_method IN ('GET', 'POST')),
         webhook_get_query_param TEXT,

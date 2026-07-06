@@ -8,6 +8,7 @@ import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_media_tag_menu.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
+import "package:obs_clipshow/src/features/osg_mode/osg_mode_session.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_clip.dart";
@@ -21,6 +22,7 @@ class DashboardFileListPanel extends StatelessWidget {
     required this.workspacePath,
     required this.mediaItems,
     required this.onPlayClip,
+    required this.onEnterOsgMode,
     required this.onMediaItemSelected,
     required this.onPreviewFocusRequested,
     this.scrollController,
@@ -29,6 +31,7 @@ class DashboardFileListPanel extends StatelessWidget {
   final String workspacePath;
   final List<MediaListItem> mediaItems;
   final void Function(PlayoutClip clip) onPlayClip;
+  final void Function(OsgModeSession session) onEnterOsgMode;
   final void Function(MediaListItem item) onMediaItemSelected;
   final VoidCallback onPreviewFocusRequested;
   final ScrollController? scrollController;
@@ -65,7 +68,11 @@ class DashboardFileListPanel extends StatelessWidget {
               children: <Widget>[
                 Row(
                   children: <Widget>[
-                    const Text("Files"),
+                    Text(
+                      viewModel.mediaPaneTab == DashboardMediaPaneTab.tagSets
+                          ? "Tag Sets"
+                          : "Files",
+                    ),
                     SizedBox(width: gap8),
                     Expanded(
                       child: AdaptiveAutocomplete<String>(
@@ -127,41 +134,54 @@ class DashboardFileListPanel extends StatelessWidget {
                             },
                       ),
                     ),
-                    SizedBox(width: gap8),
-                    Expanded(
-                      child: TextFormField(
-                        initialValue: viewModel.fileNameSearchQuery,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          hintText: viewModel.fileSearchUsesFullPath
-                              ? "Search workspace path"
-                              : "Search filename",
-                          border: const OutlineInputBorder(),
-                          suffixIcon: IconButton(
-                            tooltip: viewModel.fileSearchUsesFullPath
-                                ? "Searching full workspace path (click for filename only)"
-                                : "Searching filename only (click for full workspace path)",
-                            icon: Icon(
-                              viewModel.fileSearchUsesFullPath
-                                  ? Icons.folder_open
-                                  : Icons.description_outlined,
+                    if (viewModel.mediaPaneTab !=
+                        DashboardMediaPaneTab.tagSets) ...<Widget>[
+                      SizedBox(width: gap8),
+                      Expanded(
+                        child: TextFormField(
+                          initialValue: viewModel.fileNameSearchQuery,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: viewModel.fileSearchUsesFullPath
+                                ? "Search workspace path"
+                                : "Search filename",
+                            border: const OutlineInputBorder(),
+                            suffixIcon: IconButton(
+                              tooltip: viewModel.fileSearchUsesFullPath
+                                  ? "Searching full workspace path (click for filename only)"
+                                  : "Searching filename only (click for full workspace path)",
+                              icon: Icon(
+                                viewModel.fileSearchUsesFullPath
+                                    ? Icons.folder_open
+                                    : Icons.description_outlined,
+                              ),
+                              onPressed: viewModel.toggleFileSearchScope,
                             ),
-                            onPressed: viewModel.toggleFileSearchScope,
                           ),
+                          onChanged: viewModel.setFileNameSearchQuery,
+                          onTapOutside: (_) {
+                            FocusScope.of(context).unfocus();
+                            onPreviewFocusRequested();
+                          },
                         ),
-                        onChanged: viewModel.setFileNameSearchQuery,
-                        onTapOutside: (_) {
-                          FocusScope.of(context).unfocus();
-                          onPreviewFocusRequested();
-                        },
                       ),
-                    ),
+                    ],
                     SizedBox(width: gap8),
                     FilterChip(
                       label: const Text("Untagged"),
                       selected: viewModel.showUntaggedOnly,
                       onSelected: viewModel.setShowUntaggedOnly,
                     ),
+                    if (viewModel.mediaPaneTab ==
+                        DashboardMediaPaneTab.tagSets) ...<Widget>[
+                      SizedBox(width: gap8),
+                      OutlinedButton.icon(
+                        onPressed: () =>
+                            unawaited(_createTagSet(context, viewModel)),
+                        icon: const Icon(Icons.add),
+                        label: const Text("Tag Set"),
+                      ),
+                    ],
                   ],
                 ),
                 SizedBox(height: gap8),
@@ -220,11 +240,13 @@ class DashboardFileListPanel extends StatelessWidget {
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (BuildContext context, int index) {
                 final MediaListItem item = mediaItems[index];
-                final String relativePath =
-                    WorkspaceMediaPaths.displayRelativeToWorkspace(
-                      workspacePath,
-                      item.filePath,
-                    );
+                final bool isTagSet = item.type == MediaListItemType.tagSet;
+                final String relativePath = isTagSet
+                    ? "Tag Set"
+                    : WorkspaceMediaPaths.displayRelativeToWorkspace(
+                        workspacePath,
+                        item.filePath,
+                      );
                 final bool isSelected =
                     viewModel.selectedItemKey == item.stableKey;
                 final MediaIssue mediaIssue = item.mediaIssue;
@@ -272,16 +294,21 @@ class DashboardFileListPanel extends StatelessWidget {
                                   ),
                                   SizedBox(height: gap4),
                                 ],
-                                _ThumbnailPreview(
-                                  videoPath:
-                                      WorkspaceMediaPaths.absoluteMasterPath(
-                                        workspacePath,
-                                        item.filePath,
+                                isTagSet
+                                    ? _TagSetThumbnailPlaceholder(
+                                        width: thumbWidth,
+                                        height: thumbHeight,
+                                      )
+                                    : _ThumbnailPreview(
+                                        videoPath:
+                                            WorkspaceMediaPaths.absoluteMasterPath(
+                                              workspacePath,
+                                              item.filePath,
+                                            ),
+                                        issue: mediaIssue,
+                                        width: thumbWidth,
+                                        height: thumbHeight,
                                       ),
-                                  issue: mediaIssue,
-                                  width: thumbWidth,
-                                  height: thumbHeight,
-                                ),
                               ],
                             ),
                           ),
@@ -294,11 +321,14 @@ class DashboardFileListPanel extends StatelessWidget {
                                   TextSpan(
                                     children: <InlineSpan>[
                                       TextSpan(
-                                        text:
-                                            item.type ==
-                                                MediaListItemType.master
-                                            ? item.displayName
-                                            : "${item.displayName} (${clipRangeLabel(item.clip!)})",
+                                        text: switch (item.type) {
+                                          MediaListItemType.master =>
+                                            item.displayName,
+                                          MediaListItemType.tagSet =>
+                                            item.displayName,
+                                          MediaListItemType.clip =>
+                                            "${item.displayName} (${clipRangeLabel(item.clip!)})",
+                                        },
                                       ),
                                       if (item.displayName != item.fileName)
                                         WidgetSpan(
@@ -372,34 +402,49 @@ class DashboardFileListPanel extends StatelessWidget {
                               ],
                             ),
                           ),
-                          IconButton(
-                            tooltip: mediaIssue == MediaIssue.none
-                                ? "Play"
-                                : mediaIssue == MediaIssue.empty
-                                ? "Empty file"
-                                : "Unreadable or corrupt file",
-                            onPressed: mediaIssue == MediaIssue.none
-                                ? () => onPlayClip(
-                                    toPlayoutClip(
-                                      item,
-                                      workspaceRoot: workspacePath,
-                                      osgPresetVisibleInitial: viewModel
-                                          .previewOsgPresetVisibility,
-                                      semanticTagSnapshotVersion: viewModel
-                                          .semanticTagSnapshotForItem(item),
-                                      semanticTypeIdsOnMedia: viewModel
-                                          .semanticTypeIdsOnMedia(item),
+                          if (isTagSet)
+                            IconButton(
+                              tooltip: "Enter OSG Mode with this tag set",
+                              onPressed: !viewModel.canEnterOsgModeForTagSet(
+                                item.tagSet!,
+                              )
+                                  ? null
+                                  : () => onEnterOsgMode(
+                                      viewModel.buildOsgModeSessionForTagSet(
+                                        item.tagSet!,
+                                      ),
                                     ),
-                                  )
-                                : null,
-                            icon: Icon(
-                              mediaIssue == MediaIssue.none
-                                  ? Icons.play_arrow
+                              icon: const Icon(Icons.layers_outlined),
+                            )
+                          else
+                            IconButton(
+                              tooltip: mediaIssue == MediaIssue.none
+                                  ? "Play"
                                   : mediaIssue == MediaIssue.empty
-                                  ? Icons.remove_circle_outline
-                                  : Icons.close,
+                                  ? "Empty file"
+                                  : "Unreadable or corrupt file",
+                              onPressed: mediaIssue == MediaIssue.none
+                                  ? () => onPlayClip(
+                                      toPlayoutClip(
+                                        item,
+                                        workspaceRoot: workspacePath,
+                                        osgPresetVisibleInitial: viewModel
+                                            .previewOsgPresetVisibility,
+                                        semanticTagSnapshotVersion: viewModel
+                                            .semanticTagSnapshotForItem(item),
+                                        semanticTypeIdsOnMedia: viewModel
+                                            .semanticTypeIdsOnMedia(item),
+                                      ),
+                                    )
+                                  : null,
+                              icon: Icon(
+                                mediaIssue == MediaIssue.none
+                                    ? Icons.play_arrow
+                                    : mediaIssue == MediaIssue.empty
+                                    ? Icons.remove_circle_outline
+                                    : Icons.close,
+                              ),
                             ),
-                          ),
                         ],
                       ),
                     ),
@@ -412,10 +457,29 @@ class DashboardFileListPanel extends StatelessWidget {
       ),
     );
   }
+
+  Future<void> _createTagSet(
+    BuildContext context,
+    DashboardViewModel viewModel,
+  ) async {
+    final String? name = await showNamePromptDialog(
+      context,
+      title: "New Tag Set",
+      initialValue: "",
+    );
+    if (name == null || name.trim().isEmpty) {
+      return;
+    }
+    await viewModel.createTagSet(name.trim());
+  }
 }
 
-/// Master: probed file duration when present. Clip: marked segment length when out point is set.
+/// Master: probed file duration when present. Clip: marked segment length
+/// when out point is set. Tag sets have no duration.
 String? _durationLabelAboveThumbnail(MediaListItem item) {
+  if (item.type == MediaListItemType.tagSet) {
+    return null;
+  }
   if (item.type == MediaListItemType.master) {
     final int? ms = item.master!.durationMs;
     if (ms == null) {
@@ -432,6 +496,36 @@ String? _durationLabelAboveThumbnail(MediaListItem item) {
     return null;
   }
   return formatMs(lenMs);
+}
+
+class _TagSetThumbnailPlaceholder extends StatelessWidget {
+  const _TagSetThumbnailPlaceholder({required this.width, required this.height});
+
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final double radius = scaleDimension(context, 4);
+    final double iconSize = scaleDimension(context, 18);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Container(
+          color: scheme.surfaceContainerHighest,
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.layers_outlined,
+            size: iconSize,
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ThumbnailPreview extends StatelessWidget {

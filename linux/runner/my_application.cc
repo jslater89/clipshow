@@ -54,15 +54,22 @@ static void my_application_activate(GApplication* application) {
 
   gtk_window_set_default_size(window, 1280, 720);
 
+  GdkScreen* rgba_screen = gtk_window_get_screen(window);
+  if (rgba_screen != nullptr) {
+    GdkVisual* rgba_visual = gdk_screen_get_rgba_visual(rgba_screen);
+    if (rgba_visual != nullptr && gdk_screen_is_composited(rgba_screen)) {
+      gtk_widget_set_visual(GTK_WIDGET(window), rgba_visual);
+    }
+  }
+
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
-  // Background defaults to black, override it here if necessary, e.g. #00000000
-  // for transparent.
-  gdk_rgba_parse(&background_color, "#000000");
+  // Transparent Flutter view background for OSG Mode window capture (X11).
+  gdk_rgba_parse(&background_color, "#00000000");
   fl_view_set_background_color(view, &background_color);
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));

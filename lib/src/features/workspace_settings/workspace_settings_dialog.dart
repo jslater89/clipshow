@@ -29,6 +29,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
   final TextEditingController _obsFaceSceneController = TextEditingController();
   final TextEditingController _obsCaptureSceneController =
       TextEditingController();
+  final TextEditingController _obsOsgSceneController = TextEditingController();
   final TextEditingController _captureRecordingDirController =
       TextEditingController();
   final TextEditingController _captureOutputDirController =
@@ -69,6 +70,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     _obsVideoSceneController.dispose();
     _obsFaceSceneController.dispose();
     _obsCaptureSceneController.dispose();
+    _obsOsgSceneController.dispose();
     _captureRecordingDirController.dispose();
     _captureOutputDirController.dispose();
     _playoutRecordStagingController.dispose();
@@ -163,6 +165,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       _obsVideoSceneController.text = obsConfig.videoScene;
       _obsFaceSceneController.text = obsConfig.faceScene;
       _obsCaptureSceneController.text = obsConfig.captureScene;
+      _obsOsgSceneController.text = obsConfig.osgScene;
       final CapturePathsSettings capturePaths = viewModel.capturePathsSettings;
       _captureRecordingDirController.text = capturePaths.recordingRelativeDir;
       _captureOutputDirController.text = capturePaths.outputRelativeDir;
@@ -888,6 +891,16 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 ),
               ),
               SizedBox(height: scaleDimension(context, 8)),
+              TextField(
+                controller: _obsOsgSceneController,
+                decoration: const InputDecoration(
+                  labelText: "OSG Scene",
+                  helperText:
+                      "Program scene for graphics-only OSG Mode (empty disables).",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
               _AsyncFilledButton(
                 label: "Save OBS",
                 onPressed: () async {
@@ -902,6 +915,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                       videoScene: _obsVideoSceneController.text.trim(),
                       faceScene: _obsFaceSceneController.text.trim(),
                       captureScene: _obsCaptureSceneController.text.trim(),
+                      osgScene: _obsOsgSceneController.text.trim(),
                     ),
                   );
                 },

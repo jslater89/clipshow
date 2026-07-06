@@ -14,7 +14,10 @@ import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/features/playout/playout_framework_compositing_strip.dart";
 import "package:obs_clipshow/src/features/playout/playout_screen.dart";
+import "package:obs_clipshow/src/features/osg_mode/osg_mode_screen.dart";
+import "package:obs_clipshow/src/features/osg_mode/osg_mode_session.dart";
 import "package:obs_clipshow/src/features/workspace_settings/workspace_settings_dialog.dart";
+import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/obs/obs_service.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/util/reveal_file_in_folder.dart";
@@ -22,6 +25,8 @@ import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 import "package:path/path.dart" as p;
 
 enum PlayoutWindowMode { windowed, fullscreen }
+
+enum _SceneSwitchTarget { face, video, osg }
 
 class ObsClipshowApp extends StatefulWidget {
   const ObsClipshowApp({super.key});
@@ -52,6 +57,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   Rect? _prePlayoutBounds;
   bool _wasMaximizedBeforePlayout = false;
   PlayoutClip? _activeClip;
+  OsgModeSession? _activeOsgModeSession;
   Completer<void>? _playoutFirstFrameCompleter;
   bool _pendingPlayoutRecord = false;
   static const Duration _playoutFirstFrameTimeout = Duration(seconds: 30);
@@ -120,7 +126,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       return;
     }
     final String nextKey =
-        "${obsConfig.serverAddress}:${obsConfig.port}:${obsConfig.password}:${obsConfig.videoScene}:${obsConfig.faceScene}";
+        "${obsConfig.serverAddress}:${obsConfig.port}:${obsConfig.password}:${obsConfig.videoScene}:${obsConfig.faceScene}:${obsConfig.osgScene}";
     if (_obsConfigKey != nextKey) {
       _obsConfigKey = nextKey;
       if (mounted) {
@@ -204,7 +210,78 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       password: obsConfig.password.isEmpty ? null : obsConfig.password,
       videoSceneName: obsConfig.videoScene,
       faceSceneName: obsConfig.faceScene,
+      osgSceneName: obsConfig.osgScene,
     );
+  }
+
+  Future<void> _enterOsgMode(OsgModeSession session) async {
+    _viewModel.setPlayoutActive(true);
+    if (_dashboardScrollController.hasClients) {
+      _lastDashboardScrollOffset = _dashboardScrollController.offset;
+    }
+    try {
+      _prePlayoutBounds = await windowManager.getBounds();
+    } catch (error) {
+      _logger.warning("Unable to capture window bounds before OSG mode: $error");
+    }
+
+    await _applyPlayoutWindowMode(_viewModel.playoutOutputSize);
+    setState(() {
+      _activeOsgModeSession = session;
+    });
+    _schedulePlayoutCompositingOverlayMount();
+  }
+
+  Future<void> _onOsgModeFirstFrameReady() async {
+    if (!mounted || _activeOsgModeSession == null) {
+      return;
+    }
+    await _switchToOsgScene();
+  }
+
+  Future<void> _exitOsgMode() async {
+    _playoutRootCompositingOverlay.unmount();
+    await _switchToFaceScene();
+    await windowManager.setFullScreen(false);
+    await windowManager.setTitleBarStyle(TitleBarStyle.normal);
+    await _unlockAspectRatio();
+    if (_prePlayoutBounds != null) {
+      try {
+        await windowManager.setBounds(_prePlayoutBounds);
+      } catch (error) {
+        _logger.warning(
+          "Unable to restore window bounds after OSG mode: $error",
+        );
+      }
+    }
+    if (_wasMaximizedBeforePlayout) {
+      try {
+        await windowManager.maximize();
+      } catch (error) {
+        _logger.warning(
+          "Unable to re-maximize window after OSG mode: $error",
+        );
+      }
+      _wasMaximizedBeforePlayout = false;
+    }
+    setState(() {
+      _activeOsgModeSession = null;
+    });
+    _viewModel.setPlayoutActive(false);
+    unawaited(_restoreDashboardScrollOffset());
+  }
+
+  Future<OsgModeSession?> _switchOsgModeQuickSlot(int slotIndex) async {
+    final OsgModeSession? next = _viewModel.buildOsgModeSessionForQuickSlot(
+      slotIndex,
+    );
+    if (next == null) {
+      return null;
+    }
+    setState(() {
+      _activeOsgModeSession = next;
+    });
+    return next;
   }
 
   Future<void> _enterPlayout(PlayoutClip clip, {bool record = false}) async {
@@ -357,11 +434,69 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     }
     _playoutRootCompositingOverlay.resetMountAttempts();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _activeClip == null) {
+      if (!mounted || (_activeClip == null && _activeOsgModeSession == null)) {
         return;
       }
       _playoutRootCompositingOverlay.mountFromNavigator(_navigatorKey);
     });
+  }
+
+  Widget _buildHome(DashboardViewModel viewModel) {
+    if (_activeClip != null) {
+      return ChangeNotifierProvider<DashboardViewModel>.value(
+        value: viewModel,
+        child: PlayoutScreen(
+          clip: _activeClip!,
+          osgWorkspaceConfig: viewModel.osgWorkspaceConfig,
+          workspaceRoot: viewModel.workspacePath ?? "",
+          tagSemanticTypes: viewModel.tagSemanticTypes,
+          telestratorDefaults: viewModel.telestratorDefaults,
+          onResolveSemanticText: (int semanticTypeId) =>
+              viewModel.resolveSemanticTagText(
+                _activeClip!,
+                semanticTypeId,
+              ),
+          onExitRequested: _exitPlayout,
+          onFirstFrameReady: _onPlayoutFirstFrameReady,
+        ),
+      );
+    }
+    if (_activeOsgModeSession != null) {
+      final OsgModeSession session = _activeOsgModeSession!;
+      return ChangeNotifierProvider<DashboardViewModel>.value(
+        value: viewModel,
+        child: OsgModeScreen(
+          session: session,
+          osgWorkspaceConfig: viewModel.osgWorkspaceConfig,
+          workspaceRoot: viewModel.workspacePath ?? "",
+          tagSemanticTypes: viewModel.tagSemanticTypes,
+          onResolveSemanticText: (int semanticTypeId) =>
+              viewModel.resolveSemanticTagTextForMedia(
+                mediaType: MediaListItemType.tagSet,
+                mediaId: session.tagSetId,
+                semanticTypeId: semanticTypeId,
+              ),
+          onExitRequested: _exitOsgMode,
+          onFirstFrameReady: _onOsgModeFirstFrameReady,
+          onTagSetQuickSlot: _switchOsgModeQuickSlot,
+          onSessionChanged: (OsgModeSession next) {
+            setState(() {
+              _activeOsgModeSession = next;
+            });
+          },
+        ),
+      );
+    }
+    return DashboardScreen(
+      viewModel: viewModel,
+      onPlayClip: (PlayoutClip clip) => _enterPlayout(clip),
+      onRecordClip: (PlayoutClip clip) => _enterPlayout(clip, record: true),
+      onEnterOsgMode: _enterOsgMode,
+      onWorkspaceSettingsRequested: _showWorkspaceSettings,
+      obsConnectionHealthy: _obsConnectionHealthy,
+      obsLastSuccessfulPingHms: _formatHms(_lastSuccessfulObsPingAt),
+      scrollController: _dashboardScrollController,
+    );
   }
 
   Future<void> _applyPlayoutWindowMode(PlayoutOutputSize output) async {
@@ -438,14 +573,18 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   }
 
   Future<void> _switchToVideoScene() async {
-    await _runSceneSwitch(enteringPlayout: true);
+    await _runSceneSwitch(target: _SceneSwitchTarget.video);
   }
 
   Future<void> _switchToFaceScene() async {
-    await _runSceneSwitch(enteringPlayout: false);
+    await _runSceneSwitch(target: _SceneSwitchTarget.face);
   }
 
-  Future<void> _runSceneSwitch({required bool enteringPlayout}) async {
+  Future<void> _switchToOsgScene() async {
+    await _runSceneSwitch(target: _SceneSwitchTarget.osg);
+  }
+
+  Future<void> _runSceneSwitch({required _SceneSwitchTarget target}) async {
     final ObsSceneSwitchConfig? obsConfig = _viewModel.obsSceneSwitchConfig;
     final List<WebhookSceneSwitchConfig> webhooks =
         _viewModel.webhookSceneSwitchConfigs;
@@ -455,8 +594,10 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       final ObsService service = _buildObsService(obsConfig);
       try {
         await service.ensureConnected();
-        if (enteringPlayout) {
+        if (target == _SceneSwitchTarget.video) {
           await service.switchToVideoScene();
+        } else if (target == _SceneSwitchTarget.osg) {
+          await service.switchToOsgScene();
         } else {
           await service.switchToFaceScene();
         }
@@ -475,7 +616,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       try {
         await _sendSceneSwitchWebhook(
           webhook,
-          enteringPlayout: enteringPlayout,
+          target: target,
         );
       } catch (error) {
         _logger.warning(
@@ -492,10 +633,14 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
 
   Future<void> _sendSceneSwitchWebhook(
     WebhookSceneSwitchConfig webhook, {
-    required bool enteringPlayout,
+    required _SceneSwitchTarget target,
   }) async {
-    // Fixed tokens for receivers; not tied to OBS Video/Face scene strings.
-    final String sceneToken = enteringPlayout ? "video" : "face";
+    // Fixed tokens for receivers; not tied to OBS scene strings.
+    final String sceneToken = switch (target) {
+      _SceneSwitchTarget.video => "video",
+      _SceneSwitchTarget.osg => "osg",
+      _SceneSwitchTarget.face => "face",
+    };
     final Uri uri = Uri.parse(webhook.url);
     final HttpClient client = HttpClient();
     try {
@@ -607,33 +752,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
           ),
         );
       },
-      home: _activeClip == null
-          ? DashboardScreen(
-              viewModel: _viewModel,
-              onPlayClip: (PlayoutClip clip) => _enterPlayout(clip),
-              onRecordClip: (PlayoutClip clip) => _enterPlayout(clip, record: true),
-              onWorkspaceSettingsRequested: _showWorkspaceSettings,
-              obsConnectionHealthy: _obsConnectionHealthy,
-              obsLastSuccessfulPingHms: _formatHms(_lastSuccessfulObsPingAt),
-              scrollController: _dashboardScrollController,
-            )
-          : ChangeNotifierProvider<DashboardViewModel>.value(
-              value: _viewModel,
-              child: PlayoutScreen(
-                clip: _activeClip!,
-                osgWorkspaceConfig: _viewModel.osgWorkspaceConfig,
-                workspaceRoot: _viewModel.workspacePath ?? "",
-                tagSemanticTypes: _viewModel.tagSemanticTypes,
-                telestratorDefaults: _viewModel.telestratorDefaults,
-                onResolveSemanticText: (int semanticTypeId) =>
-                    _viewModel.resolveSemanticTagText(
-                      _activeClip!,
-                      semanticTypeId,
-                    ),
-                onExitRequested: _exitPlayout,
-                onFirstFrameReady: _onPlayoutFirstFrameReady,
-              ),
-            ),
+      home: _buildHome(_viewModel),
     );
   }
 }

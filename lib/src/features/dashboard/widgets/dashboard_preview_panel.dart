@@ -68,6 +68,10 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
   Widget build(BuildContext context) {
     final DashboardViewModel viewModel = context.watch<DashboardViewModel>();
     final String? workspaceRoot = viewModel.workspacePath;
+    // This panel only renders for the Manage tab; tag sets have their own
+    // tab and preview (see DashboardTagSetPane), and the current selection
+    // is cleared when switching tabs, so selectedItem is never a tag set
+    // here.
     final MediaListItem? selectedItem = viewModel.selectedItem;
     final MasterMediaFile? selectedMedia = viewModel.selectedMedia;
     final MediaIssue previewIssue = selectedItem == null
@@ -182,9 +186,15 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                           workspaceRoot != null
                                       ? OsgPlayoutLayer(
                                           key: ValueKey<String>(
-                                            selectedItem.stableKey,
+                                            "${selectedItem.stableKey}-${viewModel.semanticTagSnapshotForItem(selectedItem)}",
                                           ),
-                                          clip: previewOsgClip,
+                                          mediaType: previewOsgClip.mediaType,
+                                          mediaId: previewOsgClip.mediaId,
+                                          annotationsText:
+                                              previewOsgClip.annotationsText,
+                                          semanticTagSnapshotVersion:
+                                              previewOsgClip
+                                                  .semanticTagSnapshotVersion,
                                           config: viewModel.osgWorkspaceConfig,
                                           workspaceRoot: workspaceRoot,
                                           resolveSemantic:

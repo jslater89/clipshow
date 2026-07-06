@@ -6,7 +6,7 @@ import "package:flutter/material.dart";
 import "package:path/path.dart" as p;
 
 import "package:obs_clipshow/src/features/osg/osg_slot_text_align.dart";
-import "package:obs_clipshow/src/features/playout/playout_clip.dart";
+import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
 
@@ -35,14 +35,20 @@ Widget osgWrapVisibilityMotion({
 class OsgPlayoutLayer extends StatefulWidget {
   const OsgPlayoutLayer({
     super.key,
-    required this.clip,
+    required this.mediaType,
+    required this.mediaId,
+    required this.annotationsText,
+    this.semanticTagSnapshotVersion = 0,
     required this.config,
     required this.workspaceRoot,
     required this.resolveSemantic,
     required this.visible,
   });
 
-  final PlayoutClip clip;
+  final MediaListItemType mediaType;
+  final int mediaId;
+  final String annotationsText;
+  final int semanticTagSnapshotVersion;
   final OsgWorkspaceConfig config;
   final String workspaceRoot;
   final OsgSemanticResolve resolveSemantic;
@@ -58,10 +64,9 @@ class _OsgPlayoutLayerState extends State<OsgPlayoutLayer> {
   @override
   void didUpdateWidget(covariant OsgPlayoutLayer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.clip.mediaId != widget.clip.mediaId ||
-        oldWidget.clip.mediaType != widget.clip.mediaType ||
-        oldWidget.clip.semanticTagSnapshotVersion !=
-            widget.clip.semanticTagSnapshotVersion) {
+    if (oldWidget.mediaId != widget.mediaId ||
+        oldWidget.mediaType != widget.mediaType ||
+        oldWidget.semanticTagSnapshotVersion != widget.semanticTagSnapshotVersion) {
       _semanticTextByTypeId.clear();
       unawaited(_loadSemantics());
     }
@@ -106,7 +111,7 @@ class _OsgPlayoutLayerState extends State<OsgPlayoutLayer> {
             visible: widget.visible[slot],
             workspaceRoot: widget.workspaceRoot,
             semanticTextByTypeId: _semanticTextByTypeId,
-            clip: widget.clip,
+            annotationsText: widget.annotationsText,
           ),
       ],
     );
@@ -119,14 +124,14 @@ class _OsgSinglePresetLayer extends StatefulWidget {
     required this.visible,
     required this.workspaceRoot,
     required this.semanticTextByTypeId,
-    required this.clip,
+    required this.annotationsText,
   });
 
   final OsgPreset preset;
   final bool visible;
   final String workspaceRoot;
   final Map<int, String> semanticTextByTypeId;
-  final PlayoutClip clip;
+  final String annotationsText;
 
   static bool canRenderImage(OsgPreset preset, String workspaceRoot) {
     if (workspaceRoot.trim().isEmpty) {
@@ -281,7 +286,7 @@ class _OsgSinglePresetLayerState extends State<_OsgSinglePresetLayer>
                 final double sh = b.height * fh;
                 final String text = switch (slot.textSource) {
                   OsgTextSource.fixed => slot.fixedText,
-                  OsgTextSource.annotation => widget.clip.annotationsText,
+                  OsgTextSource.annotation => widget.annotationsText,
                   OsgTextSource.semantic =>
                     slot.semanticTypeId == null
                         ? ""

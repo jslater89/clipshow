@@ -9,6 +9,7 @@ import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/media/tag_set.dart";
 import "package:obs_clipshow/src/media/workspace.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -774,6 +775,7 @@ void main() {
             videoScene: "video",
             faceScene: "face",
             captureScene: "Cap",
+            osgScene: "OSG Scene",
           ),
         );
         await repository.saveObsSceneSwitchConfig(
@@ -785,6 +787,7 @@ void main() {
             videoScene: "video2",
             faceScene: "face2",
             captureScene: "",
+            osgScene: "",
           ),
         );
 
@@ -1216,6 +1219,58 @@ void main() {
         isTrue,
       );
       await upgraded.close();
+    });
+
+    test("creates tag sets and attaches tags for OSG Mode", () async {
+      final AppDatabase appDatabase = AppDatabase();
+      final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+      final database = await appDatabase.openForWorkspace(workspace);
+      final MediaRepository repository = MediaRepository(database);
+
+      final TagSet tagSet = await repository.createTagSet("Lower Third A");
+      await repository.addTagToMedia(
+        mediaType: MediaListItemType.tagSet,
+        mediaId: tagSet.id,
+        tag: "Player One",
+      );
+      await repository.setMediaAnnotations(
+        mediaType: MediaListItemType.tagSet,
+        mediaId: tagSet.id,
+        annotations: "Notes for annotation slots",
+      );
+
+      final List<TagSet> listed = await repository.listTagSets();
+      expect(listed, hasLength(1));
+      expect(listed.single.name, "Lower Third A");
+      expect(
+        await repository.resolveSemanticTagForMedia(
+          mediaType: MediaListItemType.tagSet,
+          mediaId: tagSet.id,
+          semanticTypeId: 99,
+        ),
+        isNull,
+      );
+
+      final Map<String, List<MediaTagAttachment>> attachments =
+          await repository.listMediaTagAttachmentsForTagSets(<int>[tagSet.id]);
+      // "Tag Set" is auto-attached by createTagSet as a system tag, alongside
+      // the explicitly-added "Player One" tag.
+      expect(attachments["ts:${tagSet.id}"], hasLength(2));
+      expect(
+        attachments["ts:${tagSet.id}"]!.map(
+          (MediaTagAttachment a) => a.tagName,
+        ),
+        containsAll(<String>["Player One", MediaRepository.tagSetTag]),
+      );
+
+      await repository.saveOsgModeQuickSlotTagSetIds(<int?>[tagSet.id, null]);
+      final List<int?> slots = await repository.loadOsgModeQuickSlotTagSetIds();
+      expect(slots.first, tagSet.id);
+
+      await repository.deleteTagSet(tagSet.id);
+      expect(await repository.listTagSets(), isEmpty);
+
+      await database.close();
     });
   });
 }

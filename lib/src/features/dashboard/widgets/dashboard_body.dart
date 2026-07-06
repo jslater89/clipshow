@@ -8,15 +8,24 @@ import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_file_list_
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_capture_panel.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_preview_panel.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_tag_panel.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_tag_set_pane.dart";
+import "package:obs_clipshow/src/features/osg_mode/osg_mode_session.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 
 class DashboardBody extends StatefulWidget {
-  const DashboardBody({super.key, this.scrollController, required this.onPlayClip, required this.onRecordClip});
+  const DashboardBody({
+    super.key,
+    this.scrollController,
+    required this.onPlayClip,
+    required this.onRecordClip,
+    required this.onEnterOsgMode,
+  });
 
   final ScrollController? scrollController;
   final void Function(PlayoutClip clip) onPlayClip;
   final void Function(PlayoutClip clip) onRecordClip;
+  final void Function(OsgModeSession session) onEnterOsgMode;
 
   @override
   State<DashboardBody> createState() => _DashboardBodyState();
@@ -86,9 +95,14 @@ class _DashboardBodyState extends State<DashboardBody> {
             mediaItems: visibleMediaItems,
             scrollController: widget.scrollController,
             onPlayClip: widget.onPlayClip,
+            onEnterOsgMode: widget.onEnterOsgMode,
             onPreviewFocusRequested: _previewFocusNode.requestFocus,
             onMediaItemSelected: (MediaListItem item) {
-              viewModel.setMediaPaneTab(DashboardMediaPaneTab.manage);
+              viewModel.setMediaPaneTab(
+                item.type == MediaListItemType.tagSet
+                    ? DashboardMediaPaneTab.tagSets
+                    : DashboardMediaPaneTab.manage,
+              );
               viewModel.selectItem(item);
               _previewFocusNode.requestFocus();
             },
@@ -120,6 +134,11 @@ class _DashboardBodyState extends State<DashboardBody> {
                         label: Text("Bake Queue"),
                         icon: Icon(Icons.queue_play_next_outlined),
                       ),
+                    ButtonSegment<DashboardMediaPaneTab>(
+                      value: DashboardMediaPaneTab.tagSets,
+                      label: Text("Tag Sets"),
+                      icon: Icon(Icons.layers_outlined),
+                    ),
                   ],
                   selected: <DashboardMediaPaneTab>{effectiveTab},
                   onSelectionChanged: (Set<DashboardMediaPaneTab> selected) {
@@ -131,43 +150,58 @@ class _DashboardBodyState extends State<DashboardBody> {
                 ),
               ),
               Expanded(
-                child: switch (effectiveTab) {
+                child: switch (viewModel.mediaPaneTab) {
                   DashboardMediaPaneTab.capture => const DashboardCapturePanel(),
                   DashboardMediaPaneTab.bakeQueue => const DashboardBakeQueuePanel(),
-                  DashboardMediaPaneTab.manage => LayoutBuilder(
-                    builder: (BuildContext context, BoxConstraints constraints) {
-                      final double handleH = scaleDimension(context, _resizeHandleLogicalHeight);
-                      final double panelBudget = constraints.maxHeight - handleH;
-                      if (panelBudget <= 1) {
-                        return Column(
-                          key: _splitPaneKey,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: <Widget>[
-                            const SizedBox.shrink(),
-                            _buildResizeHandle(context),
-                            const Expanded(child: SizedBox.shrink()),
-                          ],
-                        );
-                      }
-                      final double previewHeight = _resolvedPreviewHeight(panelBudget);
-                      return Column(
-                        key: _splitPaneKey,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          SizedBox(
-                            height: previewHeight,
-                            child: DashboardPreviewPanel(
-                              onPlayClip: widget.onPlayClip,
-                              onRecordClip: widget.onRecordClip,
-                              focusNode: _previewFocusNode,
-                            ),
-                          ),
-                          _buildResizeHandle(context),
-                          Expanded(child: DashboardTagPanel(onPreviewFocusRequested: _previewFocusNode.requestFocus)),
-                        ],
-                      );
-                    },
+                  DashboardMediaPaneTab.tagSets => DashboardTagSetPane(
+                    onEnterOsgMode: widget.onEnterOsgMode,
+                    onPreviewFocusRequested: _previewFocusNode.requestFocus,
                   ),
+                  DashboardMediaPaneTab.manage => LayoutBuilder(
+                        builder:
+                            (BuildContext context, BoxConstraints constraints) {
+                          final double handleH = scaleDimension(
+                            context,
+                            _resizeHandleLogicalHeight,
+                          );
+                          final double panelBudget =
+                              constraints.maxHeight - handleH;
+                          if (panelBudget <= 1) {
+                            return Column(
+                              key: _splitPaneKey,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: <Widget>[
+                                const SizedBox.shrink(),
+                                _buildResizeHandle(context),
+                                const Expanded(child: SizedBox.shrink()),
+                              ],
+                            );
+                          }
+                          final double previewHeight =
+                              _resolvedPreviewHeight(panelBudget);
+                          return Column(
+                            key: _splitPaneKey,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              SizedBox(
+                                height: previewHeight,
+                                child: DashboardPreviewPanel(
+                                  onPlayClip: widget.onPlayClip,
+                                  onRecordClip: widget.onRecordClip,
+                                  focusNode: _previewFocusNode,
+                                ),
+                              ),
+                              _buildResizeHandle(context),
+                              Expanded(
+                                child: DashboardTagPanel(
+                                  onPreviewFocusRequested:
+                                      _previewFocusNode.requestFocus,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                 },
               ),
             ],

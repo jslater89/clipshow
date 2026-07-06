@@ -89,7 +89,8 @@ List<String> sortTags(List<String> tags) {
   return tags;
 }
 
-bool isSystemTag(String tag) => tag == "Master" || tag == "Clip";
+bool isSystemTag(String tag) =>
+    tag == "Master" || tag == "Clip" || tag == "Tag Set";
 
 Color? tagChipColor(BuildContext context, String tag) {
   if (!isSystemTag(tag)) {
@@ -159,6 +160,74 @@ String clipRangeLabel(MediaClip clip) {
   return "${formatMs(start)} - ${formatMs(end)}";
 }
 
+/// Prompts for a single-line name (e.g. creating/renaming a tag set).
+///
+/// Owns its [TextEditingController] inside a dedicated [StatefulWidget] so
+/// disposal is tied to that widget leaving the tree (i.e. after the dialog's
+/// exit transition finishes, including the framework's built-in Escape
+/// dismissal) rather than to the caller's `await showDialog(...)` returning.
+Future<String?> showNamePromptDialog(
+  BuildContext context, {
+  required String title,
+  required String initialValue,
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (BuildContext ctx) {
+      return _NamePromptDialog(title: title, initialValue: initialValue);
+    },
+  );
+}
+
+class _NamePromptDialog extends StatefulWidget {
+  const _NamePromptDialog({required this.title, required this.initialValue});
+
+  final String title;
+  final String initialValue;
+
+  @override
+  State<_NamePromptDialog> createState() => _NamePromptDialogState();
+}
+
+class _NamePromptDialogState extends State<_NamePromptDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialValue,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(
+          labelText: "Name",
+          border: OutlineInputBorder(),
+        ),
+        onSubmitted: (String value) =>
+            Navigator.of(context).pop(value.trim()),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text("Cancel"),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text("Save"),
+        ),
+      ],
+    );
+  }
+}
+
 String formatMs(int value) {
   final Duration duration = Duration(milliseconds: value);
   final int minutes = duration.inMinutes;
@@ -166,6 +235,8 @@ String formatMs(int value) {
   return "${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
 }
 
+/// Builds video-playout context for [item]. [item] must be a master or clip;
+/// tag sets have no backing video and are driven by OSG Mode instead.
 PlayoutClip toPlayoutClip(
   MediaListItem item, {
   required String workspaceRoot,
@@ -174,6 +245,10 @@ PlayoutClip toPlayoutClip(
   int semanticTagSnapshotVersion = 0,
   Set<int> semanticTypeIdsOnMedia = const <int>{},
 }) {
+  assert(
+    item.type != MediaListItemType.tagSet,
+    "toPlayoutClip cannot be called with a tag set; tag sets have no video.",
+  );
   final String absolute = WorkspaceMediaPaths.absoluteMasterPath(
     workspaceRoot,
     item.filePath,

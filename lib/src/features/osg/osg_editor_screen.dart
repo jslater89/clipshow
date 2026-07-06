@@ -1822,31 +1822,58 @@ class _SolidGraphicSizeFieldsState extends State<_SolidGraphicSizeFields> {
   }
 }
 
-Future<String?> _promptName(BuildContext context, String title) async {
-  final TextEditingController c = TextEditingController();
-  try {
-    return await showDialog<String>(
-      context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: c,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: "Name"),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, c.text.trim()),
-            child: const Text("OK"),
-          ),
-        ],
+/// Owns its own [TextEditingController] in a dedicated [StatefulWidget] so
+/// disposal is tied to that widget leaving the tree (i.e. after the dialog's
+/// exit transition finishes, including the framework's built-in Escape
+/// dismissal) rather than to the caller's `await showDialog(...)` returning.
+/// Disposing eagerly in a `finally` right after that await races the
+/// still-animating dialog and throws "used after being disposed".
+Future<String?> _promptName(BuildContext context, String title) {
+  return showDialog<String>(
+    context: context,
+    builder: (BuildContext ctx) => _PromptNameDialog(title: title),
+  );
+}
+
+class _PromptNameDialog extends StatefulWidget {
+  const _PromptNameDialog({required this.title});
+
+  final String title;
+
+  @override
+  State<_PromptNameDialog> createState() => _PromptNameDialogState();
+}
+
+class _PromptNameDialogState extends State<_PromptNameDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: "Name"),
+        onSubmitted: (String value) =>
+            Navigator.pop(context, value.trim()),
       ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Cancel"),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text("OK"),
+        ),
+      ],
     );
-  } finally {
-    c.dispose();
   }
 }

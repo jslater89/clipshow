@@ -90,56 +90,66 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                   ),
                 )
               else ...<Widget>[
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Flexible(
-                      child: Text(
-                        selectedItem.displayName == selectedItem.fileName
-                            ? selectedItem.fileName
-                            : "${selectedItem.displayName} (${selectedItem.fileName})",
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    SizedBox(width: gap8),
-                    TextButton.icon(
-                      onPressed: () async {
-                        final String? updated =
-                            await _showRenameDisplayNameDialog(
-                              context,
-                              initialValue: selectedItem.displayName,
-                            );
-                        if (updated == null) {
-                          return;
-                        }
-                        final String? override =
-                            updated.trim().isEmpty ||
-                                updated.trim() == selectedItem.fileName
-                            ? null
-                            : updated.trim();
-                        await viewModel.setDisplayNameOverride(
-                          selectedItem,
-                          override,
-                        );
-                      },
-                      icon: Icon(Icons.edit, size: editIconSize),
-                      label: const Text("Edit"),
-                    ),
-                    TextButton(
-                      onPressed:
+                if (selectedItem.type == MediaListItemType.tagSet)
+                  // Tag sets are renamed from their preview card (see
+                  // DashboardTagSetPane); displayName always equals the
+                  // real tag_sets.name, there's no override to edit here.
+                  Text(
+                    selectedItem.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  )
+                else
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Flexible(
+                        child: Text(
                           selectedItem.displayName == selectedItem.fileName
-                          ? null
-                          : () => unawaited(
-                              viewModel.setDisplayNameOverride(
-                                selectedItem,
-                                null,
+                              ? selectedItem.fileName
+                              : "${selectedItem.displayName} (${selectedItem.fileName})",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      SizedBox(width: gap8),
+                      TextButton.icon(
+                        onPressed: () async {
+                          final String? updated =
+                              await _showRenameDisplayNameDialog(
+                                context,
+                                initialValue: selectedItem.displayName,
+                              );
+                          if (updated == null) {
+                            return;
+                          }
+                          final String? override =
+                              updated.trim().isEmpty ||
+                                  updated.trim() == selectedItem.fileName
+                              ? null
+                              : updated.trim();
+                          await viewModel.setDisplayNameOverride(
+                            selectedItem,
+                            override,
+                          );
+                        },
+                        icon: Icon(Icons.edit, size: editIconSize),
+                        label: const Text("Edit"),
+                      ),
+                      TextButton(
+                        onPressed:
+                            selectedItem.displayName == selectedItem.fileName
+                            ? null
+                            : () => unawaited(
+                                viewModel.setDisplayNameOverride(
+                                  selectedItem,
+                                  null,
+                                ),
                               ),
-                            ),
-                      child: const Text("Clear"),
-                    ),
-                  ],
-                ),
+                        child: const Text("Clear"),
+                      ),
+                    ],
+                  ),
                 SizedBox(height: gap10),
                 if (selectedItem.type == MediaListItemType.clip)
                   Align(

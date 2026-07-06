@@ -40,7 +40,7 @@ Clipshow does not require OBS Studio. The library, dashboard, Manage mode, and p
 
 Enable OBS’s WebSocket server (default port 4455; use a password in OBS if you configure one in Clipshow). The app uses that connection for program scene switches during playout and, when you use Capture, for recording control.
 
-For the integration to make sense visually, OBS should expose at least two program scenes you can map in Clipshow: one that shows what you want live when you are *not* playing a clip from this app (for example camera and microphone), and one that shows this application—typically via a Window Capture (or similar) source pointed at Clipshow’s window, sized to match your output resolution (for example 1920×1080). You choose the actual scene names in Workspace settings (see §10); they do not have to be called “Face” and “Video.”
+For the integration to make sense visually, OBS should expose program scenes you can map in Clipshow: one for your live look when you are *not* playing a clip (**Face**), one where this application’s window is captured for **clip playout** (**Video**), and optionally one for **graphics-only OSG Mode** (**OSG**) with a background layer under the transparent window capture. You choose the actual scene names in Workspace settings (see §10); defaults are “Face Scene,” “Video Scene,” and “OSG Scene.”
 
 > Screenshot (placeholder): OBS scene list with Face and Video scenes, and the WebSocket server settings panel.
 
@@ -161,7 +161,15 @@ Below the divider, **Saved Tags** is a reusable palette stored in the workspace:
 
 ---
 
-## 7. Capture mode (OBS recording)
+## 6.1 Tag Sets and OSG Mode
+
+The **Tag Sets** tab manages **bare tag sets**—named bundles of tags and annotations with **no video file**. Use them to pre-build data-driven on-screen graphics (OSGs) that read semantic tag values from the active tag set.
+
+Create tag sets, attach tags (with optional semantic types), and assign up to five **quick slots** (keys **1–5** while in OSG Mode). **Enter OSG Mode** switches the app to a transparent full-window graphics surface and, when OBS integration is enabled, selects your configured **OSG** program scene after the first frame paints. Hotkeys **6–0** toggle the same five OSG presets as clip playout; **Escape** returns to the Dashboard and **Face** scene.
+
+Build the **OSG** scene in OBS with a background layer (for example your camera or a nested Face scene) under a Window Capture of Clipshow’s window so transparency composites correctly. Set the **OSG Scene** name in Workspace settings (§10).
+
+---
 
 Switch the right column to **Capture** when you want OBS to record new footage straight into the workspace library and automatically apply Clipshow tags. Clipshow does not capture A/V itself; it controls **OBS Studio** over the same WebSocket connection as scene switching, then moves the finished file where ingestion can see it.
 
@@ -319,11 +327,11 @@ The application must be restarted when changing decoder configuration.
 
 Scene switching is modeled as **profiles**: one **OBS** connection (host, port, password, enable/disable) plus any number of **HTTP webhooks**. Each profile can be turned on or off without deleting it.
 
-Under **OBS**, set the WebSocket address and the **program** scene names Clipshow should select for “video” (showing this app), “face” (your live/camera layout), and optionally **capture** (switched before OBS recording starts in Capture mode—§7). Save applies that block.
+Under **OBS**, set the WebSocket address and the **program** scene names Clipshow should select for “video” (clip playout), “face” (your live/camera layout), “osg” (graphics-only OSG Mode), and optionally **capture** (switched before OBS recording starts in Capture mode—§7). Save applies that block.
 
 **OBS Paths** (one row, three fields): **Capture Recording** and **Capture Output** for Capture mode (§7)—OBS writes under recording; **Stop And Save** copies into output (empty output = workspace root). **Playout Record** is staging for **Record** playout (§8.7); default `recordings/export`. A second field, **Playout Output**, is where finished Record exports are copied (default `export`). Playout output must not sit inside playout staging. **Save Paths** persists capture and playout folders together; each path under the workspace is auto-added to **ignored folders** when not already covered by an existing ignored path (for example, if `recordings/` is ignored, `recordings/export` is not added separately).
 
-Under **Webhooks**, add HTTP endpoints that fire on the same playout enter/exit transitions as OBS (method, URL, and body/query shape). Saved webhooks appear in the profile list with their own enable switches. The payload value is always a fixed token—**video** when entering Playout and **face** when leaving—under your chosen query parameter or JSON/form key (not your OBS scene names).
+Under **Webhooks**, add HTTP endpoints that fire on the same playout enter/exit transitions as OBS (method, URL, and body/query shape). Saved webhooks appear in the profile list with their own enable switches. The payload value is a fixed token—**video** when entering Playout, **osg** when entering OSG Mode, and **face** when leaving either—under your chosen query parameter or JSON/form key (not your OBS scene names).
 
 ### 10.5 Ignored folders
 
