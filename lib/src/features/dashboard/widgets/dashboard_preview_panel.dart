@@ -7,6 +7,7 @@ import "package:provider/provider.dart";
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/bake/osg_bake_service.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/bake_recipe_picker_dialog.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_preview_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
@@ -16,7 +17,6 @@ import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
-import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -439,10 +439,11 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                       selectedItem == null ||
                           previewIssue != MediaIssue.none ||
                           workspaceRoot == null ||
-                          viewModel.osgBakeRecipes.isEmpty ||
-                          viewModel.bakeActive
+                          viewModel.osgBakeRecipes.isEmpty
                       ? null
-                      : () => unawaited(_startBake(context, viewModel)),
+                      : () => unawaited(
+                          _startBake(context, viewModel, selectedItem),
+                        ),
                   icon: const Icon(Icons.movie_creation_outlined),
                   label: const Text("Bake"),
                 ),
@@ -503,14 +504,32 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
   Future<void> _startBake(
     BuildContext context,
     DashboardViewModel viewModel,
+    MediaListItem item,
   ) async {
-    final OsgBakeRecipe? recipe = await _pickBakeRecipe(
+    final BakeRecipePickerChoice? choice = await showBakeRecipePickerDialog(
       context,
-      viewModel.osgBakeRecipes,
+      recipes: viewModel.osgBakeRecipes,
+      bakeNowEnabled: true,
     );
-    if (recipe == null || !context.mounted) {
+    if (choice == null || !context.mounted) {
       return;
     }
+    if (choice.action == BakeRecipePickerAction.queue) {
+      viewModel.enqueueBakeJob(item, choice.recipe);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Queued \"${choice.recipe.name}\" for ${item.displayName}.",
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Blocks until this job runs: if a bake is already active, it is
+    // enqueued ahead of pending work and runs immediately after.
+    final ({String taskId, Future<OsgBakeResult> result}) nowJob = viewModel
+        .bakeItemNow(item, choice.recipe);
     unawaited(
       showDialog<void>(
         context: context,
@@ -518,27 +537,43 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
         builder: (BuildContext ctx) {
           return PopScope(
             canPop: false,
-            child: AlertDialog(
-              content: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  const CircularProgressIndicator(),
-                  SizedBox(width: scaleDimension(ctx, 16)),
-                  const Text("Rendering\u2026"),
-                ],
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () => viewModel.requestBakeCancel(),
-                  child: const Text("Cancel"),
-                ),
-              ],
+            child: ListenableBuilder(
+              listenable: viewModel,
+              builder: (BuildContext ctx, Widget? _) {
+                // Disable Cancel until our own task is the one running: a
+                // bake already in flight when "Now" was pressed belongs to
+                // someone else's job, not this one.
+                final bool ourTaskRunning =
+                    viewModel.bakeQueueRunningTask?.id == nowJob.taskId;
+                return AlertDialog(
+                  content: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const CircularProgressIndicator(),
+                      SizedBox(width: scaleDimension(ctx, 16)),
+                      Text(
+                        ourTaskRunning
+                            ? "Rendering\u2026"
+                            : "Waiting for the current bake to finish\u2026",
+                      ),
+                    ],
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      onPressed: ourTaskRunning
+                          ? () => viewModel.requestBakeCancel()
+                          : null,
+                      child: const Text("Cancel"),
+                    ),
+                  ],
+                );
+              },
             ),
           );
         },
       ),
     );
-    final OsgBakeResult result = await viewModel.bakeSelectedItem(recipe);
+    final OsgBakeResult result = await nowJob.result;
     if (!context.mounted) {
       return;
     }
@@ -576,39 +611,6 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
         SnackBar(content: Text(result.errorMessage ?? "Bake failed.")),
       );
     }
-  }
-
-  Future<OsgBakeRecipe?> _pickBakeRecipe(
-    BuildContext context,
-    List<OsgBakeRecipe> recipes,
-  ) {
-    return showDialog<OsgBakeRecipe>(
-      context: context,
-      builder: (BuildContext ctx) {
-        return SimpleDialog(
-          title: const Text("Bake with recipe"),
-          children: recipes
-              .map(
-                (OsgBakeRecipe recipe) => SimpleDialogOption(
-                  onPressed: () => Navigator.of(ctx).pop(recipe),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(recipe.name),
-                      Text(
-                        recipe.cues.map(osgBakeCueSummaryLabel).join("; "),
-                        style: Theme.of(ctx).textTheme.bodySmall,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              )
-              .toList(),
-        );
-      },
-    );
   }
 
   Future<bool> _confirmDeleteClip(BuildContext context) async {
