@@ -17,7 +17,6 @@ import "package:obs_clipshow/src/features/osg/osg_template_aspect.dart";
 import "package:obs_clipshow/src/features/osg/widgets/osg_preset_canvas_preview.dart";
 import "package:obs_clipshow/src/features/osg/widgets/osg_semantic_type_icon_catalog.dart";
 import "package:obs_clipshow/src/features/osg/widgets/osg_semantic_type_icon_picker.dart";
-import "package:obs_clipshow/src/osg/osg_mode_key_color.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/osg/osg_preset_pack_zip.dart";
 import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
@@ -825,13 +824,6 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                         : preset.templateRelativePath),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            if (vm.isOsgModeBroadcastEnabled &&
-                preset.enabled &&
-                osgPresetHasColorKeyUnfriendlyTransparency(preset))
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: _OsgModeColorKeyTransparencyWarning(preset: preset),
-              ),
             const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
@@ -1882,66 +1874,6 @@ class _PromptNameDialogState extends State<_PromptNameDialog> {
           child: const Text("OK"),
         ),
       ],
-    );
-  }
-}
-
-class _OsgModeColorKeyTransparencyWarning extends StatelessWidget {
-  const _OsgModeColorKeyTransparencyWarning({required this.preset});
-
-  final OsgPreset preset;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final List<String> reasons = <String>[];
-    if (preset.layerOpacity < 1.0) {
-      reasons.add(
-        "layer opacity is ${(preset.layerOpacity * 100).round()}%",
-      );
-    }
-    if (preset.visibilityEnterDurationMs > 0) {
-      reasons.add(
-        "enter fade is "
-        "${OsgPreset.clampVisibilityDurationMs(preset.visibilityEnterDurationMs)} ms",
-      );
-    }
-    if (preset.visibilityExitDurationMs > 0) {
-      reasons.add(
-        "exit fade is "
-        "${OsgPreset.clampVisibilityDurationMs(preset.visibilityExitDurationMs)} ms",
-      );
-    }
-    final String detail = reasons.join("; ");
-    return Material(
-      color: theme.colorScheme.tertiaryContainer,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Icon(
-              Icons.warning_amber_rounded,
-              color: theme.colorScheme.onTertiaryContainer,
-              size: 20,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                "OSG Mode uses OBS Color Key. With $detail, graphics may look "
-                "green-tinted on air because partial transparency blends with "
-                "the key fill. Prefer 100% layer opacity and avoid fade "
-                "transitions; semi-transparent PNG edges can cause similar "
-                "fringing.",
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onTertiaryContainer,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

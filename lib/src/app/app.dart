@@ -49,7 +49,6 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   static const PlayoutWindowMode _playoutWindowMode =
       PlayoutWindowMode.windowed;
   static const Size _fallbackPlayoutSize = Size(1280, 720);
-  static const Color _dashboardWindowBackgroundColor = Color(0xFF121212);
   late final DashboardViewModel _viewModel;
   late final ObsService _obsService;
   final ScrollController _dashboardScrollController = ScrollController();
@@ -60,6 +59,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   PlayoutClip? _activeClip;
   OsgModeSession? _activeOsgModeSession;
   Completer<void>? _playoutFirstFrameCompleter;
+  Completer<void>? _osgModeFirstFrameCompleter;
   bool _pendingPlayoutRecord = false;
   static const Duration _playoutFirstFrameTimeout = Duration(seconds: 30);
   Timer? _obsPingTimer;
@@ -216,6 +216,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   }
 
   Future<void> _enterOsgMode(OsgModeSession session) async {
+    _osgModeFirstFrameCompleter = Completer<void>();
     _viewModel.setPlayoutActive(true);
     if (_dashboardScrollController.hasClients) {
       _lastDashboardScrollOffset = _dashboardScrollController.offset;
@@ -227,43 +228,50 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     }
 
     await _applyPlayoutWindowMode(_viewModel.playoutOutputSize);
-    await _applyOsgModeKeyColorBackground();
+    await _pumpCompositorFrames(3);
     setState(() {
       _activeOsgModeSession = session;
     });
-    _schedulePlayoutCompositingOverlayMount();
-  }
+    _scheduleRootCompositingOverlayMount(
+      () => _activeOsgModeSession != null,
+    );
 
-  Future<void> _onOsgModeFirstFrameReady() async {
+    final Completer<void>? gate = _osgModeFirstFrameCompleter;
+    if (gate != null) {
+      try {
+        await gate.future.timeout(_playoutFirstFrameTimeout);
+      } on TimeoutException {
+        _logger.warning(
+          "OSG Mode first frame not ready within "
+          "${_playoutFirstFrameTimeout.inSeconds}s; switching OBS anyway.",
+        );
+        _completeOsgModeFirstFrameGate();
+      }
+    }
     if (!mounted || _activeOsgModeSession == null) {
       return;
     }
     await _switchToOsgScene();
   }
 
-  Future<void> _applyOsgModeKeyColorBackground() async {
-    final Color keyColor = Color(_viewModel.osgModeKeyColorArgb);
-    try {
-      await windowManager.setBackgroundColor(keyColor);
-    } catch (error) {
-      _logger.warning(
-        "Unable to set OSG Mode key color window background: $error",
-      );
+  void _onOsgModeFirstFrameReady() {
+    _completeOsgModeFirstFrameGate();
+    if (kPlayoutFrameworkRootCompositingStrip) {
+      _playoutRootCompositingOverlay.mountFromNavigator(_navigatorKey);
     }
   }
 
-  Future<void> _restoreDashboardWindowBackground() async {
-    try {
-      await windowManager.setBackgroundColor(_dashboardWindowBackgroundColor);
-    } catch (error) {
-      _logger.warning(
-        "Unable to restore dashboard window background after OSG mode: $error",
-      );
+  void _completeOsgModeFirstFrameGate() {
+    final Completer<void>? gate = _osgModeFirstFrameCompleter;
+    if (gate != null && !gate.isCompleted) {
+      gate.complete();
     }
+    _osgModeFirstFrameCompleter = null;
   }
 
   Future<void> _exitOsgMode() async {
     _playoutRootCompositingOverlay.unmount();
+    _completeOsgModeFirstFrameGate();
     await _switchToFaceScene();
     await windowManager.setFullScreen(false);
     await windowManager.setTitleBarStyle(TitleBarStyle.normal);
@@ -287,7 +295,6 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       }
       _wasMaximizedBeforePlayout = false;
     }
-    await _restoreDashboardWindowBackground();
     setState(() {
       _activeOsgModeSession = null;
     });
@@ -325,7 +332,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     setState(() {
       _activeClip = clip;
     });
-    _schedulePlayoutCompositingOverlayMount();
+    _scheduleRootCompositingOverlayMount(() => _activeClip != null);
     final Completer<void>? gate = _playoutFirstFrameCompleter;
     if (gate != null) {
       try {
@@ -452,13 +459,13 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     }
   }
 
-  void _schedulePlayoutCompositingOverlayMount() {
+  void _scheduleRootCompositingOverlayMount(bool Function() isActive) {
     if (!kPlayoutFrameworkRootCompositingStrip) {
       return;
     }
     _playoutRootCompositingOverlay.resetMountAttempts();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || (_activeClip == null && _activeOsgModeSession == null)) {
+      if (!mounted || !isActive()) {
         return;
       }
       _playoutRootCompositingOverlay.mountFromNavigator(_navigatorKey);
@@ -491,7 +498,6 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
         value: viewModel,
         child: OsgModeScreen(
           session: session,
-          keyColorArgb: viewModel.osgModeKeyColorArgb,
           osgWorkspaceConfig: viewModel.osgWorkspaceConfig,
           workspaceRoot: viewModel.workspacePath ?? "",
           tagSemanticTypes: viewModel.tagSemanticTypes,
@@ -522,6 +528,12 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       obsLastSuccessfulPingHms: _formatHms(_lastSuccessfulObsPingAt),
       scrollController: _dashboardScrollController,
     );
+  }
+
+  Future<void> _pumpCompositorFrames(int count) async {
+    for (int i = 0; i < count; i++) {
+      await WidgetsBinding.instance.endOfFrame;
+    }
   }
 
   Future<void> _applyPlayoutWindowMode(PlayoutOutputSize output) async {
@@ -777,7 +789,16 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
           ),
         );
       },
-      home: _buildHome(_viewModel),
+      home: KeyedSubtree(
+        key: ValueKey<String>(
+          _activeOsgModeSession != null
+              ? "osg-${_activeOsgModeSession!.tagSetId}"
+              : _activeClip != null
+              ? "playout-${_activeClip!.mediaType.name}-${_activeClip!.mediaId}"
+              : "dashboard",
+        ),
+        child: _buildHome(_viewModel),
+      ),
     );
   }
 }

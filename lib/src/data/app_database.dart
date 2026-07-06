@@ -12,7 +12,7 @@ class AppDatabase {
     return databaseFactoryFfi.openDatabase(
       workspace.databasePath,
       options: OpenDatabaseOptions(
-        version: 11,
+        version: 12,
         onConfigure: (Database db) async {
           await db.execute("PRAGMA foreign_keys = ON;");
         },
@@ -86,6 +86,9 @@ class AppDatabase {
           if (oldVersion < 11) {
             await _upgradeToV11TagSets(db);
           }
+          if (oldVersion < 12) {
+            await _upgradeToV12TagSetsIdempotent(db);
+          }
         },
       ),
     );
@@ -156,12 +159,20 @@ class AppDatabase {
       );
     """);
     await db.execute("""
-      CREATE INDEX idx_tag_sets_created_at_ms
+      CREATE INDEX IF NOT EXISTS idx_tag_sets_created_at_ms
       ON tag_sets(created_at_ms DESC);
     """);
   }
 
   Future<void> _upgradeToV11TagSets(Database db) async {
+    await _createTagSetsTable(db);
+    await _addObsOsgSceneColumnIfMissing(db);
+    await _rebuildMediaTagsForTagSetSupport(db);
+  }
+
+  /// Idempotent pass for workspaces that already had tag_sets from a parallel
+  /// migration path before v12 (rebase / partial upgrade).
+  Future<void> _upgradeToV12TagSetsIdempotent(Database db) async {
     await _createTagSetsTable(db);
     await _addObsOsgSceneColumnIfMissing(db);
     await _rebuildMediaTagsForTagSetSupport(db);
@@ -189,12 +200,26 @@ class AppDatabase {
     }
   }
 
+  Future<bool> _mediaTagsSupportsTagSet(Database db) async {
+    final List<Map<String, Object?>> rows = await db.rawQuery(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media_tags'",
+    );
+    if (rows.isEmpty) {
+      return false;
+    }
+    final Object? sql = rows.first["sql"];
+    return sql is String && sql.contains("'tag_set'");
+  }
+
   Future<void> _rebuildMediaTagsForTagSetSupport(Database db) async {
     final List<Map<String, Object?>> tables = await db.rawQuery("""
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name = 'media_tags'
       """);
     if (tables.isEmpty) {
+      return;
+    }
+    if (await _mediaTagsSupportsTagSet(db)) {
       return;
     }
     await db.execute("PRAGMA foreign_keys = OFF;");
@@ -221,7 +246,7 @@ class AppDatabase {
       await txn.execute("DROP TABLE media_tags;");
       await txn.execute("ALTER TABLE media_tags_new RENAME TO media_tags;");
       await txn.execute("""
-        CREATE INDEX idx_media_tags_media_ref
+        CREATE INDEX IF NOT EXISTS idx_media_tags_media_ref
         ON media_tags(media_type, media_id);
       """);
     });

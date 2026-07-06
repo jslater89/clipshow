@@ -3,6 +3,7 @@ import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_osg_preset_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_tag_panel.dart";
 import "package:obs_clipshow/src/features/osg_mode/osg_mode_session.dart";
@@ -22,10 +23,12 @@ class DashboardTagSetPane extends StatelessWidget {
     super.key,
     required this.onEnterOsgMode,
     required this.onPreviewFocusRequested,
+    required this.previewFocusNode,
   });
 
   final void Function(OsgModeSession session) onEnterOsgMode;
   final VoidCallback onPreviewFocusRequested;
+  final FocusNode previewFocusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -38,37 +41,43 @@ class DashboardTagSetPane extends StatelessWidget {
         : null;
     final double gap12 = scaleDimension(context, 12);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _QuickSlotsCard(onEnterOsgMode: onEnterOsgMode),
-        SizedBox(height: gap12),
-        Expanded(
-          child: selectedTagSet == null || workspaceRoot == null
-              ? const Card(
-                  child: Center(child: Text("Select or create a tag set.")),
-                )
-              : Column(
-                  children: <Widget>[
-                    Expanded(
-                      flex: 3,
-                      child: TagSetPreviewCard(
-                        tagSet: selectedTagSet,
-                        workspaceRoot: workspaceRoot,
-                        onEnterOsgMode: onEnterOsgMode,
+    return DashboardOsgPresetHotkeysLayer(
+      focusNode: previewFocusNode,
+      autofocus: true,
+      onOsgPresetSlotToggle: viewModel.togglePreviewOsgPresetSlot,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          _QuickSlotsCard(onEnterOsgMode: onEnterOsgMode),
+          SizedBox(height: gap12),
+          Expanded(
+            child: selectedTagSet == null || workspaceRoot == null
+                ? const Card(
+                    child: Center(child: Text("Select or create a tag set.")),
+                  )
+                : Column(
+                    children: <Widget>[
+                      Expanded(
+                        flex: 3,
+                        child: TagSetPreviewCard(
+                          tagSet: selectedTagSet,
+                          workspaceRoot: workspaceRoot,
+                          previewFocusNode: previewFocusNode,
+                          onEnterOsgMode: onEnterOsgMode,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: gap12),
-                    Expanded(
-                      flex: 2,
-                      child: DashboardTagPanel(
-                        onPreviewFocusRequested: onPreviewFocusRequested,
+                      SizedBox(height: gap12),
+                      Expanded(
+                        flex: 2,
+                        child: DashboardTagPanel(
+                          onPreviewFocusRequested: onPreviewFocusRequested,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-        ),
-      ],
+                    ],
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -178,21 +187,52 @@ class _QuickSlotPicker extends StatelessWidget {
 /// Preview for a selected bare tag set: an OSG-only render (no video) plus
 /// the tag set's own housekeeping actions. Tag/annotation editing itself
 /// lives in [DashboardTagPanel], shared with masters and clips.
-class TagSetPreviewCard extends StatelessWidget {
+class TagSetPreviewCard extends StatefulWidget {
   const TagSetPreviewCard({
     super.key,
     required this.tagSet,
     required this.workspaceRoot,
+    required this.previewFocusNode,
     required this.onEnterOsgMode,
   });
 
   final TagSet tagSet;
   final String workspaceRoot;
+  final FocusNode previewFocusNode;
   final void Function(OsgModeSession session) onEnterOsgMode;
+
+  @override
+  State<TagSetPreviewCard> createState() => _TagSetPreviewCardState();
+}
+
+class _TagSetPreviewCardState extends State<TagSetPreviewCard> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        widget.previewFocusNode.requestFocus();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant TagSetPreviewCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tagSet.id != widget.tagSet.id) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          widget.previewFocusNode.requestFocus();
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final DashboardViewModel viewModel = context.watch<DashboardViewModel>();
+    final TagSet tagSet = widget.tagSet;
+    final String workspaceRoot = widget.workspaceRoot;
     final MediaListItem item = MediaListItem.tagSet(tagSet);
     final double pad12 = scaleDimension(context, 12);
     final double gap12 = scaleDimension(context, 12);
@@ -244,12 +284,15 @@ class TagSetPreviewCard extends StatelessWidget {
             ),
             SizedBox(height: gap12),
             Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(radius8),
-                child: Container(
-                  color: Colors.black,
-                  child: LayoutBuilder(
-                    builder: (BuildContext context, BoxConstraints c) {
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => widget.previewFocusNode.requestFocus(),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(radius8),
+                  child: Container(
+                    color: Colors.black,
+                    child: LayoutBuilder(
+                      builder: (BuildContext context, BoxConstraints c) {
                       // Letterbox/pillarbox to the real playout canvas aspect
                       // ratio so presets (authored against that canvas) don't
                       // stretch or clip when this card's own box is a very
@@ -314,6 +357,7 @@ class TagSetPreviewCard extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
             ),
             SizedBox(height: gap12),
             Wrap(

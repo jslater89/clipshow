@@ -15,7 +15,6 @@ class OsgModeScreen extends StatefulWidget {
   const OsgModeScreen({
     super.key,
     required this.session,
-    required this.keyColorArgb,
     required this.osgWorkspaceConfig,
     required this.workspaceRoot,
     required this.tagSemanticTypes,
@@ -27,7 +26,6 @@ class OsgModeScreen extends StatefulWidget {
   });
 
   final OsgModeSession session;
-  final int keyColorArgb;
   final OsgWorkspaceConfig osgWorkspaceConfig;
   final String workspaceRoot;
   final List<TagSemanticType> tagSemanticTypes;
@@ -49,6 +47,7 @@ class _OsgModeScreenState extends State<OsgModeScreen> {
   int _osgRequirementFlashToken = 0;
   String _osgRequirementFlashText = "";
   late OsgModeSession _session;
+  bool _firstFrameReadyNotified = false;
 
   @override
   void initState() {
@@ -60,12 +59,32 @@ class _OsgModeScreenState extends State<OsgModeScreen> {
     }
     _reconcileOsgVisibilityToRequirements(requestFrame: false);
     _logger.info("OSG Mode started for tag set ${_session.tagSetName}");
+    _scheduleFirstFrameReadyAfterPaint();
+  }
+
+  void _scheduleFirstFrameReadyAfterPaint() {
+    if (_firstFrameReadyNotified) {
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
+      if (!mounted || _firstFrameReadyNotified) {
         return;
       }
-      widget.onFirstFrameReady();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _firstFrameReadyNotified) {
+          return;
+        }
+        _notifyFirstFrameReady();
+      });
     });
+  }
+
+  void _notifyFirstFrameReady() {
+    if (_firstFrameReadyNotified) {
+      return;
+    }
+    _firstFrameReadyNotified = true;
+    widget.onFirstFrameReady();
   }
 
   @override
@@ -203,7 +222,7 @@ class _OsgModeScreenState extends State<OsgModeScreen> {
   Widget build(BuildContext context) {
     final double edgeInset = scaleDimension(context, 16);
     return Scaffold(
-      backgroundColor: Color(widget.keyColorArgb),
+      backgroundColor: Colors.transparent,
       body: OsgModeHotkeysLayer(
         onExitRequested: _requestExit,
         onHelpToggleRequested: _toggleHelpOverlay,

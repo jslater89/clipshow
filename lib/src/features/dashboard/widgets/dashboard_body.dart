@@ -41,6 +41,7 @@ class _DashboardBodyState extends State<DashboardBody> {
 
   final GlobalKey _splitPaneKey = GlobalKey();
   final FocusNode _previewFocusNode = FocusNode(debugLabel: "DashboardPreviewFocus");
+  final FocusNode _tagSetPreviewFocusNode = FocusNode(debugLabel: "TagSetPreviewFocus");
 
   /// Drag-set preview pane height; null means use [_defaultPreviewHeight].
   double? _previewPanelHeightPx;
@@ -62,6 +63,7 @@ class _DashboardBodyState extends State<DashboardBody> {
   @override
   void dispose() {
     _previewFocusNode.dispose();
+    _tagSetPreviewFocusNode.dispose();
     super.dispose();
   }
 
@@ -98,13 +100,18 @@ class _DashboardBodyState extends State<DashboardBody> {
             onEnterOsgMode: widget.onEnterOsgMode,
             onPreviewFocusRequested: _previewFocusNode.requestFocus,
             onMediaItemSelected: (MediaListItem item) {
+              final bool isTagSet = item.type == MediaListItemType.tagSet;
               viewModel.setMediaPaneTab(
-                item.type == MediaListItemType.tagSet
+                isTagSet
                     ? DashboardMediaPaneTab.tagSets
                     : DashboardMediaPaneTab.manage,
               );
               viewModel.selectItem(item);
-              _previewFocusNode.requestFocus();
+              if (isTagSet) {
+                _tagSetPreviewFocusNode.requestFocus();
+              } else {
+                _previewFocusNode.requestFocus();
+              }
             },
           ),
         ),
@@ -145,7 +152,15 @@ class _DashboardBodyState extends State<DashboardBody> {
                     if (selected.isEmpty) {
                       return;
                     }
-                    viewModel.setMediaPaneTab(selected.first);
+                    final DashboardMediaPaneTab tab = selected.first;
+                    viewModel.setMediaPaneTab(tab);
+                    if (tab == DashboardMediaPaneTab.tagSets) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) {
+                          _tagSetPreviewFocusNode.requestFocus();
+                        }
+                      });
+                    }
                   },
                 ),
               ),
@@ -155,7 +170,8 @@ class _DashboardBodyState extends State<DashboardBody> {
                   DashboardMediaPaneTab.bakeQueue => const DashboardBakeQueuePanel(),
                   DashboardMediaPaneTab.tagSets => DashboardTagSetPane(
                     onEnterOsgMode: widget.onEnterOsgMode,
-                    onPreviewFocusRequested: _previewFocusNode.requestFocus,
+                    onPreviewFocusRequested: _tagSetPreviewFocusNode.requestFocus,
+                    previewFocusNode: _tagSetPreviewFocusNode,
                   ),
                   DashboardMediaPaneTab.manage => LayoutBuilder(
                         builder:

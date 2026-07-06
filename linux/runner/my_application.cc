@@ -14,9 +14,94 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+// Recursively finds the GtkGLArea inside an FlView widget tree.
+static GtkWidget* find_gl_area(GtkWidget* widget) {
+  if (GTK_IS_GL_AREA(widget)) {
+    return widget;
+  }
+
+  if (GTK_IS_CONTAINER(widget)) {
+    GtkWidget* result = nullptr;
+    GList* children = gtk_container_get_children(GTK_CONTAINER(widget));
+    for (GList* iter = children; iter != nullptr; iter = g_list_next(iter)) {
+      result = find_gl_area(GTK_WIDGET(iter->data));
+      if (result != nullptr) {
+        break;
+      }
+    }
+    g_list_free(children);
+    return result;
+  }
+
+  return nullptr;
+}
+
+static void apply_transparent_view_settings(FlView* view) {
+  GdkRGBA background_color;
+  gdk_rgba_parse(&background_color, "#00000000");
+  fl_view_set_background_color(view, &background_color);
+
+  GtkWidget* gl_area = find_gl_area(GTK_WIDGET(view));
+  if (gl_area != nullptr) {
+    gtk_gl_area_set_has_alpha(GTK_GL_AREA(gl_area), TRUE);
+  }
+}
+
+// static gboolean on_window_configure(GtkWidget* widget,
+//                                     GdkEventConfigure* event,
+//                                     gpointer user_data) {
+//   FlView* view = FL_VIEW(user_data);
+//   apply_transparent_view_settings(view);
+//   gtk_widget_queue_draw(GTK_WIDGET(view));
+//   return FALSE;
+// }
+
+typedef struct {
+  GtkWidget* window;
+  FlView* view;
+  guint remaining_ticks;
+} DeferredRevealState;
+
+// The window is shown at opacity 0 so GdkFrameClock ticks keep firing while the
+// compositor applies transparent GLArea output; opacity returns to 1 afterward.
+static gboolean deferred_reveal_tick_cb(GtkWidget* widget,
+                                        GdkFrameClock* frame_clock,
+                                        gpointer user_data) {
+  DeferredRevealState* state = static_cast<DeferredRevealState*>(user_data);
+
+  if (state->remaining_ticks > 0) {
+    state->remaining_ticks--;
+    if (state->remaining_ticks > 0) {
+      return G_SOURCE_CONTINUE;
+    }
+  }
+
+  apply_transparent_view_settings(state->view);
+  gtk_widget_queue_draw(GTK_WIDGET(state->view));
+  gtk_widget_set_opacity(state->window, 1.0);
+  g_free(state);
+  return G_SOURCE_REMOVE;
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
-  gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  apply_transparent_view_settings(view);
+  gtk_widget_queue_draw(GTK_WIDGET(view));
+
+  GtkWidget* window = gtk_widget_get_toplevel(GTK_WIDGET(view));
+  if (gtk_widget_get_visible(window)) {
+    return;
+  }
+
+  gtk_widget_set_opacity(window, 0.0);
+  gtk_widget_show(window);
+
+  DeferredRevealState* state = g_new(DeferredRevealState, 1);
+  state->window = window;
+  state->view = view;
+  // Debug builds can composite one frame too early; wait two ticks after show.
+  state->remaining_ticks = 2;
+  gtk_widget_add_tick_callback(window, deferred_reveal_tick_cb, state, nullptr);
 }
 
 // Implements GApplication::activate.
@@ -33,8 +118,8 @@ static void my_application_activate(GApplication* application) {
   // If running on Wayland assume the header bar will work (may need changing
   // if future cases occur).
   gboolean use_header_bar = TRUE;
-#ifdef GDK_WINDOWING_X11
   GdkScreen* screen = gtk_window_get_screen(window);
+#ifdef GDK_WINDOWING_X11
   if (GDK_IS_X11_SCREEN(screen)) {
     const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
     if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
@@ -54,22 +139,31 @@ static void my_application_activate(GApplication* application) {
 
   gtk_window_set_default_size(window, 1280, 720);
 
+  // Enable a composited RGBA window so transparent Flutter content shows through.
+  gtk_widget_set_app_paintable(GTK_WIDGET(window), TRUE);
+  GdkVisual* visual = gdk_screen_get_rgba_visual(screen);
+  if (visual != NULL && gdk_screen_is_composited(screen)) {
+    gtk_widget_set_visual(GTK_WIDGET(window), visual);
+  }
+
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
-  GdkRGBA background_color;
-  gdk_rgba_parse(&background_color, "#000000");
-  fl_view_set_background_color(view, &background_color);
+  apply_transparent_view_settings(view);
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
+
+  // g_signal_connect(window, "configure-event",
+  //                  G_CALLBACK(on_window_configure), view);
 
   // Show the window when Flutter renders.
   // Requires the view to be realized so we can start rendering.
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
                            self);
   gtk_widget_realize(GTK_WIDGET(view));
+  apply_transparent_view_settings(view);
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
