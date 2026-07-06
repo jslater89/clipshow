@@ -16,11 +16,16 @@ import "package:obs_clipshow/src/ingestion/ingestion_service.dart";
 import "package:obs_clipshow/src/ingestion/thumbnail_service.dart";
 import "package:obs_clipshow/src/ingestion/workspace_watcher.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
+import "package:obs_clipshow/src/features/osg_mode/osg_mode_session.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/media/tag_set.dart";
 import "package:obs_clipshow/src/obs/capture_path_utils.dart";
 import "package:obs_clipshow/src/obs/playout_record_path_utils.dart";
 import "package:obs_clipshow/src/osg/osg_bake_models.dart";
+import "package:obs_clipshow/src/osg/osg_mode_key_color.dart";
+import "package:obs_clipshow/src/osg/osg_key_color_suggester.dart"
+    as osg_key_color;
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/obs/obs_capture_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -31,7 +36,7 @@ import "package:obs_clipshow/src/workspace/workspace_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_trash.dart";
 
 /// Manage (library prep) vs OBS Capture pane on the dashboard right column.
-enum DashboardMediaPaneTab { manage, capture, bakeQueue }
+enum DashboardMediaPaneTab { manage, capture, bakeQueue, tagSets }
 
 /// Result of stopping a Record playout session.
 class PlayoutRecordStopResult {
@@ -144,6 +149,8 @@ class DashboardViewModel extends ChangeNotifier {
       <String, Completer<OsgBakeResult>>{};
   final Set<String> _loadedSystemFontFamilies = <String>{};
 
+  List<int?> _osgModeQuickSlotTagSetIds = List<int?>.filled(5, null);
+
   OsgPresetVisibility _previewOsgPresetVisibility =
       const OsgPresetVisibility.allOff();
   int _previewOsgRequirementFlashToken = 0;
@@ -240,6 +247,12 @@ class DashboardViewModel extends ChangeNotifier {
 
   OsgWorkspaceConfig get osgWorkspaceConfig =>
       _workspaceSettings?.osgWorkspaceConfig ?? OsgWorkspaceConfig.fallback();
+
+  int get osgModeKeyColorArgb =>
+      _workspaceSettings?.osgModeKeyColorArgb ??
+      OsgModeKeyColorSettings.defaultKeyColorArgb;
+
+  bool get osgModeEnabled => _workspaceSettings?.osgModeEnabled ?? true;
 
   List<TagSemanticType> get tagSemanticTypes =>
       _workspaceSettings?.tagSemanticTypes ?? <TagSemanticType>[];
@@ -567,6 +580,36 @@ class DashboardViewModel extends ChangeNotifier {
 
   String get previewOsgRequirementFlashText => _previewOsgRequirementFlashText;
 
+  /// All tag sets in the workspace, in the same order they appear in
+  /// [_allItems] (most-recently-created first).
+  List<TagSet> get tagSets => _allItems
+      .where((MediaListItem i) => i.type == MediaListItemType.tagSet)
+      .map((MediaListItem i) => i.tagSet!)
+      .toList();
+
+  List<int?> get osgModeQuickSlotTagSetIds =>
+      List<int?>.unmodifiable(_osgModeQuickSlotTagSetIds);
+
+  bool get canEnterOsgMode {
+    if (!osgModeEnabled) {
+      return false;
+    }
+    return _resolveInitialOsgModeTagSetId() != null;
+  }
+
+  /// Whether OSG Mode can be entered with a specific [tagSet] right now
+  /// (independent of the current dashboard selection or quick slots).
+  bool canEnterOsgModeForTagSet(TagSet tagSet) => osgModeEnabled;
+
+  /// True when OBS integration is enabled and an OSG program scene is configured
+  /// for automatic switching on OSG Mode enter/exit.
+  bool get isOsgModeBroadcastEnabled => isOsgObsSceneSwitchConfigured;
+
+  bool get isOsgObsSceneSwitchConfigured {
+    final ObsSceneSwitchConfig? config = obsSceneSwitchConfig;
+    return config != null && config.enabled && config.osgScene.trim().isNotEmpty;
+  }
+
   void clearPreviewOsgRequirementFlash() {
     if (_previewOsgRequirementFlashToken == 0) {
       return;
@@ -724,11 +767,22 @@ class DashboardViewModel extends ChangeNotifier {
   int semanticTagSnapshotForItem(MediaListItem item) =>
       _semanticTagSnapshotByItemKey[item.stableKey] ?? 0;
 
+  /// Switches which tab of the media pane is active. Tag sets and regular
+  /// media (masters/clips) are mutually exclusive in the file list, so the
+  /// currently selected item is cleared if it doesn't belong in the
+  /// destination tab (e.g. a selected tag set when switching to Manage).
   void setMediaPaneTab(DashboardMediaPaneTab tab) {
     if (_mediaPaneTab == tab) {
       return;
     }
     _mediaPaneTab = tab;
+    final MediaListItem? item = selectedItem;
+    if (item != null &&
+        (item.type == MediaListItemType.tagSet) !=
+            (tab == DashboardMediaPaneTab.tagSets)) {
+      _selectedItemKey = null;
+    }
+    _applyFilters();
     notifyListeners();
   }
 
@@ -1202,15 +1256,142 @@ class DashboardViewModel extends ChangeNotifier {
     PlayoutClip clip,
     int semanticTypeId,
   ) async {
+    return resolveSemanticTagTextForMedia(
+      mediaType: clip.mediaType,
+      mediaId: clip.mediaId,
+      semanticTypeId: semanticTypeId,
+    );
+  }
+
+  Future<String?> resolveSemanticTagTextForMedia({
+    required MediaListItemType mediaType,
+    required int mediaId,
+    required int semanticTypeId,
+  }) async {
     final MediaRepository? repository = _mediaRepository;
     if (repository == null) {
       return null;
     }
     return repository.resolveSemanticTagForMedia(
-      mediaType: clip.mediaType,
-      mediaId: clip.mediaId,
+      mediaType: mediaType,
+      mediaId: mediaId,
       semanticTypeId: semanticTypeId,
     );
+  }
+
+  Future<void> createTagSet(String name) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    final TagSet created = await repository.createTagSet(name);
+    await _reloadFromRepository();
+    selectItem(MediaListItem.tagSet(created));
+  }
+
+  Future<void> renameTagSet(TagSet tagSet, String name) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.renameTagSet(tagSetId: tagSet.id, name: name);
+    await _reloadFromRepository();
+  }
+
+  Future<void> deleteTagSet(TagSet tagSet) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.deleteTagSet(tagSet.id);
+    if (_selectedItemKey == MediaListItem.tagSet(tagSet).stableKey) {
+      _selectedItemKey = null;
+    }
+    bool quickSlotsChanged = false;
+    for (int i = 0; i < _osgModeQuickSlotTagSetIds.length; i++) {
+      if (_osgModeQuickSlotTagSetIds[i] == tagSet.id) {
+        _osgModeQuickSlotTagSetIds[i] = null;
+        quickSlotsChanged = true;
+      }
+    }
+    if (quickSlotsChanged) {
+      await repository.saveOsgModeQuickSlotTagSetIds(
+        _osgModeQuickSlotTagSetIds,
+      );
+    }
+    await _reloadFromRepository();
+  }
+
+  Future<void> setOsgModeQuickSlotTagSetId(int slotIndex, int? tagSetId) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null || slotIndex < 0 || slotIndex >= 5) {
+      return;
+    }
+    _osgModeQuickSlotTagSetIds[slotIndex] = tagSetId;
+    await repository.saveOsgModeQuickSlotTagSetIds(_osgModeQuickSlotTagSetIds);
+    notifyListeners();
+  }
+
+  /// Builds a session for entering OSG Mode with [tagSet]. Mirrors Playout's
+  /// semantics: whatever OSG presets are toggled on in the dashboard preview
+  /// right now are what plays out immediately, rather than remembering some
+  /// separate "last used in OSG mode" state.
+  OsgModeSession buildOsgModeSessionForTagSet(TagSet tagSet) {
+    final MediaListItem item = MediaListItem.tagSet(tagSet);
+    return OsgModeSession(
+      tagSetId: tagSet.id,
+      tagSetName: tagSet.name,
+      annotationsText: tagSet.annotations ?? "",
+      semanticTypeIdsOnMedia: semanticTypeIdsOnMedia(item),
+      semanticTagSnapshotVersion: semanticTagSnapshotForItem(item),
+      osgPresetVisibleInitial: _previewOsgPresetVisibility,
+    );
+  }
+
+  OsgModeSession? buildInitialOsgModeSession() {
+    final int? tagSetId = _resolveInitialOsgModeTagSetId();
+    if (tagSetId == null) {
+      return null;
+    }
+    for (final TagSet tagSet in tagSets) {
+      if (tagSet.id == tagSetId) {
+        return buildOsgModeSessionForTagSet(tagSet);
+      }
+    }
+    return null;
+  }
+
+  OsgModeSession? buildOsgModeSessionForQuickSlot(int slotIndex) {
+    if (slotIndex < 0 || slotIndex >= _osgModeQuickSlotTagSetIds.length) {
+      return null;
+    }
+    final int? tagSetId = _osgModeQuickSlotTagSetIds[slotIndex];
+    if (tagSetId == null) {
+      return null;
+    }
+    for (final TagSet tagSet in tagSets) {
+      if (tagSet.id == tagSetId) {
+        return buildOsgModeSessionForTagSet(tagSet);
+      }
+    }
+    return null;
+  }
+
+  int? _resolveInitialOsgModeTagSetId() {
+    final MediaListItem? item = selectedItem;
+    if (item != null && item.type == MediaListItemType.tagSet) {
+      return item.id;
+    }
+    for (final int? id in _osgModeQuickSlotTagSetIds) {
+      if (id != null) {
+        return id;
+      }
+    }
+    final List<TagSet> sets = tagSets;
+    if (sets.isEmpty) {
+      return null;
+    }
+    return sets.first.id;
   }
 
   Future<void> savePlayoutOutputSize(PlayoutOutputSize value) async {
@@ -1448,6 +1629,8 @@ class DashboardViewModel extends ChangeNotifier {
     _mediaRepository = session.mediaRepository;
     _workspacePath = session.workspace.rootPath;
     await _loadWorkspaceSettings();
+    _osgModeQuickSlotTagSetIds =
+        await session.mediaRepository.loadOsgModeQuickSlotTagSetIds();
     await _mediaSubscription?.cancel();
     await _thumbnailSubscription?.cancel();
     _thumbnailSubscription = _ingestionService.thumbnailReady.listen(
@@ -2292,6 +2475,7 @@ class DashboardViewModel extends ChangeNotifier {
                   "videoScene": settings.obsSceneSwitchConfig!.videoScene,
                   "faceScene": settings.obsSceneSwitchConfig!.faceScene,
                   "captureScene": settings.obsSceneSwitchConfig!.captureScene,
+                  "osgScene": settings.obsSceneSwitchConfig!.osgScene,
                 },
           "webhooks": settings.webhookSceneSwitchConfigs
               .map(
@@ -2336,16 +2520,21 @@ class DashboardViewModel extends ChangeNotifier {
       },
       "mediaItems": items.map((MediaListItem item) {
         final bool isClip = item.type == MediaListItemType.clip;
+        final bool isTagSet = item.type == MediaListItemType.tagSet;
         return <String, Object?>{
-          "identifier": isClip ? item.stableKey : item.fileName,
+          "identifier": isClip || isTagSet ? item.stableKey : item.fileName,
           "fileName": item.fileName,
-          "displayNameOverride": isClip
-              ? item.clip!.displayNameOverride
-              : item.master!.displayNameOverride,
-          "relativePath": WorkspaceMediaPaths.displayRelativeToWorkspace(
-            workspaceRoot,
-            item.filePath,
-          ),
+          "displayNameOverride": switch (item.type) {
+            MediaListItemType.clip => item.clip!.displayNameOverride,
+            MediaListItemType.master => item.master!.displayNameOverride,
+            MediaListItemType.tagSet => null,
+          },
+          "relativePath": isTagSet
+              ? null
+              : WorkspaceMediaPaths.displayRelativeToWorkspace(
+                  workspaceRoot,
+                  item.filePath,
+                ),
           "tags": (tagsByItem[item.stableKey] ?? <String>{}).toList()..sort(),
           "tagRows": (attachmentsByItem[item.stableKey] ?? <MediaTagAttachment>[])
               .map(
@@ -2402,7 +2591,11 @@ class DashboardViewModel extends ChangeNotifier {
     final Set<String> requiredTags = _activeTagFilters
         .map((String tag) => tag.toLowerCase())
         .toSet();
+    final bool wantTagSets = _mediaPaneTab == DashboardMediaPaneTab.tagSets;
     _visibleItems = _allItems.where((MediaListItem item) {
+      if ((item.type == MediaListItemType.tagSet) != wantTagSets) {
+        return false;
+      }
       final Set<String> tags = tagsForItem(item);
       final Set<String> userTags = tags.where(_isUserTag).toSet();
       final Set<String> tagsLower = tags
@@ -2435,7 +2628,9 @@ class DashboardViewModel extends ChangeNotifier {
   }
 
   bool _isUserTag(String tag) =>
-      tag != MediaRepository.masterTag && tag != MediaRepository.clipTag;
+      tag != MediaRepository.masterTag &&
+      tag != MediaRepository.clipTag &&
+      tag != MediaRepository.tagSetTag;
 
   void setPlayoutActive(bool active) {
     _ingestionService.setPlayoutActive(active);
@@ -2506,6 +2701,59 @@ class DashboardViewModel extends ChangeNotifier {
     await repository.saveIngestThumbnailConcurrency(value);
     await _loadWorkspaceSettings();
     notifyListeners();
+  }
+
+  Future<void> saveOsgModeKeyColorArgb(int argb) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveOsgModeKeyColorArgb(argb | 0xFF000000);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> saveOsgModeEnabled(bool value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveOsgModeEnabled(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<OsgKeyColorSuggestion> suggestOsgModeKeyColor() async {
+    final String? root = _workspacePath;
+    if (root == null || root.trim().isEmpty) {
+      return OsgKeyColorSuggestion(
+        suggestedKeyColorArgb: osgModeKeyColorArgb,
+        analysis: osg_key_color.analyzeOsgKeyColor(
+          keyColorArgb: osgModeKeyColorArgb,
+          forbidden: const <OsgRgb>[],
+        ),
+        alternateCandidates: const <OsgKeyColorAnalysis>[],
+      );
+    }
+    return osg_key_color.suggestOsgModeKeyColor(
+      config: osgWorkspaceConfig,
+      workspaceRoot: root,
+    );
+  }
+
+  Future<OsgKeyColorAnalysis> validateOsgModeKeyColor(int argb) async {
+    final String? root = _workspacePath;
+    if (root == null || root.trim().isEmpty) {
+      return osg_key_color.analyzeOsgKeyColor(
+        keyColorArgb: argb,
+        forbidden: const <OsgRgb>[],
+      );
+    }
+    return osg_key_color.validateOsgModeKeyColor(
+      keyColorArgb: argb,
+      config: osgWorkspaceConfig,
+      workspaceRoot: root,
+    );
   }
 
   Future<void> saveDefaultClipVolume(double value) async {

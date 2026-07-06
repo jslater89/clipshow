@@ -1,3 +1,4 @@
+import "dart:convert";
 import "package:logging/logging.dart";
 import "package:path/path.dart" as p;
 import "package:sqflite/sqflite.dart";
@@ -5,9 +6,11 @@ import "package:sqflite/sqflite.dart";
 import 'package:obs_clipshow/src/media/master_media_file.dart';
 import 'package:obs_clipshow/src/media/media_clip.dart';
 import 'package:obs_clipshow/src/media/media_list_item.dart';
+import 'package:obs_clipshow/src/media/tag_set.dart';
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
+import "package:obs_clipshow/src/osg/osg_mode_key_color.dart";
 import "package:obs_clipshow/src/workspace/ignored_path_utils.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
@@ -20,6 +23,7 @@ class MediaRepository {
   static const int _maxIssueDetailLength = 500;
   static const String masterTag = "Master";
   static const String clipTag = "Clip";
+  static const String tagSetTag = "Tag Set";
 
   /// Inserts or updates file stats. Preserves [media_issue] / [media_issue_detail] on conflict.
   ///
@@ -315,11 +319,167 @@ class MediaRepository {
       );
       return;
     }
+    if (mediaType == MediaListItemType.tagSet) {
+      await _database.update(
+        "tag_sets",
+        <String, Object?>{"annotations": normalized},
+        where: "id = ?",
+        whereArgs: <Object?>[mediaId],
+      );
+      return;
+    }
     await _database.update(
       "clips",
       <String, Object?>{"annotations": normalized},
       where: "id = ?",
       whereArgs: <Object?>[mediaId],
+    );
+  }
+
+  Future<List<TagSet>> listTagSets() async {
+    final List<Map<String, Object?>> rows = await _database.query(
+      "tag_sets",
+      orderBy: "created_at_ms DESC, name COLLATE NOCASE ASC",
+    );
+    return rows.map(TagSet.fromMap).toList();
+  }
+
+  Future<TagSet> createTagSet(String name) async {
+    final String normalized = name.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError("Tag set name cannot be empty.");
+    }
+    final int nowMs = DateTime.now().millisecondsSinceEpoch;
+    return _database.transaction((Transaction txn) async {
+      final int id = await txn.insert("tag_sets", <String, Object?>{
+        "name": normalized,
+        "annotations": null,
+        "created_at_ms": nowMs,
+      });
+      await _attachTagToMedia(
+        txn,
+        mediaType: MediaListItemType.tagSet,
+        mediaId: id,
+        tag: tagSetTag,
+        semanticTypeId: null,
+      );
+      return TagSet(
+        id: id,
+        name: normalized,
+        annotations: null,
+        createdAtMs: nowMs,
+      );
+    });
+  }
+
+  Future<void> renameTagSet({required int tagSetId, required String name}) async {
+    final String normalized = name.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError("Tag set name cannot be empty.");
+    }
+    await _database.update(
+      "tag_sets",
+      <String, Object?>{"name": normalized},
+      where: "id = ?",
+      whereArgs: <Object?>[tagSetId],
+    );
+  }
+
+  Future<void> deleteTagSet(int tagSetId) async {
+    await _database.transaction((Transaction txn) async {
+      await txn.delete(
+        "media_tags",
+        where: "media_type = ? AND media_id = ?",
+        whereArgs: <Object?>["tag_set", tagSetId],
+      );
+      await txn.delete(
+        "tag_sets",
+        where: "id = ?",
+        whereArgs: <Object?>[tagSetId],
+      );
+      await _deleteOrphanTags(txn);
+    });
+  }
+
+  Future<Map<String, List<MediaTagAttachment>>> listMediaTagAttachmentsForTagSets(
+    List<int> tagSetIds,
+  ) async {
+    if (tagSetIds.isEmpty) {
+      return <String, List<MediaTagAttachment>>{};
+    }
+    final String ids = tagSetIds.join(",");
+    final List<Map<String, Object?>> rows = await _database.rawQuery("""
+      SELECT
+        media_tags.id AS media_tag_id,
+        media_tags.media_type,
+        media_tags.media_id,
+        media_tags.tag_id,
+        media_tags.semantic_type_id,
+        tags.name AS tag_name,
+        tag_semantic_types.name AS semantic_type_name,
+        tag_semantic_types.icon_code_point AS semantic_type_icon_code_point
+      FROM media_tags
+      JOIN tags ON tags.id = media_tags.tag_id
+      LEFT JOIN tag_semantic_types
+        ON tag_semantic_types.id = media_tags.semantic_type_id
+      WHERE media_tags.media_type = 'tag_set'
+        AND media_tags.media_id IN ($ids)
+      ORDER BY tags.name COLLATE NOCASE ASC
+      """);
+    final Map<String, List<MediaTagAttachment>> byKey =
+        <String, List<MediaTagAttachment>>{};
+    for (final Map<String, Object?> row in rows) {
+      final int mediaId = row["media_id"]! as int;
+      final String key = "ts:$mediaId";
+      byKey
+          .putIfAbsent(key, () => <MediaTagAttachment>[])
+          .add(
+            MediaTagAttachment(
+              mediaTagId: row["media_tag_id"]! as int,
+              tagId: row["tag_id"]! as int,
+              tagName: row["tag_name"]! as String,
+              semanticTypeId: row["semantic_type_id"] as int?,
+              semanticTypeName: row["semantic_type_name"] as String?,
+              semanticTypeIconCodePoint:
+                  row["semantic_type_icon_code_point"] as int?,
+            ),
+          );
+    }
+    return byKey;
+  }
+
+  Future<List<int?>> loadOsgModeQuickSlotTagSetIds() async {
+    final String? raw = await _getWorkspaceSetting("osgMode.quickSlotTagSetIds");
+    if (raw == null || raw.trim().isEmpty) {
+      return List<int?>.filled(5, null);
+    }
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is! List<dynamic>) {
+        return List<int?>.filled(5, null);
+      }
+      final List<int?> out = List<int?>.filled(5, null);
+      for (int i = 0; i < 5 && i < decoded.length; i++) {
+        final Object? v = decoded[i];
+        out[i] = v is int ? v : int.tryParse("$v");
+      }
+      return out;
+    } catch (_) {
+      return List<int?>.filled(5, null);
+    }
+  }
+
+  Future<void> saveOsgModeQuickSlotTagSetIds(List<int?> slotIds) async {
+    final List<int?> normalized = List<int?>.from(slotIds);
+    while (normalized.length < 5) {
+      normalized.add(null);
+    }
+    if (normalized.length > 5) {
+      normalized.removeRange(5, normalized.length);
+    }
+    await _putWorkspaceSetting(
+      "osgMode.quickSlotTagSetIds",
+      jsonEncode(normalized),
     );
   }
 
@@ -398,25 +558,7 @@ class MediaRepository {
     if (items.isEmpty) {
       return <String, Set<String>>{};
     }
-    final String masterIds = items
-        .where((MediaListItem item) => item.type == MediaListItemType.master)
-        .map((MediaListItem item) => item.id)
-        .join(",");
-    final String clipIds = items
-        .where((MediaListItem item) => item.type == MediaListItemType.clip)
-        .map((MediaListItem item) => item.id)
-        .join(",");
-    final List<String> clauses = <String>[];
-    if (masterIds.isNotEmpty) {
-      clauses.add(
-        "(media_tags.media_type = 'master' AND media_tags.media_id IN ($masterIds))",
-      );
-    }
-    if (clipIds.isNotEmpty) {
-      clauses.add(
-        "(media_tags.media_type = 'clip' AND media_tags.media_id IN ($clipIds))",
-      );
-    }
+    final List<String> clauses = _mediaIdClausesByType(items);
     if (clauses.isEmpty) {
       return <String, Set<String>>{};
     }
@@ -432,10 +574,44 @@ class MediaRepository {
       final String mediaType = row["media_type"]! as String;
       final int mediaId = row["media_id"]! as int;
       final String tagName = row["name"]! as String;
-      final String key = mediaType == "master" ? "m:$mediaId" : "c:$mediaId";
+      final String key = _stableKeyForMediaTypeValue(mediaType, mediaId);
       tagsByKey.putIfAbsent(key, () => <String>{}).add(tagName);
     }
     return tagsByKey;
+  }
+
+  /// Builds `media_type`/`media_id IN (...)` SQL clauses for [items], one per
+  /// media type present. Shared by [listTagsForItems] and
+  /// [listMediaTagAttachmentsForItems] so both stay in sync as media types
+  /// are added.
+  List<String> _mediaIdClausesByType(List<MediaListItem> items) {
+    final Map<MediaListItemType, List<int>> idsByType =
+        <MediaListItemType, List<int>>{};
+    for (final MediaListItem item in items) {
+      idsByType.putIfAbsent(item.type, () => <int>[]).add(item.id);
+    }
+    final List<String> clauses = <String>[];
+    for (final MapEntry<MediaListItemType, List<int>> entry
+        in idsByType.entries) {
+      if (entry.value.isEmpty) {
+        continue;
+      }
+      final String ids = entry.value.join(",");
+      clauses.add(
+        "(media_tags.media_type = '${_mediaTypeValue(entry.key)}' AND media_tags.media_id IN ($ids))",
+      );
+    }
+    return clauses;
+  }
+
+  String _stableKeyForMediaTypeValue(String mediaType, int mediaId) {
+    final String prefix = switch (mediaType) {
+      "master" => "m",
+      "clip" => "c",
+      "tag_set" => "ts",
+      _ => throw ArgumentError("Unknown media_type: $mediaType"),
+    };
+    return "$prefix:$mediaId";
   }
 
   Future<List<String>> listAllTags() async {
@@ -686,17 +862,23 @@ class MediaRepository {
   Future<List<MediaListItem>> listMixedItems() async {
     final List<MasterMediaFile> masters = await listAll();
     final List<MediaClip> clips = await listClips();
+    final List<TagSet> tagSets = await listTagSets();
     final List<MediaListItem> items = <MediaListItem>[
       ...masters.map(MediaListItem.master),
       ...clips.map(MediaListItem.clip),
+      ...tagSets.map(MediaListItem.tagSet),
     ];
     items.sort((MediaListItem a, MediaListItem b) {
-      final int aTime = a.type == MediaListItemType.master
-          ? a.master!.modifiedAtMs
-          : a.clip!.createdAtMs;
-      final int bTime = b.type == MediaListItemType.master
-          ? b.master!.modifiedAtMs
-          : b.clip!.createdAtMs;
+      final int aTime = switch (a.type) {
+        MediaListItemType.master => a.master!.modifiedAtMs,
+        MediaListItemType.clip => a.clip!.createdAtMs,
+        MediaListItemType.tagSet => a.tagSet!.createdAtMs,
+      };
+      final int bTime = switch (b.type) {
+        MediaListItemType.master => b.master!.modifiedAtMs,
+        MediaListItemType.clip => b.clip!.createdAtMs,
+        MediaListItemType.tagSet => b.tagSet!.createdAtMs,
+      };
       return bTime.compareTo(aTime);
     });
     return items;
@@ -756,6 +938,8 @@ class MediaRepository {
     final List<TagSemanticType> semanticTypes = await listTagSemanticTypes();
     final List<OsgBakeRecipe> osgBakeRecipes = await _loadOsgBakeRecipes();
     final double defaultClipVolume = await _loadDefaultClipVolume();
+    final int osgModeKeyColorArgb = await _loadOsgModeKeyColorArgb();
+    final bool osgModeEnabled = await _loadOsgModeEnabled();
     return WorkspaceSettingsBundle(
       telestratorDefaults: telestratorDefaults,
       decoderConfig: decoderConfig,
@@ -774,6 +958,8 @@ class MediaRepository {
       tagSemanticTypes: semanticTypes,
       osgBakeRecipes: osgBakeRecipes,
       defaultClipVolume: defaultClipVolume,
+      osgModeKeyColorArgb: osgModeKeyColorArgb,
+      osgModeEnabled: osgModeEnabled,
     );
   }
 
@@ -903,25 +1089,7 @@ class MediaRepository {
     if (items.isEmpty) {
       return <String, List<MediaTagAttachment>>{};
     }
-    final String masterIds = items
-        .where((MediaListItem item) => item.type == MediaListItemType.master)
-        .map((MediaListItem item) => item.id)
-        .join(",");
-    final String clipIds = items
-        .where((MediaListItem item) => item.type == MediaListItemType.clip)
-        .map((MediaListItem item) => item.id)
-        .join(",");
-    final List<String> clauses = <String>[];
-    if (masterIds.isNotEmpty) {
-      clauses.add(
-        "(media_tags.media_type = 'master' AND media_tags.media_id IN ($masterIds))",
-      );
-    }
-    if (clipIds.isNotEmpty) {
-      clauses.add(
-        "(media_tags.media_type = 'clip' AND media_tags.media_id IN ($clipIds))",
-      );
-    }
+    final List<String> clauses = _mediaIdClausesByType(items);
     if (clauses.isEmpty) {
       return <String, List<MediaTagAttachment>>{};
     }
@@ -947,7 +1115,7 @@ class MediaRepository {
     for (final Map<String, Object?> row in rows) {
       final String mediaType = row["media_type"]! as String;
       final int mediaId = row["media_id"]! as int;
-      final String key = mediaType == "master" ? "m:$mediaId" : "c:$mediaId";
+      final String key = _stableKeyForMediaTypeValue(mediaType, mediaId);
       byKey
           .putIfAbsent(key, () => <MediaTagAttachment>[])
           .add(
@@ -1112,6 +1280,37 @@ class MediaRepository {
       "playback.defaultClipVolume",
       clamped.toString(),
     );
+  }
+
+  Future<int> _loadOsgModeKeyColorArgb() async {
+    final String? raw = await _getWorkspaceSetting("osgMode.keyColorArgb");
+    if (raw == null || raw.trim().isEmpty) {
+      return OsgModeKeyColorSettings.defaultKeyColorArgb;
+    }
+    final int? parsed = int.tryParse(raw.trim());
+    if (parsed == null) {
+      return OsgModeKeyColorSettings.defaultKeyColorArgb;
+    }
+    return parsed | 0xFF000000;
+  }
+
+  Future<void> saveOsgModeKeyColorArgb(int argb) async {
+    await _putWorkspaceSetting(
+      "osgMode.keyColorArgb",
+      "${argb | 0xFF000000}",
+    );
+  }
+
+  Future<bool> _loadOsgModeEnabled() async {
+    final String? raw = await _getWorkspaceSetting("osgMode.enabled");
+    if (raw == null) {
+      return true;
+    }
+    return raw == "true";
+  }
+
+  Future<void> saveOsgModeEnabled(bool value) async {
+    await _putWorkspaceSetting("osgMode.enabled", value ? "true" : "false");
   }
 
   Future<CapturePathsSettings> _loadCapturePathsSettings() async {
@@ -1368,6 +1567,7 @@ class MediaRepository {
       videoScene: (row["obs_video_scene"] as String?) ?? "Video Scene",
       faceScene: (row["obs_face_scene"] as String?) ?? "Face Scene",
       captureScene: (row["obs_capture_scene"] as String?) ?? "",
+      osgScene: (row["obs_osg_scene"] as String?) ?? "",
     );
   }
 
@@ -1398,6 +1598,7 @@ class MediaRepository {
         "obs_video_scene": value.videoScene,
         "obs_face_scene": value.faceScene,
         "obs_capture_scene": value.captureScene,
+        "obs_osg_scene": value.osgScene,
       };
       if (existing.isEmpty) {
         await txn.insert("scene_switch_profiles", payload);
@@ -1628,8 +1829,11 @@ class MediaRepository {
     }
   }
 
-  String _mediaTypeValue(MediaListItemType mediaType) =>
-      mediaType == MediaListItemType.master ? "master" : "clip";
+  String _mediaTypeValue(MediaListItemType mediaType) => switch (mediaType) {
+    MediaListItemType.master => "master",
+    MediaListItemType.clip => "clip",
+    MediaListItemType.tagSet => "tag_set",
+  };
 
   Future<void> _deleteOrphanTags(DatabaseExecutor executor) async {
     await executor.rawDelete("""

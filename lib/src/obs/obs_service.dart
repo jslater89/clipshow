@@ -7,12 +7,14 @@ class ObsService {
     this.password,
     this.videoSceneName = "Video Scene",
     this.faceSceneName = "Face Scene",
+    this.osgSceneName = "OSG Scene",
   });
 
   final String url;
   final String? password;
   final String videoSceneName;
   final String faceSceneName;
+  final String osgSceneName;
   final Logger _logger = Logger("ObsService");
   ObsWebSocket? _client;
 
@@ -37,6 +39,12 @@ class ObsService {
     final ObsWebSocket client = await _requireClient();
     _logger.info("Switching OBS program scene to $faceSceneName");
     await client.scenes.setCurrentProgramScene(faceSceneName);
+  }
+
+  Future<void> switchToOsgScene() async {
+    final ObsWebSocket client = await _requireClient();
+    _logger.info("Switching OBS program scene to $osgSceneName");
+    await client.scenes.setCurrentProgramScene(osgSceneName);
   }
 
   Future<void> close() async {

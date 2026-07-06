@@ -7,7 +7,8 @@ import "package:flutter/material.dart";
 ///
 /// Mimics [BannerPainter] (foreground shadow + semi-transparent fill) with
 /// tunable constants below. A 1px opaque strip in this slot does not fix the
-/// FVP/Linux chroma bug; this corner paint path does.
+/// FVP/Linux chroma bug; this corner paint path does. Used for playout and
+/// OSG Mode on Linux.
 const bool kPlayoutFrameworkRootCompositingStrip = true;
 
 /// Diagonal strip half-width before rotation (~Banner `_kOffset`).

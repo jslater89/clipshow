@@ -9,7 +9,9 @@ import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/media/tag_set.dart";
 import "package:obs_clipshow/src/media/workspace.dart";
+import "package:obs_clipshow/src/osg/osg_mode_key_color.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
@@ -774,6 +776,7 @@ void main() {
             videoScene: "video",
             faceScene: "face",
             captureScene: "Cap",
+            osgScene: "OSG Scene",
           ),
         );
         await repository.saveObsSceneSwitchConfig(
@@ -785,6 +788,7 @@ void main() {
             videoScene: "video2",
             faceScene: "face2",
             captureScene: "",
+            osgScene: "",
           ),
         );
 
@@ -857,6 +861,23 @@ void main() {
         expect(
           settings.defaultClipVolume,
           PlaybackVolumeDefaults.defaultVolume,
+        );
+        expect(
+          settings.osgModeKeyColorArgb,
+          OsgModeKeyColorSettings.defaultKeyColorArgb,
+        );
+        expect(settings.osgModeEnabled, isTrue);
+
+        await repository.saveOsgModeKeyColorArgb(0xFF112233);
+        expect(
+          (await repository.loadWorkspaceSettings()).osgModeKeyColorArgb,
+          0xFF112233,
+        );
+
+        await repository.saveOsgModeEnabled(false);
+        expect(
+          (await repository.loadWorkspaceSettings()).osgModeEnabled,
+          isFalse,
         );
 
         await repository.savePauseIngestScanDuringPreview(false);
@@ -1217,5 +1238,203 @@ void main() {
       );
       await upgraded.close();
     });
+
+    test("creates tag sets and attaches tags for OSG Mode", () async {
+      final AppDatabase appDatabase = AppDatabase();
+      final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+      final database = await appDatabase.openForWorkspace(workspace);
+      final MediaRepository repository = MediaRepository(database);
+
+      final TagSet tagSet = await repository.createTagSet("Lower Third A");
+      await repository.addTagToMedia(
+        mediaType: MediaListItemType.tagSet,
+        mediaId: tagSet.id,
+        tag: "Player One",
+      );
+      await repository.setMediaAnnotations(
+        mediaType: MediaListItemType.tagSet,
+        mediaId: tagSet.id,
+        annotations: "Notes for annotation slots",
+      );
+
+      final List<TagSet> listed = await repository.listTagSets();
+      expect(listed, hasLength(1));
+      expect(listed.single.name, "Lower Third A");
+      expect(
+        await repository.resolveSemanticTagForMedia(
+          mediaType: MediaListItemType.tagSet,
+          mediaId: tagSet.id,
+          semanticTypeId: 99,
+        ),
+        isNull,
+      );
+
+      final Map<String, List<MediaTagAttachment>> attachments =
+          await repository.listMediaTagAttachmentsForTagSets(<int>[tagSet.id]);
+      // "Tag Set" is auto-attached by createTagSet as a system tag, alongside
+      // the explicitly-added "Player One" tag.
+      expect(attachments["ts:${tagSet.id}"], hasLength(2));
+      expect(
+        attachments["ts:${tagSet.id}"]!.map(
+          (MediaTagAttachment a) => a.tagName,
+        ),
+        containsAll(<String>["Player One", MediaRepository.tagSetTag]),
+      );
+
+      await repository.saveOsgModeQuickSlotTagSetIds(<int?>[tagSet.id, null]);
+      final List<int?> slots = await repository.loadOsgModeQuickSlotTagSetIds();
+      expect(slots.first, tagSet.id);
+
+      await repository.deleteTagSet(tagSet.id);
+      expect(await repository.listTagSets(), isEmpty);
+
+      await database.close();
+    });
+
+    test(
+      "upgrades v10 when tag_sets index already exists from parallel migration",
+      () async {
+        sqfliteFfiInit();
+        final String dbPath = p.join(tempDirectory.path, "obs_clipshow.db");
+        final Database legacy = await databaseFactoryFfi.openDatabase(
+          dbPath,
+          options: OpenDatabaseOptions(
+            version: 10,
+            onCreate: (Database db, int version) async {
+              await db.execute("""
+                CREATE TABLE master_media_files (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  file_path TEXT NOT NULL UNIQUE,
+                  file_name TEXT NOT NULL,
+                  display_name_override TEXT,
+                  annotations TEXT,
+                  file_size_bytes INTEGER NOT NULL,
+                  modified_at_ms INTEGER NOT NULL,
+                  created_at_ms INTEGER NOT NULL,
+                  duration_ms INTEGER,
+                  media_issue TEXT NOT NULL DEFAULT 'none',
+                  media_issue_detail TEXT
+                );
+              """);
+              await db.execute("""
+                CREATE TABLE clips (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  master_media_id INTEGER NOT NULL,
+                  display_name_override TEXT,
+                  annotations TEXT,
+                  in_ms INTEGER NOT NULL,
+                  out_ms INTEGER,
+                  created_at_ms INTEGER NOT NULL,
+                  FOREIGN KEY(master_media_id) REFERENCES master_media_files(id) ON DELETE CASCADE
+                );
+              """);
+              await db.execute("""
+                CREATE TABLE tags (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL UNIQUE COLLATE NOCASE
+                );
+              """);
+              await db.execute("""
+                CREATE TABLE tag_semantic_types (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                  icon_code_point INTEGER
+                );
+              """);
+              await db.execute("""
+                CREATE TABLE media_tags (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  media_type TEXT NOT NULL CHECK(media_type IN ('master', 'clip')),
+                  media_id INTEGER NOT NULL,
+                  tag_id INTEGER NOT NULL,
+                  semantic_type_id INTEGER,
+                  FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+                  FOREIGN KEY(semantic_type_id) REFERENCES tag_semantic_types(id) ON DELETE SET NULL,
+                  UNIQUE(media_type, media_id, tag_id)
+                );
+              """);
+              await db.execute("""
+                CREATE TABLE saved_tags (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                  semantic_type_id INTEGER REFERENCES tag_semantic_types(id) ON DELETE SET NULL
+                );
+              """);
+              await db.execute("""
+                CREATE TABLE workspace_settings (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+              """);
+              await db.execute("""
+                CREATE TABLE scene_switch_profiles (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  profile_type TEXT NOT NULL CHECK(profile_type IN ('obs', 'webhook')),
+                  name TEXT NOT NULL,
+                  enabled INTEGER NOT NULL DEFAULT 1,
+                  obs_server_address TEXT,
+                  obs_port INTEGER,
+                  obs_password TEXT,
+                  obs_video_scene TEXT,
+                  obs_face_scene TEXT,
+                  obs_capture_scene TEXT,
+                  webhook_url TEXT,
+                  webhook_method TEXT CHECK(webhook_method IN ('GET', 'POST')),
+                  webhook_get_query_param TEXT,
+                  webhook_post_body_type TEXT CHECK(webhook_post_body_type IN ('form', 'json')),
+                  webhook_scene_key TEXT
+                );
+              """);
+              await db.execute("""
+                CREATE TABLE ignored_folders (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  relative_path TEXT NOT NULL UNIQUE
+                );
+              """);
+              await db.execute("""
+                CREATE TABLE tag_sets (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                  annotations TEXT,
+                  created_at_ms INTEGER NOT NULL
+                );
+              """);
+              await db.execute("""
+                CREATE INDEX idx_tag_sets_created_at_ms
+                ON tag_sets(created_at_ms DESC);
+              """);
+            },
+          ),
+        );
+        await legacy.close();
+
+        final AppDatabase appDatabase = AppDatabase();
+        final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+        final Database upgraded = await appDatabase.openForWorkspace(workspace);
+        final List<Map<String, Object?>> versionRow = await upgraded.rawQuery(
+          "PRAGMA user_version",
+        );
+        expect(versionRow.single["user_version"], 12);
+
+        final List<Map<String, Object?>> indexRows = await upgraded.rawQuery(
+          """
+          SELECT name FROM sqlite_master
+          WHERE type = 'index' AND name = 'idx_tag_sets_created_at_ms'
+          """,
+        );
+        expect(indexRows, hasLength(1));
+
+        final List<Map<String, Object?>> mtDef = await upgraded.rawQuery(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media_tags'",
+        );
+        expect(mtDef.single["sql"], contains("'tag_set'"));
+
+        final MediaRepository repository = MediaRepository(upgraded);
+        final TagSet tagSet = await repository.createTagSet("Rebased");
+        expect(tagSet.name, "Rebased");
+
+        await upgraded.close();
+      },
+    );
   });
 }

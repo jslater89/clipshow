@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
+import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_osg_preset_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 
@@ -141,18 +142,7 @@ class DashboardPreviewHotkeysLayer extends StatelessWidget {
         if (onSaveClipRequested != null)
           const SingleActivator(LogicalKeyboardKey.keyS):
               const PreviewSaveClipIntent(),
-        if (onOsgPresetSlotToggle != null) ...<ShortcutActivator, Intent>{
-          const SingleActivator(LogicalKeyboardKey.digit6):
-              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset1),
-          const SingleActivator(LogicalKeyboardKey.digit7):
-              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset2),
-          const SingleActivator(LogicalKeyboardKey.digit8):
-              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset3),
-          const SingleActivator(LogicalKeyboardKey.digit9):
-              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset4),
-          const SingleActivator(LogicalKeyboardKey.digit0):
-              const PreviewOsgPresetSlotIntent(OsgPresetSlot.preset5),
-        },
+        if (onOsgPresetSlotToggle != null) ...osgPresetSlotShortcutMap(),
         if (onVolumeUpRequested != null)
           const SingleActivator(LogicalKeyboardKey.arrowUp):
               const PreviewVolumeUpIntent(),

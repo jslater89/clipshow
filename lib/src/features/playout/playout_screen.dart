@@ -338,9 +338,12 @@ class _PlayoutVideoAreaOverlay extends StatelessWidget {
         if (workspaceRoot.trim().isNotEmpty)
           OsgPlayoutLayer(
             key: ValueKey<String>(
-              "${clip.mediaType.name}-${clip.mediaId}",
+              "${clip.mediaType.name}-${clip.mediaId}-${clip.semanticTagSnapshotVersion}",
             ),
-            clip: clip,
+            mediaType: clip.mediaType,
+            mediaId: clip.mediaId,
+            annotationsText: clip.annotationsText,
+            semanticTagSnapshotVersion: clip.semanticTagSnapshotVersion,
             config: osgWorkspaceConfig,
             workspaceRoot: workspaceRoot,
             resolveSemantic: onResolveSemanticText,

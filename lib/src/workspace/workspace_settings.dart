@@ -263,6 +263,7 @@ class ObsSceneSwitchConfig {
     required this.videoScene,
     required this.faceScene,
     required this.captureScene,
+    required this.osgScene,
   });
 
   factory ObsSceneSwitchConfig.fallback() {
@@ -274,6 +275,7 @@ class ObsSceneSwitchConfig {
       videoScene: "Video Scene",
       faceScene: "Face Scene",
       captureScene: "",
+      osgScene: "OSG Scene",
     );
   }
 
@@ -286,6 +288,9 @@ class ObsSceneSwitchConfig {
 
   /// Empty string disables switching before capture.
   final String captureScene;
+
+  /// Empty string disables automatic program-scene switching on OSG Mode enter/exit.
+  final String osgScene;
 }
 
 /// Paths relative to workspace root (POSIX-style segments). Used for OBS staging copy workflow.
@@ -380,6 +385,8 @@ class WorkspaceSettingsBundle {
     required this.tagSemanticTypes,
     required this.osgBakeRecipes,
     required this.defaultClipVolume,
+    required this.osgModeKeyColorArgb,
+    required this.osgModeEnabled,
   });
 
   final TelestratorDefaults telestratorDefaults;
@@ -417,4 +424,10 @@ class WorkspaceSettingsBundle {
   /// Initial clip volume (0.0–1.0) used when the workspace loads, before the
   /// user adjusts via the volume hotkeys. Session adjustments are not persisted.
   final double defaultClipVolume;
+
+  /// Opaque fill behind OSG Mode graphics for OBS Color Key window capture.
+  final int osgModeKeyColorArgb;
+
+  /// When false, Enter OSG Mode is unavailable regardless of tag sets or OBS.
+  final bool osgModeEnabled;
 }
