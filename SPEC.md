@@ -66,13 +66,13 @@ The application operates in mutually exclusive UI states to prevent broadcast er
 
 ### State 3: OSG Mode (graphics mode)
 * **Purpose:** Graphics-only output driven by a **tag set** (semantic tags + workspace OSG presets). No video decoder. Transparent window background for OBS Window Capture on the **OSG** scene.
-* **Trigger:** **Enter OSG Mode** on the Dashboard **Tag Sets** tab (requires configured **OSG** scene name and at least one tag set).
+* **Trigger:** **Enter OSG Mode** on the Dashboard **Tag Sets** tab (requires **OSG Mode enabled** in workspace settings and at least one tag set).
 * **Execution sequence:**
     1. Dashboard is replaced by the OSG Mode surface (transparent background).
     2. Same window sizing rules as playout (16:9, hidden title bar).
-    3. After the first frame paints, OBS switches to the **OSG** scene (and/or webhooks with **`osg`** token).
+    3. After the first frame paints, if an **OSG** program scene name is configured, OBS switches to that scene (and/or webhooks with **`osg`** token). When the OSG scene name is empty, OBS program scene is unchanged (manual/nested-scene workflows).
     4. Operator toggles OSG presets with **6–0** and switches tag sets with **1–5** (quick slots configured on the Tag Sets tab).
-* **Reversion:** **`Escape`** → **Face** scene + Dashboard restore (same window restore as playout exit).
+* **Reversion:** **`Escape`** → Dashboard restore (same window restore as playout exit). When an **OSG** program scene name is configured, OBS also switches to **Face**.
 
 ### Record playout (OBS export)
 * **Purpose:** Produce a shareable video file (OBS-encoded program output) from a clip or master playout session—OSGs, telestrator, and live voiceover via the OBS audio chain—without offline ffmpeg rendering.

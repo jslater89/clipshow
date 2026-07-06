@@ -252,6 +252,8 @@ class DashboardViewModel extends ChangeNotifier {
       _workspaceSettings?.osgModeKeyColorArgb ??
       OsgModeKeyColorSettings.defaultKeyColorArgb;
 
+  bool get osgModeEnabled => _workspaceSettings?.osgModeEnabled ?? true;
+
   List<TagSemanticType> get tagSemanticTypes =>
       _workspaceSettings?.tagSemanticTypes ?? <TagSemanticType>[];
 
@@ -589,7 +591,7 @@ class DashboardViewModel extends ChangeNotifier {
       List<int?>.unmodifiable(_osgModeQuickSlotTagSetIds);
 
   bool get canEnterOsgMode {
-    if (!_osgSceneConfigured) {
+    if (!osgModeEnabled) {
       return false;
     }
     return _resolveInitialOsgModeTagSetId() != null;
@@ -597,12 +599,13 @@ class DashboardViewModel extends ChangeNotifier {
 
   /// Whether OSG Mode can be entered with a specific [tagSet] right now
   /// (independent of the current dashboard selection or quick slots).
-  bool canEnterOsgModeForTagSet(TagSet tagSet) => _osgSceneConfigured;
+  bool canEnterOsgModeForTagSet(TagSet tagSet) => osgModeEnabled;
 
-  /// True when OBS integration is enabled and an OSG program scene is configured.
-  bool get isOsgModeBroadcastEnabled => _osgSceneConfigured;
+  /// True when OBS integration is enabled and an OSG program scene is configured
+  /// for automatic switching on OSG Mode enter/exit.
+  bool get isOsgModeBroadcastEnabled => isOsgObsSceneSwitchConfigured;
 
-  bool get _osgSceneConfigured {
+  bool get isOsgObsSceneSwitchConfigured {
     final ObsSceneSwitchConfig? config = obsSceneSwitchConfig;
     return config != null && config.enabled && config.osgScene.trim().isNotEmpty;
   }
@@ -2706,6 +2709,16 @@ class DashboardViewModel extends ChangeNotifier {
       return;
     }
     await repository.saveOsgModeKeyColorArgb(argb | 0xFF000000);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> saveOsgModeEnabled(bool value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveOsgModeEnabled(value);
     await _loadWorkspaceSettings();
     notifyListeners();
   }

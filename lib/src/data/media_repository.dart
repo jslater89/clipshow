@@ -939,6 +939,7 @@ class MediaRepository {
     final List<OsgBakeRecipe> osgBakeRecipes = await _loadOsgBakeRecipes();
     final double defaultClipVolume = await _loadDefaultClipVolume();
     final int osgModeKeyColorArgb = await _loadOsgModeKeyColorArgb();
+    final bool osgModeEnabled = await _loadOsgModeEnabled();
     return WorkspaceSettingsBundle(
       telestratorDefaults: telestratorDefaults,
       decoderConfig: decoderConfig,
@@ -958,6 +959,7 @@ class MediaRepository {
       osgBakeRecipes: osgBakeRecipes,
       defaultClipVolume: defaultClipVolume,
       osgModeKeyColorArgb: osgModeKeyColorArgb,
+      osgModeEnabled: osgModeEnabled,
     );
   }
 
@@ -1297,6 +1299,18 @@ class MediaRepository {
       "osgMode.keyColorArgb",
       "${argb | 0xFF000000}",
     );
+  }
+
+  Future<bool> _loadOsgModeEnabled() async {
+    final String? raw = await _getWorkspaceSetting("osgMode.enabled");
+    if (raw == null) {
+      return true;
+    }
+    return raw == "true";
+  }
+
+  Future<void> saveOsgModeEnabled(bool value) async {
+    await _putWorkspaceSetting("osgMode.enabled", value ? "true" : "false");
   }
 
   Future<CapturePathsSettings> _loadCapturePathsSettings() async {

@@ -251,7 +251,14 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     if (!mounted || _activeOsgModeSession == null) {
       return;
     }
-    await _switchToOsgScene();
+    if (_viewModel.isOsgObsSceneSwitchConfigured) {
+      await _switchToOsgScene();
+    } else {
+      await _runSceneSwitch(
+        target: _SceneSwitchTarget.osg,
+        skipObsProgramSceneSwitch: true,
+      );
+    }
   }
 
   void _onOsgModeFirstFrameReady() {
@@ -272,7 +279,9 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   Future<void> _exitOsgMode() async {
     _playoutRootCompositingOverlay.unmount();
     _completeOsgModeFirstFrameGate();
-    await _switchToFaceScene();
+    if (_viewModel.isOsgObsSceneSwitchConfigured) {
+      await _switchToFaceScene();
+    }
     await windowManager.setFullScreen(false);
     await windowManager.setTitleBarStyle(TitleBarStyle.normal);
     await _unlockAspectRatio();
@@ -621,12 +630,15 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     await _runSceneSwitch(target: _SceneSwitchTarget.osg);
   }
 
-  Future<void> _runSceneSwitch({required _SceneSwitchTarget target}) async {
+  Future<void> _runSceneSwitch({
+    required _SceneSwitchTarget target,
+    bool skipObsProgramSceneSwitch = false,
+  }) async {
     final ObsSceneSwitchConfig? obsConfig = _viewModel.obsSceneSwitchConfig;
     final List<WebhookSceneSwitchConfig> webhooks =
         _viewModel.webhookSceneSwitchConfigs;
     bool attempted = false;
-    if (obsConfig != null && obsConfig.enabled) {
+    if (obsConfig != null && obsConfig.enabled && !skipObsProgramSceneSwitch) {
       attempted = true;
       final ObsService service = _buildObsService(obsConfig);
       try {
@@ -634,7 +646,10 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
         if (target == _SceneSwitchTarget.video) {
           await service.switchToVideoScene();
         } else if (target == _SceneSwitchTarget.osg) {
-          await service.switchToOsgScene();
+          final String osgScene = obsConfig.osgScene.trim();
+          if (osgScene.isNotEmpty) {
+            await service.switchToOsgScene();
+          }
         } else {
           await service.switchToFaceScene();
         }

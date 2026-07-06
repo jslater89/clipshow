@@ -866,11 +866,18 @@ void main() {
           settings.osgModeKeyColorArgb,
           OsgModeKeyColorSettings.defaultKeyColorArgb,
         );
+        expect(settings.osgModeEnabled, isTrue);
 
         await repository.saveOsgModeKeyColorArgb(0xFF112233);
         expect(
           (await repository.loadWorkspaceSettings()).osgModeKeyColorArgb,
           0xFF112233,
+        );
+
+        await repository.saveOsgModeEnabled(false);
+        expect(
+          (await repository.loadWorkspaceSettings()).osgModeEnabled,
+          isFalse,
         );
 
         await repository.savePauseIngestScanDuringPreview(false);

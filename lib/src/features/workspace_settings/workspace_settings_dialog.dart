@@ -481,6 +481,19 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                 style: theme.textTheme.bodySmall,
               ),
               SizedBox(height: scaleDimension(context, 8)),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text("OSG Mode Enabled"),
+                subtitle: Text(
+                  "When enabled, Enter OSG Mode is available on the Tag Sets tab. "
+                  "Leave the OBS OSG Scene name empty (§ OBS) to control program scenes manually—for example nested scenes with and without graphics.",
+                  style: theme.textTheme.bodySmall,
+                ),
+                value: viewModel.osgModeEnabled,
+                onChanged: (bool value) =>
+                    unawaited(viewModel.saveOsgModeEnabled(value)),
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
               FilledButton.tonal(
                 onPressed: viewModel.workspacePath == null
                     ? null
@@ -1052,9 +1065,10 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
               TextField(
                 controller: _obsOsgSceneController,
                 decoration: const InputDecoration(
-                  labelText: "OSG Scene",
+                  labelText: "OSG Scene (optional)",
                   helperText:
-                      "Program scene for graphics-only OSG Mode (empty disables).",
+                      "Program scene switched on OSG Mode enter/exit when set. "
+                      "Leave empty for manual OBS (nested scenes).",
                   border: OutlineInputBorder(),
                 ),
               ),

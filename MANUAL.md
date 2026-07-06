@@ -165,9 +165,9 @@ Below the divider, **Saved Tags** is a reusable palette stored in the workspace:
 
 The **Tag Sets** tab manages **bare tag sets**—named bundles of tags and annotations with **no video file**. Use them to pre-build data-driven on-screen graphics (OSGs) that read semantic tag values from the active tag set.
 
-Create tag sets, attach tags (with optional semantic types), and assign up to five **quick slots** (keys **1–5** while in OSG Mode). **Enter OSG Mode** switches the app to a transparent full-window graphics surface and, when OBS integration is enabled, selects your configured **OSG** program scene after the first frame paints. Hotkeys **6–0** toggle the same five OSG presets as clip playout; **Escape** returns to the Dashboard and **Face** scene.
+Create tag sets, attach tags (with optional semantic types), and assign up to five **quick slots** (keys **1–5** while in OSG Mode). Enable **OSG Mode** under On-screen graphics in Workspace settings (§10). **Enter OSG Mode** switches the app to a transparent full-window graphics surface. When OBS integration is enabled and an **OSG Scene** name is set, Clipshow selects that program scene after the first frame paints and returns to **Face** on **Escape**; leave **OSG Scene** empty to control OBS yourself (for example nested scenes with and without the graphics layer). Hotkeys **6–0** toggle the same five OSG presets as clip playout.
 
-Build the **OSG** scene in OBS with a background layer (for example your camera or a nested Face scene) under a Window Capture of Clipshow’s window so transparency composites correctly. Set the **OSG Scene** name in Workspace settings (§10).
+Build an **OSG** scene in OBS with a background layer (for example your camera or a nested Face scene) under a Window Capture of Clipshow’s window so transparency composites correctly. You can nest that scene inside other program layouts and switch between “OSG on” and “OSG off” variants manually.
 
 ---
 
@@ -327,7 +327,7 @@ The application must be restarted when changing decoder configuration.
 
 Scene switching is modeled as **profiles**: one **OBS** connection (host, port, password, enable/disable) plus any number of **HTTP webhooks**. Each profile can be turned on or off without deleting it.
 
-Under **OBS**, set the WebSocket address and the **program** scene names Clipshow should select for “video” (clip playout), “face” (your live/camera layout), “osg” (graphics-only OSG Mode), and optionally **capture** (switched before OBS recording starts in Capture mode—§7). Save applies that block.
+Under **OBS**, set the WebSocket address and the **program** scene names Clipshow should select for “video” (clip playout), “face” (your live/camera layout), optionally “osg” (automatic OSG Mode enter/exit), and optionally **capture** (switched before OBS recording starts in Capture mode—§7). An empty **OSG Scene** leaves program scene unchanged during OSG Mode—use that for nested-scene workflows. Save applies that block.
 
 **OBS Paths** (one row, three fields): **Capture Recording** and **Capture Output** for Capture mode (§7)—OBS writes under recording; **Stop And Save** copies into output (empty output = workspace root). **Playout Record** is staging for **Record** playout (§8.7); default `recordings/export`. A second field, **Playout Output**, is where finished Record exports are copied (default `export`). Playout output must not sit inside playout staging. **Save Paths** persists capture and playout folders together; each path under the workspace is auto-added to **ignored folders** when not already covered by an existing ignored path (for example, if `recordings/` is ignored, `recordings/export` is not added separately).
 

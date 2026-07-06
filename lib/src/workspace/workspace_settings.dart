@@ -289,7 +289,7 @@ class ObsSceneSwitchConfig {
   /// Empty string disables switching before capture.
   final String captureScene;
 
-  /// Empty string disables OSG Mode scene switching.
+  /// Empty string disables automatic program-scene switching on OSG Mode enter/exit.
   final String osgScene;
 }
 
@@ -386,6 +386,7 @@ class WorkspaceSettingsBundle {
     required this.osgBakeRecipes,
     required this.defaultClipVolume,
     required this.osgModeKeyColorArgb,
+    required this.osgModeEnabled,
   });
 
   final TelestratorDefaults telestratorDefaults;
@@ -426,4 +427,7 @@ class WorkspaceSettingsBundle {
 
   /// Opaque fill behind OSG Mode graphics for OBS Color Key window capture.
   final int osgModeKeyColorArgb;
+
+  /// When false, Enter OSG Mode is unavailable regardless of tag sets or OBS.
+  final bool osgModeEnabled;
 }
