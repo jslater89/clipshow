@@ -1,14 +1,18 @@
 import "dart:async";
 
 import "package:flutter/material.dart";
+import "package:path/path.dart" as p;
 import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
+import "package:obs_clipshow/src/bake/osg_bake_service.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/bake_recipe_picker_dialog.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_preview_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
 import "package:obs_clipshow/src/features/playout/osg_playout_layer.dart";
+import "package:obs_clipshow/src/util/reveal_file_in_folder.dart";
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
@@ -430,6 +434,19 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                     icon: const Icon(Icons.delete_outline),
                     label: const Text("Trash File"),
                   ),
+                FilledButton.tonalIcon(
+                  onPressed:
+                      selectedItem == null ||
+                          previewIssue != MediaIssue.none ||
+                          workspaceRoot == null ||
+                          viewModel.osgBakeRecipes.isEmpty
+                      ? null
+                      : () => unawaited(
+                          _startBake(context, viewModel, selectedItem),
+                        ),
+                  icon: const Icon(Icons.movie_creation_outlined),
+                  label: const Text("Bake"),
+                ),
                 FilledButton.icon(
                   onPressed:
                       selectedItem == null ||
@@ -482,6 +499,136 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
         ),
       ),
     );
+  }
+
+  Future<void> _startBake(
+    BuildContext context,
+    DashboardViewModel viewModel,
+    MediaListItem item,
+  ) async {
+    final BakeRecipePickerChoice? choice = await showBakeRecipePickerDialog(
+      context,
+      recipes: viewModel.osgBakeRecipes,
+      bakeNowEnabled: true,
+    );
+    if (choice == null || !context.mounted) {
+      return;
+    }
+    if (choice.action == BakeRecipePickerAction.queue) {
+      final String? error = viewModel.enqueueBakeJob(item, choice.recipe);
+      if (!context.mounted) {
+        return;
+      }
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error)),
+        );
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Queued \"${choice.recipe.name}\" for ${item.displayName}.",
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Blocks until this job runs: if a bake is already active, it is
+    // enqueued ahead of pending work and runs immediately after.
+    final ({String taskId, Future<OsgBakeResult> result}) nowJob = viewModel
+        .bakeItemNow(item, choice.recipe);
+    if (nowJob.taskId.isEmpty) {
+      final OsgBakeResult result = await nowJob.result;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.errorMessage ?? "Bake failed.")),
+        );
+      }
+      return;
+    }
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext ctx) {
+          return PopScope(
+            canPop: false,
+            child: ListenableBuilder(
+              listenable: viewModel,
+              builder: (BuildContext ctx, Widget? _) {
+                // Disable Cancel until our own task is the one running: a
+                // bake already in flight when "Now" was pressed belongs to
+                // someone else's job, not this one.
+                final bool ourTaskRunning =
+                    viewModel.bakeQueueRunningTask?.id == nowJob.taskId;
+                return AlertDialog(
+                  content: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const CircularProgressIndicator(),
+                      SizedBox(width: scaleDimension(ctx, 16)),
+                      Text(
+                        ourTaskRunning
+                            ? "Rendering\u2026"
+                            : "Waiting for the current bake to finish\u2026",
+                      ),
+                    ],
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      onPressed: ourTaskRunning
+                          ? () => viewModel.requestBakeCancel()
+                          : null,
+                      child: const Text("Cancel"),
+                    ),
+                  ],
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
+    final OsgBakeResult result = await nowJob.result;
+    if (!context.mounted) {
+      return;
+    }
+    Navigator.of(context, rootNavigator: true).pop();
+    final String? destPath = result.destPath;
+    if (destPath != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Baked to ${p.basename(destPath)}"),
+          showCloseIcon: true,
+          action: SnackBarAction(
+            label: "Reveal",
+            onPressed: () {
+              unawaited(() async {
+                try {
+                  await revealFileInFolder(destPath);
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text("Could not open file manager: $e"),
+                      ),
+                    );
+                  }
+                }
+              }());
+            },
+          ),
+        ),
+      );
+    } else if (result.errorMessage == "Bake cancelled.") {
+      // Operator dismissed the bake; no follow-up snackbar.
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.errorMessage ?? "Bake failed.")),
+      );
+    }
   }
 
   Future<bool> _confirmDeleteClip(BuildContext context) async {

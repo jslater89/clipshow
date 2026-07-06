@@ -8,6 +8,8 @@ import "package:logging/logging.dart";
 import "package:path/path.dart" as p;
 import "package:system_fonts/system_fonts.dart";
 
+import "package:obs_clipshow/src/bake/osg_bake_queue_models.dart";
+import "package:obs_clipshow/src/bake/osg_bake_service.dart";
 import "package:obs_clipshow/src/data/app_database.dart";
 import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/ingestion/ingestion_service.dart";
@@ -18,6 +20,7 @@ import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/obs/capture_path_utils.dart";
 import "package:obs_clipshow/src/obs/playout_record_path_utils.dart";
+import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/obs/obs_capture_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -28,7 +31,7 @@ import "package:obs_clipshow/src/workspace/workspace_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_trash.dart";
 
 /// Manage (library prep) vs OBS Capture pane on the dashboard right column.
-enum DashboardMediaPaneTab { manage, capture }
+enum DashboardMediaPaneTab { manage, capture, bakeQueue }
 
 /// Result of stopping a Record playout session.
 class PlayoutRecordStopResult {
@@ -130,6 +133,15 @@ class DashboardViewModel extends ChangeNotifier {
   String? _captureStatusMessage;
   bool _obsPlayoutRecordActive = false;
   ObsCaptureService? _obsPlayoutRecordSession;
+  bool _bakeActive = false;
+  bool _bakeCancelRequested = false;
+  final List<OsgBakeQueueTask> _bakeQueuePending = <OsgBakeQueueTask>[];
+  final List<OsgBakeQueueTask> _bakeQueueFinished = <OsgBakeQueueTask>[];
+  OsgBakeQueueTask? _bakeQueueRunningTask;
+  bool _bakeQueuePaused = false;
+  bool _bakeQueuePumpActive = false;
+  final Map<String, Completer<OsgBakeResult>> _bakeNowWaiters =
+      <String, Completer<OsgBakeResult>>{};
   final Set<String> _loadedSystemFontFamilies = <String>{};
 
   OsgPresetVisibility _previewOsgPresetVisibility =
@@ -231,6 +243,318 @@ class DashboardViewModel extends ChangeNotifier {
 
   List<TagSemanticType> get tagSemanticTypes =>
       _workspaceSettings?.tagSemanticTypes ?? <TagSemanticType>[];
+
+  List<OsgBakeRecipe> get osgBakeRecipes =>
+      _workspaceSettings?.osgBakeRecipes ?? <OsgBakeRecipe>[];
+
+  /// True while a bake export pipeline is running.
+  bool get bakeActive => _bakeActive;
+
+  /// Tasks waiting to be baked, in run order (index 0 runs next).
+  List<OsgBakeQueueTask> get bakeQueuePending =>
+      List<OsgBakeQueueTask>.unmodifiable(_bakeQueuePending);
+
+  /// Completed, failed, and cancelled tasks, most recent first.
+  List<OsgBakeQueueTask> get bakeQueueFinished =>
+      List<OsgBakeQueueTask>.unmodifiable(_bakeQueueFinished);
+
+  /// The task currently being baked, if any.
+  OsgBakeQueueTask? get bakeQueueRunningTask => _bakeQueueRunningTask;
+
+  /// True when the queue should stop after the current task finishes.
+  bool get bakeQueuePaused => _bakeQueuePaused;
+
+  /// True while the queue runner is processing (or about to process) tasks.
+  bool get bakeQueueRunnerActive => _bakeQueuePumpActive || _bakeActive;
+
+  /// Requests cancellation of the in-flight bake at the next safe checkpoint.
+  void requestBakeCancel() {
+    if (!_bakeActive) {
+      return;
+    }
+    _bakeCancelRequested = true;
+  }
+
+  /// Returns an error message when [recipe] cues a preset whose required
+  /// semantic tags are missing on [item]; null when the bake may proceed.
+  String? bakeSemanticRequirementsError(
+    MediaListItem item,
+    OsgBakeRecipe recipe,
+  ) {
+    return osgBakeSemanticRequirementsError(
+      recipe: recipe,
+      presets: osgWorkspaceConfig.workspacePresets,
+      semanticTypeIdsOnMedia: semanticTypeIdsOnMedia(item),
+      tagSemanticTypes: tagSemanticTypes,
+    );
+  }
+
+  /// Adds [item] baked with [recipe] to the end of the bake queue. Starts the
+  /// runner immediately unless the queue is paused. Returns null on success, or
+  /// an error message when the job was not enqueued (e.g. missing semantic tags).
+  String? enqueueBakeJob(MediaListItem item, OsgBakeRecipe recipe) {
+    final String? requirementsError = bakeSemanticRequirementsError(
+      item,
+      recipe,
+    );
+    if (requirementsError != null) {
+      return requirementsError;
+    }
+    _bakeQueuePending.add(
+      OsgBakeQueueTask(
+        id: nextBakeQueueTaskId(),
+        mediaStableKey: item.stableKey,
+        mediaDisplayName: item.displayName,
+        recipeId: recipe.id,
+        recipeName: recipe.name,
+        status: OsgBakeQueueTaskStatus.pending,
+        enqueuedAt: DateTime.now(),
+      ),
+    );
+    notifyListeners();
+    unawaited(_pumpBakeQueue());
+    return null;
+  }
+
+  /// Bakes [item] with [recipe] ahead of anything else in the queue,
+  /// bypassing pause. If a task is already running, waits for it to finish
+  /// before starting. Returns the new task's id (so callers can tell, via
+  /// [bakeQueueRunningTask], once *this* task — rather than whatever was
+  /// already running — is actually in flight) plus a future that resolves
+  /// once baking completes. When semantic requirements are not met, [taskId]
+  /// is empty and [result] completes immediately with an error.
+  ({String taskId, Future<OsgBakeResult> result}) bakeItemNow(
+    MediaListItem item,
+    OsgBakeRecipe recipe,
+  ) {
+    final String? requirementsError = bakeSemanticRequirementsError(
+      item,
+      recipe,
+    );
+    if (requirementsError != null) {
+      return (
+        taskId: "",
+        result: Future<OsgBakeResult>.value(
+          OsgBakeResult(errorMessage: requirementsError),
+        ),
+      );
+    }
+    final OsgBakeQueueTask task = OsgBakeQueueTask(
+      id: nextBakeQueueTaskId(),
+      mediaStableKey: item.stableKey,
+      mediaDisplayName: item.displayName,
+      recipeId: recipe.id,
+      recipeName: recipe.name,
+      status: OsgBakeQueueTaskStatus.pending,
+      enqueuedAt: DateTime.now(),
+    );
+    final Completer<OsgBakeResult> completer = Completer<OsgBakeResult>();
+    _bakeNowWaiters[task.id] = completer;
+    _bakeQueuePending.insert(0, task);
+    notifyListeners();
+    unawaited(_pumpBakeQueue());
+    return (taskId: task.id, result: completer.future);
+  }
+
+  /// Resumes automatic processing of pending (non-"now") tasks.
+  void startBakeQueue() {
+    if (!_bakeQueuePaused) {
+      return;
+    }
+    _bakeQueuePaused = false;
+    notifyListeners();
+    unawaited(_pumpBakeQueue());
+  }
+
+  /// Stops the queue after the current task finishes; tasks baked via
+  /// [bakeItemNow] still run immediately while paused.
+  void pauseBakeQueue() {
+    if (_bakeQueuePaused) {
+      return;
+    }
+    _bakeQueuePaused = true;
+    notifyListeners();
+  }
+
+  /// Removes a not-yet-started task from the queue.
+  void removePendingBakeTask(String id) {
+    final int index = _bakeQueuePending.indexWhere(
+      (OsgBakeQueueTask t) => t.id == id,
+    );
+    if (index < 0) {
+      return;
+    }
+    final OsgBakeQueueTask removed = _bakeQueuePending.removeAt(index);
+    notifyListeners();
+    _bakeNowWaiters
+        .remove(removed.id)
+        ?.complete(const OsgBakeResult(errorMessage: "Bake removed from queue."));
+  }
+
+  void clearFinishedBakeTask(String id) {
+    _bakeQueueFinished.removeWhere((OsgBakeQueueTask t) => t.id == id);
+    notifyListeners();
+  }
+
+  void clearAllFinishedBakeTasks() {
+    if (_bakeQueueFinished.isEmpty) {
+      return;
+    }
+    _bakeQueueFinished.clear();
+    notifyListeners();
+  }
+
+  MediaListItem? _findItemByStableKey(String key) {
+    for (final MediaListItem item in _allItems) {
+      if (item.stableKey == key) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  OsgBakeRecipe? _findBakeRecipeById(int id) {
+    for (final OsgBakeRecipe recipe in osgBakeRecipes) {
+      if (recipe.id == id) {
+        return recipe;
+      }
+    }
+    return null;
+  }
+
+  /// Runs pending tasks one at a time until the queue empties or pauses.
+  /// "Now" tasks (tracked in [_bakeNowWaiters]) are always inserted at the
+  /// front of the queue, so they run next regardless of [_bakeQueuePaused].
+  Future<void> _pumpBakeQueue() async {
+    if (_bakeQueuePumpActive) {
+      return;
+    }
+    _bakeQueuePumpActive = true;
+    try {
+      while (_bakeQueuePending.isNotEmpty) {
+        final OsgBakeQueueTask next = _bakeQueuePending.first;
+        final bool isNowTask = _bakeNowWaiters.containsKey(next.id);
+        if (_bakeQueuePaused && !isNowTask) {
+          break;
+        }
+        _bakeQueuePending.removeAt(0);
+        await _executeBakeTask(next);
+      }
+    } finally {
+      _bakeQueuePumpActive = false;
+    }
+  }
+
+  /// Runs [task] end to end, records the outcome in [bakeQueueFinished], and
+  /// completes any [bakeItemNow] waiter for it.
+  Future<OsgBakeResult> _executeBakeTask(OsgBakeQueueTask task) async {
+    _bakeQueueRunningTask = task.copyWith(
+      status: OsgBakeQueueTaskStatus.running,
+    );
+    _bakeActive = true;
+    _bakeCancelRequested = false;
+    notifyListeners();
+
+    final OsgBakeResult result = await _runBakeForTask(task);
+
+    final OsgBakeQueueTaskStatus finalStatus = result.destPath != null
+        ? OsgBakeQueueTaskStatus.completed
+        : result.errorMessage == "Bake cancelled."
+        ? OsgBakeQueueTaskStatus.cancelled
+        : OsgBakeQueueTaskStatus.failed;
+    _bakeQueueFinished.insert(
+      0,
+      task.copyWith(
+        status: finalStatus,
+        destPath: result.destPath,
+        errorMessage: result.errorMessage,
+        completedAt: DateTime.now(),
+      ),
+    );
+    _bakeQueueRunningTask = null;
+    _bakeActive = false;
+    _bakeCancelRequested = false;
+    notifyListeners();
+
+    _bakeNowWaiters.remove(task.id)?.complete(result);
+    return result;
+  }
+
+  /// Resolves [task] against live workspace state and runs the bake
+  /// pipeline. Missing media/recipe/workspace produce a failed result rather
+  /// than throwing, so the queue keeps moving.
+  Future<OsgBakeResult> _runBakeForTask(OsgBakeQueueTask task) async {
+    try {
+      final String? workspaceRoot = _workspacePath;
+      final MediaRepository? repository = _mediaRepository;
+      if (workspaceRoot == null || repository == null) {
+        return const OsgBakeResult(errorMessage: "No workspace open.");
+      }
+      final MediaListItem? item = _findItemByStableKey(task.mediaStableKey);
+      if (item == null) {
+        return OsgBakeResult(
+          errorMessage: "Media item no longer exists: ${task.mediaDisplayName}",
+        );
+      }
+      final OsgBakeRecipe? recipe = _findBakeRecipeById(task.recipeId);
+      if (recipe == null) {
+        return OsgBakeResult(
+          errorMessage: "Bake recipe no longer exists: ${task.recipeName}",
+        );
+      }
+      final String? requirementsError = bakeSemanticRequirementsError(
+        item,
+        recipe,
+      );
+      if (requirementsError != null) {
+        return OsgBakeResult(errorMessage: requirementsError);
+      }
+
+      final String masterAbs = WorkspaceMediaPaths.absoluteMasterPath(
+        workspaceRoot,
+        item.filePath,
+      );
+      final int inMs = item.type == MediaListItemType.clip
+          ? item.clip!.inMs
+          : 0;
+      final int? outMs = item.type == MediaListItemType.clip
+          ? item.clip!.outMs
+          : null;
+
+      final List<OsgPreset> presets = osgWorkspaceConfig.workspacePresets;
+      final Map<int, String> semanticTextByTypeId =
+          await _resolveSemanticTextForBake(
+            repository: repository,
+            item: item,
+            recipe: recipe,
+            presets: presets,
+          );
+
+      final String outputDirAbs = PlayoutRecordPathUtils.normalizedOutputDir(
+        workspaceAbsolute: workspaceRoot,
+        settings: playoutRecordPathsSettings,
+      );
+      final OsgBakeRequest request = OsgBakeRequest(
+        masterFileAbsolute: masterAbs,
+        inMs: inMs,
+        outMs: outMs,
+        recipe: recipe,
+        presets: presets,
+        outputSize: playoutOutputSize,
+        semanticTextByTypeId: semanticTextByTypeId,
+        annotationsText: item.annotations ?? "",
+        workspaceRoot: workspaceRoot,
+        outputDirAbsolute: outputDirAbs,
+        exportBaseName: p.basenameWithoutExtension(item.displayName),
+      );
+      return await OsgBakeService(
+        shouldCancel: () => _bakeCancelRequested,
+      ).bake(request);
+    } catch (e, st) {
+      _logger.warning("Bake task ${task.id} failed: $e\n$st");
+      return OsgBakeResult(errorMessage: "Bake failed: $e");
+    }
+  }
   List<ShelfTagEntry> get captureTags =>
       List<ShelfTagEntry>.unmodifiable(_captureTags);
   bool get obsCaptureRecording => _obsCaptureRecording;
@@ -910,6 +1234,49 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> saveOsgBakeRecipes(List<OsgBakeRecipe> value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveOsgBakeRecipes(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  /// Resolves semantic slot text for every semantic type referenced by presets
+  /// that [recipe] cues, once per bake (mirrors OsgPlayoutLayer's load).
+  Future<Map<int, String>> _resolveSemanticTextForBake({
+    required MediaRepository repository,
+    required MediaListItem item,
+    required OsgBakeRecipe recipe,
+    required List<OsgPreset> presets,
+  }) async {
+    final Set<int> semanticTypeIds = <int>{};
+    for (final OsgBakeCue cue in recipe.cues) {
+      final int index = cue.slot.presetIndex;
+      if (index < 0 || index >= presets.length) {
+        continue;
+      }
+      for (final OsgSlot slot in presets[index].slots) {
+        if (slot.textSource == OsgTextSource.semantic &&
+            slot.semanticTypeId != null) {
+          semanticTypeIds.add(slot.semanticTypeId!);
+        }
+      }
+    }
+    final Map<int, String> out = <int, String>{};
+    for (final int id in semanticTypeIds) {
+      final String? text = await repository.resolveSemanticTagForMedia(
+        mediaType: item.type,
+        mediaId: item.id,
+        semanticTypeId: id,
+      );
+      out[id] = text ?? "";
+    }
+    return out;
+  }
+
   Future<int> insertTagSemanticType({
     required String name,
     int? iconCodePoint,
@@ -1068,6 +1435,16 @@ class DashboardViewModel extends ChangeNotifier {
     _clipsOfMasterFilterMediaId = null;
     _previewOsgPresetVisibility = const OsgPresetVisibility.allOff();
     _semanticTagSnapshotByItemKey.clear();
+    for (final OsgBakeQueueTask removed in _bakeQueuePending) {
+      _bakeNowWaiters
+          .remove(removed.id)
+          ?.complete(
+            const OsgBakeResult(errorMessage: "Workspace changed."),
+          );
+    }
+    _bakeQueuePending.clear();
+    _bakeQueueFinished.clear();
+    _bakeQueuePaused = false;
     _mediaRepository = session.mediaRepository;
     _workspacePath = session.workspace.rootPath;
     await _loadWorkspaceSettings();

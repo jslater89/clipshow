@@ -7,6 +7,7 @@ import "package:provider/provider.dart";
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/osg/osg_editor_screen.dart";
+import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/widgets/rgba_color_picker.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -426,6 +427,63 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                         );
                       },
                 child: const Text("Open on-screen graphics editor…"),
+              ),
+              Divider(height: scaleDimension(context, 24)),
+              _SectionTitle("Bake recipes", theme),
+              SizedBox(height: scaleDimension(context, 8)),
+              Text(
+                "Named OSG timing sets applied when baking a clip to a "
+                "video file (Bake in the preview bar).",
+                style: theme.textTheme.bodySmall,
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
+              if (viewModel.osgBakeRecipes.isEmpty)
+                Text(
+                  "No bake recipes yet.",
+                  style: theme.textTheme.bodySmall,
+                )
+              else
+                Column(
+                  children: viewModel.osgBakeRecipes
+                      .map(
+                        (OsgBakeRecipe recipe) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text(recipe.name),
+                          subtitle: Text(
+                            recipe.cues
+                                .map(osgBakeCueSummaryLabel)
+                                .join("; "),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              IconButton(
+                                tooltip: "Edit Recipe",
+                                icon: const Icon(Icons.edit_outlined),
+                                onPressed: () => unawaited(
+                                  _editBakeRecipe(viewModel, recipe),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: "Delete Recipe",
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () => unawaited(
+                                  _deleteBakeRecipe(viewModel, recipe),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              SizedBox(height: scaleDimension(context, 8)),
+              FilledButton.tonal(
+                onPressed: () => unawaited(_addBakeRecipe(viewModel)),
+                child: const Text("Add Bake Recipe…"),
               ),
               Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Decoder config", theme),
@@ -1119,6 +1177,61 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     );
   }
 
+  Future<void> _addBakeRecipe(DashboardViewModel viewModel) async {
+    final OsgBakeRecipe? draft = await showDialog<OsgBakeRecipe>(
+      context: context,
+      builder: (BuildContext ctx) => const _BakeRecipeEditorDialog(),
+    );
+    if (draft == null || !mounted) {
+      return;
+    }
+    final List<OsgBakeRecipe> existing = viewModel.osgBakeRecipes;
+    int nextId = 1;
+    for (final OsgBakeRecipe r in existing) {
+      if (r.id >= nextId) {
+        nextId = r.id + 1;
+      }
+    }
+    await viewModel.saveOsgBakeRecipes(<OsgBakeRecipe>[
+      ...existing,
+      OsgBakeRecipe(id: nextId, name: draft.name, cues: draft.cues),
+    ]);
+  }
+
+  Future<void> _editBakeRecipe(
+    DashboardViewModel viewModel,
+    OsgBakeRecipe recipe,
+  ) async {
+    final OsgBakeRecipe? draft = await showDialog<OsgBakeRecipe>(
+      context: context,
+      builder: (BuildContext ctx) =>
+          _BakeRecipeEditorDialog(existing: recipe),
+    );
+    if (draft == null || !mounted) {
+      return;
+    }
+    await viewModel.saveOsgBakeRecipes(
+      viewModel.osgBakeRecipes
+          .map(
+            (OsgBakeRecipe r) => r.id == recipe.id
+                ? OsgBakeRecipe(id: r.id, name: draft.name, cues: draft.cues)
+                : r,
+          )
+          .toList(),
+    );
+  }
+
+  Future<void> _deleteBakeRecipe(
+    DashboardViewModel viewModel,
+    OsgBakeRecipe recipe,
+  ) async {
+    await viewModel.saveOsgBakeRecipes(
+      viewModel.osgBakeRecipes
+          .where((OsgBakeRecipe r) => r.id != recipe.id)
+          .toList(),
+    );
+  }
+
   Widget _cardWithTitle({required String title, required Widget child}) {
     return Card(
       margin: EdgeInsets.zero,
@@ -1251,5 +1364,297 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(text, style: theme.textTheme.titleLarge);
+  }
+}
+
+/// Mutable per-cue editing state for [_BakeRecipeEditorDialog].
+class _DraftBakeCue {
+  _DraftBakeCue();
+
+  factory _DraftBakeCue.fromCue(OsgBakeCue cue) {
+    final _DraftBakeCue draft = _DraftBakeCue();
+    draft.slot = cue.slot;
+    draft.startKind = cue.start.kind;
+    draft.endKind = cue.end.kind;
+    if (draft.startKind == OsgBakeAnchorKind.absoluteMs ||
+        draft.startKind == OsgBakeAnchorKind.offsetFromEndMs) {
+      draft.startMsController.text = "${cue.start.valueMs}";
+    }
+    if (draft.endKind == OsgBakeAnchorKind.absoluteMs ||
+        draft.endKind == OsgBakeAnchorKind.offsetFromEndMs) {
+      draft.endMsController.text = "${cue.end.valueMs}";
+    }
+    return draft;
+  }
+
+  OsgPresetSlot slot = OsgPresetSlot.preset1;
+  OsgBakeAnchorKind startKind = OsgBakeAnchorKind.clipStart;
+  OsgBakeAnchorKind endKind = OsgBakeAnchorKind.clipEnd;
+  final TextEditingController startMsController = TextEditingController(
+    text: "0",
+  );
+  final TextEditingController endMsController = TextEditingController(
+    text: "0",
+  );
+
+  void dispose() {
+    startMsController.dispose();
+    endMsController.dispose();
+  }
+
+  OsgBakeCue toCue() {
+    int parseMs(TextEditingController c) {
+      final int v = int.tryParse(c.text.trim()) ?? 0;
+      return v < 0 ? 0 : v;
+    }
+
+    return OsgBakeCue(
+      slot: slot,
+      start: OsgBakeAnchor(kind: startKind, valueMs: parseMs(startMsController)),
+      end: OsgBakeAnchor(kind: endKind, valueMs: parseMs(endMsController)),
+    );
+  }
+}
+
+/// Creates or edits a bake recipe (name + cue list). Pops with the draft recipe
+/// (id 0 when adding; the caller assigns a real id) or null on cancel.
+class _BakeRecipeEditorDialog extends StatefulWidget {
+  const _BakeRecipeEditorDialog({this.existing});
+
+  /// When set, the dialog opens in edit mode with this recipe pre-filled.
+  final OsgBakeRecipe? existing;
+
+  @override
+  State<_BakeRecipeEditorDialog> createState() =>
+      _BakeRecipeEditorDialogState();
+}
+
+class _BakeRecipeEditorDialogState extends State<_BakeRecipeEditorDialog> {
+  final TextEditingController _nameController = TextEditingController();
+  late final List<_DraftBakeCue> _cues;
+  String? _validationError;
+
+  bool get _isEditing => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final OsgBakeRecipe? existing = widget.existing;
+    if (existing != null) {
+      _nameController.text = existing.name;
+      _cues = existing.cues.isEmpty
+          ? <_DraftBakeCue>[_DraftBakeCue()]
+          : existing.cues.map(_DraftBakeCue.fromCue).toList();
+    } else {
+      _cues = <_DraftBakeCue>[_DraftBakeCue()];
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    for (final _DraftBakeCue cue in _cues) {
+      cue.dispose();
+    }
+    super.dispose();
+  }
+
+  bool _anchorNeedsMs(OsgBakeAnchorKind kind) =>
+      kind == OsgBakeAnchorKind.absoluteMs ||
+      kind == OsgBakeAnchorKind.offsetFromEndMs;
+
+  Widget _anchorEditor({
+    required String label,
+    required OsgBakeAnchorKind kind,
+    required TextEditingController msController,
+    required ValueChanged<OsgBakeAnchorKind> onKindChanged,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        SizedBox(
+          width: scaleDimension(context, 140),
+          child: DropdownButtonFormField<OsgBakeAnchorKind>(
+            initialValue: kind,
+            decoration: InputDecoration(
+              labelText: label,
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+            items: OsgBakeAnchorKind.values
+                .map(
+                  (OsgBakeAnchorKind k) => DropdownMenuItem<OsgBakeAnchorKind>(
+                    value: k,
+                    child: Text(k.label),
+                  ),
+                )
+                .toList(),
+            onChanged: (OsgBakeAnchorKind? value) {
+              if (value != null) {
+                onKindChanged(value);
+              }
+            },
+          ),
+        ),
+        if (_anchorNeedsMs(kind)) ...<Widget>[
+          SizedBox(width: scaleDimension(context, 8)),
+          SizedBox(
+            width: scaleDimension(context, 90),
+            child: TextField(
+              controller: msController,
+              keyboardType: TextInputType.number,
+              inputFormatters: <TextInputFormatter>[
+                FilteringTextInputFormatter.digitsOnly,
+              ],
+              decoration: const InputDecoration(
+                labelText: "Ms",
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _cueRow(int index) {
+    final _DraftBakeCue cue = _cues[index];
+    return Card(
+      margin: EdgeInsets.only(bottom: scaleDimension(context, 8)),
+      child: Padding(
+        padding: EdgeInsets.all(scaleDimension(context, 8)),
+        child: Wrap(
+          spacing: scaleDimension(context, 8),
+          runSpacing: scaleDimension(context, 8),
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            SizedBox(
+              width: scaleDimension(context, 148),
+              child: DropdownButtonFormField<OsgPresetSlot>(
+                initialValue: cue.slot,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: "OSG",
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: OsgPresetSlot.values
+                    .map(
+                      (OsgPresetSlot s) => DropdownMenuItem<OsgPresetSlot>(
+                        value: s,
+                        child: Text("OSG ${s.playoutHotkeyDigitLabel}"),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (OsgPresetSlot? value) {
+                  if (value != null) {
+                    setState(() => cue.slot = value);
+                  }
+                },
+              ),
+            ),
+            _anchorEditor(
+              label: "Show From",
+              kind: cue.startKind,
+              msController: cue.startMsController,
+              onKindChanged: (OsgBakeAnchorKind k) =>
+                  setState(() => cue.startKind = k),
+            ),
+            _anchorEditor(
+              label: "Until",
+              kind: cue.endKind,
+              msController: cue.endMsController,
+              onKindChanged: (OsgBakeAnchorKind k) =>
+                  setState(() => cue.endKind = k),
+            ),
+            IconButton(
+              tooltip: "Remove Cue",
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _cues.length <= 1
+                  ? null
+                  : () {
+                      setState(() {
+                        _cues.removeAt(index).dispose();
+                      });
+                    },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _save() {
+    final String name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _validationError = "Recipe name is required.");
+      return;
+    }
+    if (_cues.isEmpty) {
+      setState(() => _validationError = "Add at least one cue.");
+      return;
+    }
+    Navigator.of(context).pop(
+      OsgBakeRecipe(
+        id: widget.existing?.id ?? 0,
+        name: name,
+        cues: _cues.map((_DraftBakeCue c) => c.toCue()).toList(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_isEditing ? "Edit bake recipe" : "Add bake recipe"),
+      content: SizedBox(
+        width: scaleDimension(context, 620),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              TextField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: "Recipe Name",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              SizedBox(height: scaleDimension(context, 12)),
+              for (int i = 0; i < _cues.length; i++) _cueRow(i),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => setState(() => _cues.add(_DraftBakeCue())),
+                  icon: const Icon(Icons.add),
+                  label: const Text("Add Cue"),
+                ),
+              ),
+              if (_validationError != null) ...<Widget>[
+                SizedBox(height: scaleDimension(context, 8)),
+                Text(
+                  _validationError!,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text("Cancel"),
+        ),
+        FilledButton(
+          onPressed: _save,
+          child: const Text("Save Recipe"),
+        ),
+      ],
+    );
   }
 }

@@ -6,6 +6,7 @@ import 'package:obs_clipshow/src/media/master_media_file.dart';
 import 'package:obs_clipshow/src/media/media_clip.dart';
 import 'package:obs_clipshow/src/media/media_list_item.dart';
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
+import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/workspace/ignored_path_utils.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -753,6 +754,7 @@ class MediaRepository {
     final OsgWorkspaceConfig osgWorkspaceConfig =
         await _loadOsgWorkspaceConfig();
     final List<TagSemanticType> semanticTypes = await listTagSemanticTypes();
+    final List<OsgBakeRecipe> osgBakeRecipes = await _loadOsgBakeRecipes();
     final double defaultClipVolume = await _loadDefaultClipVolume();
     return WorkspaceSettingsBundle(
       telestratorDefaults: telestratorDefaults,
@@ -770,6 +772,7 @@ class MediaRepository {
       playoutOutputSize: playoutOutputSize,
       osgWorkspaceConfig: osgWorkspaceConfig,
       tagSemanticTypes: semanticTypes,
+      osgBakeRecipes: osgBakeRecipes,
       defaultClipVolume: defaultClipVolume,
     );
   }
@@ -798,6 +801,18 @@ class MediaRepository {
 
   Future<void> saveOsgWorkspaceConfig(OsgWorkspaceConfig value) async {
     await _putWorkspaceSetting("osg.presets", value.encodeToStorageJson());
+  }
+
+  Future<List<OsgBakeRecipe>> _loadOsgBakeRecipes() async {
+    final String? raw = await _getWorkspaceSetting("osg.bakeRecipes");
+    return decodeOsgBakeRecipesFromStorageJson(raw);
+  }
+
+  Future<void> saveOsgBakeRecipes(List<OsgBakeRecipe> value) async {
+    await _putWorkspaceSetting(
+      "osg.bakeRecipes",
+      encodeOsgBakeRecipesToStorageJson(value),
+    );
   }
 
   Future<List<TagSemanticType>> listTagSemanticTypes() async {
