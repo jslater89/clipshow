@@ -11,6 +11,7 @@ import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/media/tag_set.dart";
 import "package:obs_clipshow/src/media/workspace.dart";
+import "package:obs_clipshow/src/osg/osg_mode_key_color.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
@@ -860,6 +861,16 @@ void main() {
         expect(
           settings.defaultClipVolume,
           PlaybackVolumeDefaults.defaultVolume,
+        );
+        expect(
+          settings.osgModeKeyColorArgb,
+          OsgModeKeyColorSettings.defaultKeyColorArgb,
+        );
+
+        await repository.saveOsgModeKeyColorArgb(0xFF112233);
+        expect(
+          (await repository.loadWorkspaceSettings()).osgModeKeyColorArgb,
+          0xFF112233,
         );
 
         await repository.savePauseIngestScanDuringPreview(false);

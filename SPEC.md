@@ -17,7 +17,7 @@ The application expects a practical OBS scene layout; **Video**, **Face**, and *
 * **WebSocket server:** OBS WebSocket plugin enabled (default port **4455**, password as configured in the app).
 * **Scene: "Face Scene" (default name):** Primary camera and microphone inputs.
 * **Scene: "Video Scene" (default name):** A source that shows the app (e.g. Window Capture on the Flutter window), scaled to fit the program canvas (e.g. 1920×1080). Used during clip playout.
-* **Scene: "OSG Scene" (default name):** Window Capture on the same app window during **OSG Mode** (graphics-only, transparent background). Place a background layer under the capture (e.g. Face camera or nested Face scene) so transparency composites correctly.
+* **Scene: "OSG Scene" (default name):** Window Capture on the same app window during **OSG Mode** (graphics-only). The app fills the window with a workspace **key color**; add an OBS **Color Key** filter on the capture using that color. Place a background layer under the capture (e.g. Face camera or nested Face scene).
 
 ## 4. Workspace Management
 * **Definition:** A Workspace is a root directory on the local file system containing all media assets for a specific project or match.
@@ -65,10 +65,10 @@ The application operates in mutually exclusive UI states to prevent broadcast er
     6. Dashboard returns; **scroll position** is restored when possible.
 
 ### State 3: OSG Mode (graphics mode)
-* **Purpose:** Graphics-only output driven by a **tag set** (semantic tags + workspace OSG presets). No video decoder. Transparent window background for OBS Window Capture on the **OSG** scene.
+* **Purpose:** Graphics-only output driven by a **tag set** (semantic tags + workspace OSG presets). No video decoder. Solid **key color** window fill for OBS Window Capture + **Color Key** on the **OSG** scene.
 * **Trigger:** **Enter OSG Mode** on the Dashboard **Tag Sets** tab (requires configured **OSG** scene name and at least one tag set).
 * **Execution sequence:**
-    1. Dashboard is replaced by the OSG Mode surface (transparent background).
+    1. Dashboard is replaced by the OSG Mode surface (key color background from workspace settings).
     2. Same window sizing rules as playout (16:9, hidden title bar).
     3. After the first frame paints, OBS switches to the **OSG** scene (and/or webhooks with **`osg`** token).
     4. Operator toggles OSG presets with **6–0** and switches tag sets with **1–5** (quick slots configured on the Tag Sets tab).

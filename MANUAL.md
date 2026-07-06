@@ -40,7 +40,7 @@ Clipshow does not require OBS Studio. The library, dashboard, Manage mode, and p
 
 Enable OBS’s WebSocket server (default port 4455; use a password in OBS if you configure one in Clipshow). The app uses that connection for program scene switches during playout and, when you use Capture, for recording control.
 
-For the integration to make sense visually, OBS should expose program scenes you can map in Clipshow: one for your live look when you are *not* playing a clip (**Face**), one where this application’s window is captured for **clip playout** (**Video**), and optionally one for **graphics-only OSG Mode** (**OSG**) with a background layer under the transparent window capture. You choose the actual scene names in Workspace settings (see §10); defaults are “Face Scene,” “Video Scene,” and “OSG Scene.”
+For the integration to make sense visually, OBS should expose program scenes you can map in Clipshow: one for your live look when you are *not* playing a clip (**Face**), one where this application’s window is captured for **clip playout** (**Video**), and optionally one for **graphics-only OSG Mode** (**OSG**) with a background layer under a **Color Key**–filtered Window Capture. You choose the actual scene names in Workspace settings (see §10); defaults are “Face Scene,” “Video Scene,” and “OSG Scene.”
 
 > Screenshot (placeholder): OBS scene list with Face and Video scenes, and the WebSocket server settings panel.
 
@@ -165,9 +165,9 @@ Below the divider, **Saved Tags** is a reusable palette stored in the workspace:
 
 The **Tag Sets** tab manages **bare tag sets**—named bundles of tags and annotations with **no video file**. Use them to pre-build data-driven on-screen graphics (OSGs) that read semantic tag values from the active tag set.
 
-Create tag sets, attach tags (with optional semantic types), and assign up to five **quick slots** (keys **1–5** while in OSG Mode). **Enter OSG Mode** switches the app to a transparent full-window graphics surface and, when OBS integration is enabled, selects your configured **OSG** program scene after the first frame paints. Hotkeys **6–0** toggle the same five OSG presets as clip playout; **Escape** returns to the Dashboard and **Face** scene.
+Create tag sets, attach tags (with optional semantic types), and assign up to five **quick slots** (keys **1–5** while in OSG Mode). **Enter OSG Mode** fills the window with a solid **key color** behind your graphics and, when OBS integration is enabled, selects your configured **OSG** program scene after the first frame paints. Hotkeys **6–0** toggle the same five OSG presets as clip playout; **Escape** returns to the Dashboard and **Face** scene.
 
-Build the **OSG** scene in OBS with a background layer (for example your camera or a nested Face scene) under a Window Capture of Clipshow’s window so transparency composites correctly. Set the **OSG Scene** name in Workspace settings (§10).
+Build the **OSG** scene in OBS with a background layer (for example your camera or a nested Face scene) **under** a Window Capture of Clipshow’s window. On that capture source, add an OBS **Color Key** filter using the same color as **OSG Mode Key Color** in Workspace settings (§10). Use **Suggest Safe Key Color** there if your templates use greens or other common key hues. Set the **OSG Scene** name in Workspace settings (§10).
 
 ---
 

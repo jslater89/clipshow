@@ -49,6 +49,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   static const PlayoutWindowMode _playoutWindowMode =
       PlayoutWindowMode.windowed;
   static const Size _fallbackPlayoutSize = Size(1280, 720);
+  static const Color _dashboardWindowBackgroundColor = Color(0xFF121212);
   late final DashboardViewModel _viewModel;
   late final ObsService _obsService;
   final ScrollController _dashboardScrollController = ScrollController();
@@ -226,6 +227,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     }
 
     await _applyPlayoutWindowMode(_viewModel.playoutOutputSize);
+    await _applyOsgModeKeyColorBackground();
     setState(() {
       _activeOsgModeSession = session;
     });
@@ -237,6 +239,27 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       return;
     }
     await _switchToOsgScene();
+  }
+
+  Future<void> _applyOsgModeKeyColorBackground() async {
+    final Color keyColor = Color(_viewModel.osgModeKeyColorArgb);
+    try {
+      await windowManager.setBackgroundColor(keyColor);
+    } catch (error) {
+      _logger.warning(
+        "Unable to set OSG Mode key color window background: $error",
+      );
+    }
+  }
+
+  Future<void> _restoreDashboardWindowBackground() async {
+    try {
+      await windowManager.setBackgroundColor(_dashboardWindowBackgroundColor);
+    } catch (error) {
+      _logger.warning(
+        "Unable to restore dashboard window background after OSG mode: $error",
+      );
+    }
   }
 
   Future<void> _exitOsgMode() async {
@@ -264,6 +287,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       }
       _wasMaximizedBeforePlayout = false;
     }
+    await _restoreDashboardWindowBackground();
     setState(() {
       _activeOsgModeSession = null;
     });
@@ -467,6 +491,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
         value: viewModel,
         child: OsgModeScreen(
           session: session,
+          keyColorArgb: viewModel.osgModeKeyColorArgb,
           osgWorkspaceConfig: viewModel.osgWorkspaceConfig,
           workspaceRoot: viewModel.workspacePath ?? "",
           tagSemanticTypes: viewModel.tagSemanticTypes,

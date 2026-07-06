@@ -385,6 +385,7 @@ class WorkspaceSettingsBundle {
     required this.tagSemanticTypes,
     required this.osgBakeRecipes,
     required this.defaultClipVolume,
+    required this.osgModeKeyColorArgb,
   });
 
   final TelestratorDefaults telestratorDefaults;
@@ -422,4 +423,7 @@ class WorkspaceSettingsBundle {
   /// Initial clip volume (0.0–1.0) used when the workspace loads, before the
   /// user adjusts via the volume hotkeys. Session adjustments are not persisted.
   final double defaultClipVolume;
+
+  /// Opaque fill behind OSG Mode graphics for OBS Color Key window capture.
+  final int osgModeKeyColorArgb;
 }

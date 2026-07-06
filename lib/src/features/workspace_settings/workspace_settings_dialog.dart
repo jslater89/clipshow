@@ -8,6 +8,7 @@ import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/osg/osg_editor_screen.dart";
 import "package:obs_clipshow/src/osg/osg_bake_models.dart";
+import "package:obs_clipshow/src/osg/osg_mode_key_color.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/widgets/rgba_color_picker.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -54,8 +55,12 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       TextEditingController();
   final TextEditingController _ingestThumbnailConcurrencyController =
       TextEditingController();
+  final TextEditingController _osgModeKeyColorHexController =
+      TextEditingController();
 
   bool _initialized = false;
+  bool _osgModeKeyColorSuggestBusy = false;
+  String? _osgModeKeyColorValidation;
   late TelestratorDefaults _draftTelestratorDefaults;
   late List<DecoderProfile> _enabledDecoders;
   late double _draftDefaultClipVolume;
@@ -84,6 +89,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     _playoutOutputHeightController.dispose();
     _ingestProbeConcurrencyController.dispose();
     _ingestThumbnailConcurrencyController.dispose();
+    _osgModeKeyColorHexController.dispose();
     super.dispose();
   }
 
@@ -94,6 +100,85 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _applyOsgModeKeyColor(DashboardViewModel viewModel) async {
+    final int? parsed = tryParseHexArgb(_osgModeKeyColorHexController.text);
+    if (parsed == null) {
+      setState(() {
+        _osgModeKeyColorValidation =
+            "Enter a valid #RRGGBB or #AARRGGBB color.";
+      });
+      return;
+    }
+    final int opaque = parsed | 0xFF000000;
+    final OsgKeyColorAnalysis analysis =
+        await viewModel.validateOsgModeKeyColor(opaque);
+    if (!analysis.isSafe) {
+      setState(() {
+        _osgModeKeyColorValidation =
+            "Too close to an OSG graphic color. Use Suggest Safe Key Color or pick another.";
+      });
+      return;
+    }
+    await viewModel.saveOsgModeKeyColorArgb(opaque);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _osgModeKeyColorHexController.text = formatHexArgb(opaque);
+      _osgModeKeyColorValidation = null;
+    });
+    _showIngestConcurrencySnack(
+      "OSG Mode key color saved. Set the same color in OBS Color Key on the Window Capture source.",
+    );
+  }
+
+  Future<void> _suggestOsgModeKeyColor(DashboardViewModel viewModel) async {
+    if (viewModel.workspacePath == null) {
+      _showIngestConcurrencySnack("Open a workspace first.");
+      return;
+    }
+    setState(() {
+      _osgModeKeyColorSuggestBusy = true;
+      _osgModeKeyColorValidation = null;
+    });
+    final OsgKeyColorSuggestion suggestion =
+        await viewModel.suggestOsgModeKeyColor();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _osgModeKeyColorSuggestBusy = false;
+      _osgModeKeyColorHexController.text =
+          formatHexArgb(suggestion.suggestedKeyColorArgb);
+      if (suggestion.analysis.isSafe) {
+        _osgModeKeyColorValidation =
+            "Suggested key clears your enabled presets "
+            "(min RGB distance ${suggestion.analysis.minDistanceRgb.toStringAsFixed(0)}). "
+            "Try OBS Similarity ≤ ${suggestion.analysis.recommendedObsSimilarityMax}.";
+      } else {
+        _osgModeKeyColorValidation =
+            "No ideal key found; review presets or pick a custom color.";
+      }
+    });
+  }
+
+  Future<void> _pickOsgModeKeyColor() async {
+    final int current =
+        tryParseHexArgb(_osgModeKeyColorHexController.text) ??
+        OsgModeKeyColorSettings.defaultKeyColorArgb;
+    final int? picked = await showRgbaColorPickerDialog(
+      context,
+      initialArgb: current | 0xFF000000,
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _osgModeKeyColorHexController.text = formatHexArgb(picked | 0xFF000000);
+      _osgModeKeyColorValidation = null;
+    });
   }
 
   Future<void> _submitIngestConcurrencySettings(
@@ -188,6 +273,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
       _draftDefaultClipVolume = PlaybackVolumeDefaults.clamp(
         viewModel.defaultClipVolume,
       );
+      _osgModeKeyColorHexController.text =
+          formatHexArgb(viewModel.osgModeKeyColorArgb);
       _initialized = true;
     }
 
@@ -430,6 +517,77 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog> {
                         );
                       },
                 child: const Text("Open on-screen graphics editor…"),
+              ),
+              SizedBox(height: scaleDimension(context, 12)),
+              Text(
+                "OSG Mode uses a solid key color behind graphics for OBS Window Capture. "
+                "Add a Color Key filter on the capture source using the same color.",
+                style: theme.textTheme.bodySmall,
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Container(
+                    width: scaleDimension(context, 40),
+                    height: scaleDimension(context, 40),
+                    decoration: BoxDecoration(
+                      color: Color(
+                        tryParseHexArgb(_osgModeKeyColorHexController.text) ??
+                            OsgModeKeyColorSettings.defaultKeyColorArgb,
+                      ),
+                      border: Border.all(color: theme.dividerColor),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  Expanded(
+                    child: TextField(
+                      controller: _osgModeKeyColorHexController,
+                      decoration: InputDecoration(
+                        labelText: "OSG Mode Key Color",
+                        hintText: formatHexArgb(
+                          OsgModeKeyColorSettings.defaultKeyColorArgb,
+                        ),
+                        border: const OutlineInputBorder(),
+                        helperText: _osgModeKeyColorValidation,
+                      ),
+                      inputFormatters: <TextInputFormatter>[
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r"[#0-9A-Fa-f]"),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(width: scaleDimension(context, 8)),
+                  OutlinedButton(
+                    onPressed: _pickOsgModeKeyColor,
+                    child: const Text("Choose…"),
+                  ),
+                ],
+              ),
+              SizedBox(height: scaleDimension(context, 8)),
+              Wrap(
+                spacing: scaleDimension(context, 8),
+                runSpacing: scaleDimension(context, 8),
+                children: <Widget>[
+                  FilledButton.tonal(
+                    onPressed: _osgModeKeyColorSuggestBusy
+                        ? null
+                        : () => unawaited(_suggestOsgModeKeyColor(viewModel)),
+                    child: _osgModeKeyColorSuggestBusy
+                        ? SizedBox(
+                            width: scaleDimension(context, 18),
+                            height: scaleDimension(context, 18),
+                            child: const CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text("Suggest Safe Key Color"),
+                  ),
+                  _AsyncFilledButton(
+                    label: "Apply OSG Mode Key Color",
+                    onPressed: () => _applyOsgModeKeyColor(viewModel),
+                  ),
+                ],
               ),
               Divider(height: scaleDimension(context, 24)),
               _SectionTitle("Bake recipes", theme),

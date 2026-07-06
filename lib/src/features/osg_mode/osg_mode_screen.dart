@@ -1,5 +1,3 @@
-import "dart:async";
-
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 
@@ -17,6 +15,7 @@ class OsgModeScreen extends StatefulWidget {
   const OsgModeScreen({
     super.key,
     required this.session,
+    required this.keyColorArgb,
     required this.osgWorkspaceConfig,
     required this.workspaceRoot,
     required this.tagSemanticTypes,
@@ -28,6 +27,7 @@ class OsgModeScreen extends StatefulWidget {
   });
 
   final OsgModeSession session;
+  final int keyColorArgb;
   final OsgWorkspaceConfig osgWorkspaceConfig;
   final String workspaceRoot;
   final List<TagSemanticType> tagSemanticTypes;
@@ -44,9 +44,7 @@ class OsgModeScreen extends StatefulWidget {
 class _OsgModeScreenState extends State<OsgModeScreen> {
   final Logger _logger = Logger("OsgModeScreen");
   bool _isExiting = false;
-  bool _showEscapeHint = true;
   bool _showHelpOverlay = false;
-  Timer? _hintTimer;
   OsgPresetVisibility _osgPresetVisible = const OsgPresetVisibility.allOff();
   int _osgRequirementFlashToken = 0;
   String _osgRequirementFlashText = "";
@@ -61,14 +59,6 @@ class _OsgModeScreenState extends State<OsgModeScreen> {
       _osgPresetVisible = initial;
     }
     _reconcileOsgVisibilityToRequirements(requestFrame: false);
-    _hintTimer = Timer(const Duration(seconds: 1), () {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _showEscapeHint = false;
-      });
-    });
     _logger.info("OSG Mode started for tag set ${_session.tagSetName}");
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
@@ -206,7 +196,6 @@ class _OsgModeScreenState extends State<OsgModeScreen> {
 
   @override
   void dispose() {
-    _hintTimer?.cancel();
     super.dispose();
   }
 
@@ -214,7 +203,7 @@ class _OsgModeScreenState extends State<OsgModeScreen> {
   Widget build(BuildContext context) {
     final double edgeInset = scaleDimension(context, 16);
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Color(widget.keyColorArgb),
       body: OsgModeHotkeysLayer(
         onExitRequested: _requestExit,
         onHelpToggleRequested: _toggleHelpOverlay,
@@ -237,39 +226,14 @@ class _OsgModeScreenState extends State<OsgModeScreen> {
                 resolveSemantic: widget.onResolveSemanticText,
                 visible: _osgPresetVisible,
               ),
-            Positioned(
-              left: edgeInset,
-              bottom: edgeInset,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  if (_osgRequirementFlashToken > 0)
-                    Padding(
-                      padding: EdgeInsets.only(bottom: scaleDimension(context, 8)),
-                      child: TransientHudBanner(
-                        key: ValueKey<int>(_osgRequirementFlashToken),
-                        text: _osgRequirementFlashText,
-                        onDismissed: _clearOsgRequirementFlash,
-                      ),
-                    ),
-                  Text(
-                    _session.tagSetName,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (_showEscapeHint && !_showHelpOverlay)
+            if (_osgRequirementFlashToken > 0)
               Positioned(
-                right: edgeInset,
+                left: edgeInset,
                 bottom: edgeInset,
-                child: const Text(
-                  "Press Escape to return",
-                  style: TextStyle(color: Colors.white70),
+                child: TransientHudBanner(
+                  key: ValueKey<int>(_osgRequirementFlashToken),
+                  text: _osgRequirementFlashText,
+                  onDismissed: _clearOsgRequirementFlash,
                 ),
               ),
             if (_showHelpOverlay) const _OsgModeHelpOverlay(),

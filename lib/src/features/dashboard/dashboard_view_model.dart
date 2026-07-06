@@ -23,6 +23,9 @@ import "package:obs_clipshow/src/media/tag_set.dart";
 import "package:obs_clipshow/src/obs/capture_path_utils.dart";
 import "package:obs_clipshow/src/obs/playout_record_path_utils.dart";
 import "package:obs_clipshow/src/osg/osg_bake_models.dart";
+import "package:obs_clipshow/src/osg/osg_mode_key_color.dart";
+import "package:obs_clipshow/src/osg/osg_key_color_suggester.dart"
+    as osg_key_color;
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/obs/obs_capture_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -244,6 +247,10 @@ class DashboardViewModel extends ChangeNotifier {
 
   OsgWorkspaceConfig get osgWorkspaceConfig =>
       _workspaceSettings?.osgWorkspaceConfig ?? OsgWorkspaceConfig.fallback();
+
+  int get osgModeKeyColorArgb =>
+      _workspaceSettings?.osgModeKeyColorArgb ??
+      OsgModeKeyColorSettings.defaultKeyColorArgb;
 
   List<TagSemanticType> get tagSemanticTypes =>
       _workspaceSettings?.tagSemanticTypes ?? <TagSemanticType>[];
@@ -591,6 +598,9 @@ class DashboardViewModel extends ChangeNotifier {
   /// Whether OSG Mode can be entered with a specific [tagSet] right now
   /// (independent of the current dashboard selection or quick slots).
   bool canEnterOsgModeForTagSet(TagSet tagSet) => _osgSceneConfigured;
+
+  /// True when OBS integration is enabled and an OSG program scene is configured.
+  bool get isOsgModeBroadcastEnabled => _osgSceneConfigured;
 
   bool get _osgSceneConfigured {
     final ObsSceneSwitchConfig? config = obsSceneSwitchConfig;
@@ -2688,6 +2698,49 @@ class DashboardViewModel extends ChangeNotifier {
     await repository.saveIngestThumbnailConcurrency(value);
     await _loadWorkspaceSettings();
     notifyListeners();
+  }
+
+  Future<void> saveOsgModeKeyColorArgb(int argb) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveOsgModeKeyColorArgb(argb | 0xFF000000);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<OsgKeyColorSuggestion> suggestOsgModeKeyColor() async {
+    final String? root = _workspacePath;
+    if (root == null || root.trim().isEmpty) {
+      return OsgKeyColorSuggestion(
+        suggestedKeyColorArgb: osgModeKeyColorArgb,
+        analysis: osg_key_color.analyzeOsgKeyColor(
+          keyColorArgb: osgModeKeyColorArgb,
+          forbidden: const <OsgRgb>[],
+        ),
+        alternateCandidates: const <OsgKeyColorAnalysis>[],
+      );
+    }
+    return osg_key_color.suggestOsgModeKeyColor(
+      config: osgWorkspaceConfig,
+      workspaceRoot: root,
+    );
+  }
+
+  Future<OsgKeyColorAnalysis> validateOsgModeKeyColor(int argb) async {
+    final String? root = _workspacePath;
+    if (root == null || root.trim().isEmpty) {
+      return osg_key_color.analyzeOsgKeyColor(
+        keyColorArgb: argb,
+        forbidden: const <OsgRgb>[],
+      );
+    }
+    return osg_key_color.validateOsgModeKeyColor(
+      keyColorArgb: argb,
+      config: osgWorkspaceConfig,
+      workspaceRoot: root,
+    );
   }
 
   Future<void> saveDefaultClipVolume(double value) async {
