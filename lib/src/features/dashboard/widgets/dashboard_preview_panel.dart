@@ -515,7 +515,16 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
       return;
     }
     if (choice.action == BakeRecipePickerAction.queue) {
-      viewModel.enqueueBakeJob(item, choice.recipe);
+      final String? error = viewModel.enqueueBakeJob(item, choice.recipe);
+      if (!context.mounted) {
+        return;
+      }
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error)),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -530,6 +539,15 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
     // enqueued ahead of pending work and runs immediately after.
     final ({String taskId, Future<OsgBakeResult> result}) nowJob = viewModel
         .bakeItemNow(item, choice.recipe);
+    if (nowJob.taskId.isEmpty) {
+      final OsgBakeResult result = await nowJob.result;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.errorMessage ?? "Bake failed.")),
+        );
+      }
+      return;
+    }
     unawaited(
       showDialog<void>(
         context: context,

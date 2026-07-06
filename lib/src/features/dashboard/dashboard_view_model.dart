@@ -275,9 +275,31 @@ class DashboardViewModel extends ChangeNotifier {
     _bakeCancelRequested = true;
   }
 
+  /// Returns an error message when [recipe] cues a preset whose required
+  /// semantic tags are missing on [item]; null when the bake may proceed.
+  String? bakeSemanticRequirementsError(
+    MediaListItem item,
+    OsgBakeRecipe recipe,
+  ) {
+    return osgBakeSemanticRequirementsError(
+      recipe: recipe,
+      presets: osgWorkspaceConfig.workspacePresets,
+      semanticTypeIdsOnMedia: semanticTypeIdsOnMedia(item),
+      tagSemanticTypes: tagSemanticTypes,
+    );
+  }
+
   /// Adds [item] baked with [recipe] to the end of the bake queue. Starts the
-  /// runner immediately unless the queue is paused.
-  void enqueueBakeJob(MediaListItem item, OsgBakeRecipe recipe) {
+  /// runner immediately unless the queue is paused. Returns null on success, or
+  /// an error message when the job was not enqueued (e.g. missing semantic tags).
+  String? enqueueBakeJob(MediaListItem item, OsgBakeRecipe recipe) {
+    final String? requirementsError = bakeSemanticRequirementsError(
+      item,
+      recipe,
+    );
+    if (requirementsError != null) {
+      return requirementsError;
+    }
     _bakeQueuePending.add(
       OsgBakeQueueTask(
         id: nextBakeQueueTaskId(),
@@ -291,6 +313,7 @@ class DashboardViewModel extends ChangeNotifier {
     );
     notifyListeners();
     unawaited(_pumpBakeQueue());
+    return null;
   }
 
   /// Bakes [item] with [recipe] ahead of anything else in the queue,
@@ -298,11 +321,24 @@ class DashboardViewModel extends ChangeNotifier {
   /// before starting. Returns the new task's id (so callers can tell, via
   /// [bakeQueueRunningTask], once *this* task — rather than whatever was
   /// already running — is actually in flight) plus a future that resolves
-  /// once baking completes.
+  /// once baking completes. When semantic requirements are not met, [taskId]
+  /// is empty and [result] completes immediately with an error.
   ({String taskId, Future<OsgBakeResult> result}) bakeItemNow(
     MediaListItem item,
     OsgBakeRecipe recipe,
   ) {
+    final String? requirementsError = bakeSemanticRequirementsError(
+      item,
+      recipe,
+    );
+    if (requirementsError != null) {
+      return (
+        taskId: "",
+        result: Future<OsgBakeResult>.value(
+          OsgBakeResult(errorMessage: requirementsError),
+        ),
+      );
+    }
     final OsgBakeQueueTask task = OsgBakeQueueTask(
       id: nextBakeQueueTaskId(),
       mediaStableKey: item.stableKey,
@@ -465,6 +501,13 @@ class DashboardViewModel extends ChangeNotifier {
         return OsgBakeResult(
           errorMessage: "Bake recipe no longer exists: ${task.recipeName}",
         );
+      }
+      final String? requirementsError = bakeSemanticRequirementsError(
+        item,
+        recipe,
+      );
+      if (requirementsError != null) {
+        return OsgBakeResult(errorMessage: requirementsError);
       }
 
       final String masterAbs = WorkspaceMediaPaths.absoluteMasterPath(

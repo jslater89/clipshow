@@ -178,6 +178,44 @@ String osgBakeCueSummaryLabel(OsgBakeCue cue) {
       "${osgBakeAnchorLabel(cue.start)} \u2192 ${osgBakeAnchorLabel(cue.end)}";
 }
 
+/// Returns an error message when [recipe] cues a preset whose required semantic
+/// tags are absent on the media item; null when baking may proceed.
+String? osgBakeSemanticRequirementsError({
+  required OsgBakeRecipe recipe,
+  required List<OsgPreset> presets,
+  required Set<int> semanticTypeIdsOnMedia,
+  required List<TagSemanticType> tagSemanticTypes,
+}) {
+  final Set<OsgPresetSlot> cuedSlots =
+      recipe.cues.map((OsgBakeCue c) => c.slot).toSet();
+  final List<String> messages = <String>[];
+  for (final OsgPresetSlot slot in cuedSlots) {
+    final int index = slot.presetIndex;
+    if (index < 0 || index >= presets.length) {
+      continue;
+    }
+    final OsgPreset preset = presets[index];
+    if (!preset.enabled || preset.requiredSemanticTypeIds.isEmpty) {
+      continue;
+    }
+    if (preset.semanticRequirementsSatisfiedBy(semanticTypeIdsOnMedia)) {
+      continue;
+    }
+    final String message = osgMissingSemanticRequirementsMessage(
+      preset: preset,
+      semanticTypeIdsOnMedia: semanticTypeIdsOnMedia,
+      tagSemanticTypes: tagSemanticTypes,
+    );
+    if (message.isNotEmpty) {
+      messages.add(message);
+    }
+  }
+  if (messages.isEmpty) {
+    return null;
+  }
+  return messages.join("\n");
+}
+
 String encodeOsgBakeRecipesToStorageJson(List<OsgBakeRecipe> recipes) {
   return jsonEncode(recipes.map((OsgBakeRecipe r) => r.toJson()).toList());
 }

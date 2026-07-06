@@ -121,4 +121,69 @@ void main() {
       expect(osgBakeCueSummaryLabel(cue), "OSG 6: Clip Start \u2192 4s");
     });
   });
+
+  group("osgBakeSemanticRequirementsError", () {
+    const OsgBakeRecipe preset1Recipe = OsgBakeRecipe(
+      id: 1,
+      name: "Preset 1 Only",
+      cues: <OsgBakeCue>[
+        OsgBakeCue(
+          slot: OsgPresetSlot.preset1,
+          start: OsgBakeAnchor.clipStart(),
+          end: OsgBakeAnchor.clipEnd(),
+        ),
+      ],
+    );
+
+    List<OsgPreset> presetsWithRequiredType(int semanticTypeId) {
+      final List<OsgPreset> presets = List<OsgPreset>.from(
+        OsgWorkspaceConfig.fallback().workspacePresets,
+      );
+      presets[OsgPresetSlot.preset1.presetIndex] =
+          presets[OsgPresetSlot.preset1.presetIndex].copyWith(
+        enabled: true,
+        requiredSemanticTypeIds: <int>[semanticTypeId],
+      );
+      return presets;
+    }
+
+    test("returns null when the cued preset has no requirements", () {
+      expect(
+        osgBakeSemanticRequirementsError(
+          recipe: preset1Recipe,
+          presets: OsgWorkspaceConfig.fallback().workspacePresets,
+          semanticTypeIdsOnMedia: const <int>{},
+          tagSemanticTypes: const <TagSemanticType>[],
+        ),
+        isNull,
+      );
+    });
+
+    test("returns null when required semantic types are present on media", () {
+      expect(
+        osgBakeSemanticRequirementsError(
+          recipe: preset1Recipe,
+          presets: presetsWithRequiredType(42),
+          semanticTypeIdsOnMedia: const <int>{42},
+          tagSemanticTypes: const <TagSemanticType>[
+            TagSemanticType(id: 42, name: "Player"),
+          ],
+        ),
+        isNull,
+      );
+    });
+
+    test("returns a message when required semantic types are missing", () {
+      final String? error = osgBakeSemanticRequirementsError(
+        recipe: preset1Recipe,
+        presets: presetsWithRequiredType(42),
+        semanticTypeIdsOnMedia: const <int>{},
+        tagSemanticTypes: const <TagSemanticType>[
+          TagSemanticType(id: 42, name: "Player"),
+        ],
+      );
+      expect(error, isNotNull);
+      expect(error, contains("Player"));
+    });
+  });
 }
