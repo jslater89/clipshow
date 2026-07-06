@@ -8,6 +8,7 @@ import "package:logging/logging.dart";
 import "package:path/path.dart" as p;
 import "package:system_fonts/system_fonts.dart";
 
+import "package:obs_clipshow/src/bake/osg_bake_service.dart";
 import "package:obs_clipshow/src/data/app_database.dart";
 import "package:obs_clipshow/src/data/media_repository.dart";
 import "package:obs_clipshow/src/ingestion/ingestion_service.dart";
@@ -18,6 +19,7 @@ import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/obs/capture_path_utils.dart";
 import "package:obs_clipshow/src/obs/playout_record_path_utils.dart";
+import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/obs/obs_capture_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -130,6 +132,8 @@ class DashboardViewModel extends ChangeNotifier {
   String? _captureStatusMessage;
   bool _obsPlayoutRecordActive = false;
   ObsCaptureService? _obsPlayoutRecordSession;
+  bool _bakeActive = false;
+  bool _bakeCancelRequested = false;
   final Set<String> _loadedSystemFontFamilies = <String>{};
 
   OsgPresetVisibility _previewOsgPresetVisibility =
@@ -231,6 +235,20 @@ class DashboardViewModel extends ChangeNotifier {
 
   List<TagSemanticType> get tagSemanticTypes =>
       _workspaceSettings?.tagSemanticTypes ?? <TagSemanticType>[];
+
+  List<OsgBakeRecipe> get osgBakeRecipes =>
+      _workspaceSettings?.osgBakeRecipes ?? <OsgBakeRecipe>[];
+
+  /// True while a bake export pipeline is running.
+  bool get bakeActive => _bakeActive;
+
+  /// Requests cancellation of the in-flight bake at the next safe checkpoint.
+  void requestBakeCancel() {
+    if (!_bakeActive) {
+      return;
+    }
+    _bakeCancelRequested = true;
+  }
   List<ShelfTagEntry> get captureTags =>
       List<ShelfTagEntry>.unmodifiable(_captureTags);
   bool get obsCaptureRecording => _obsCaptureRecording;
@@ -908,6 +926,116 @@ class DashboardViewModel extends ChangeNotifier {
     await _loadWorkspaceSettings();
     await _preloadConfiguredOsgFonts();
     notifyListeners();
+  }
+
+  Future<void> saveOsgBakeRecipes(List<OsgBakeRecipe> value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.saveOsgBakeRecipes(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  /// Bakes the currently selected item with [recipe] into the playout export
+  /// folder. Runs the full trim/render/composite pipeline; only one bake may
+  /// run at a time.
+  Future<OsgBakeResult> bakeSelectedItem(OsgBakeRecipe recipe) async {
+    final String? workspaceRoot = _workspacePath;
+    final MediaRepository? repository = _mediaRepository;
+    final MediaListItem? item = selectedItem;
+    if (workspaceRoot == null || repository == null) {
+      return const OsgBakeResult(errorMessage: "No workspace open.");
+    }
+    if (item == null) {
+      return const OsgBakeResult(errorMessage: "No item selected.");
+    }
+    if (_bakeActive) {
+      return const OsgBakeResult(errorMessage: "A bake is already running.");
+    }
+    _bakeActive = true;
+    _bakeCancelRequested = false;
+    notifyListeners();
+    try {
+      final String masterAbs = WorkspaceMediaPaths.absoluteMasterPath(
+        workspaceRoot,
+        item.filePath,
+      );
+      final int inMs = item.type == MediaListItemType.clip
+          ? item.clip!.inMs
+          : 0;
+      final int? outMs = item.type == MediaListItemType.clip
+          ? item.clip!.outMs
+          : null;
+
+      final List<OsgPreset> presets = osgWorkspaceConfig.workspacePresets;
+      final Map<int, String> semanticTextByTypeId =
+          await _resolveSemanticTextForBake(
+            repository: repository,
+            item: item,
+            recipe: recipe,
+            presets: presets,
+          );
+
+      final String outputDirAbs = PlayoutRecordPathUtils.normalizedOutputDir(
+        workspaceAbsolute: workspaceRoot,
+        settings: playoutRecordPathsSettings,
+      );
+      final OsgBakeRequest request = OsgBakeRequest(
+        masterFileAbsolute: masterAbs,
+        inMs: inMs,
+        outMs: outMs,
+        recipe: recipe,
+        presets: presets,
+        outputSize: playoutOutputSize,
+        semanticTextByTypeId: semanticTextByTypeId,
+        annotationsText: item.annotations ?? "",
+        workspaceRoot: workspaceRoot,
+        outputDirAbsolute: outputDirAbs,
+        exportBaseName: p.basenameWithoutExtension(item.displayName),
+      );
+      return await OsgBakeService(
+        shouldCancel: () => _bakeCancelRequested,
+      ).bake(request);
+    } finally {
+      _bakeActive = false;
+      _bakeCancelRequested = false;
+      notifyListeners();
+    }
+  }
+
+  /// Resolves semantic slot text for every semantic type referenced by presets
+  /// that [recipe] cues, once per bake (mirrors OsgPlayoutLayer's load).
+  Future<Map<int, String>> _resolveSemanticTextForBake({
+    required MediaRepository repository,
+    required MediaListItem item,
+    required OsgBakeRecipe recipe,
+    required List<OsgPreset> presets,
+  }) async {
+    final Set<int> semanticTypeIds = <int>{};
+    for (final OsgBakeCue cue in recipe.cues) {
+      final int index = cue.slot.presetIndex;
+      if (index < 0 || index >= presets.length) {
+        continue;
+      }
+      for (final OsgSlot slot in presets[index].slots) {
+        if (slot.textSource == OsgTextSource.semantic &&
+            slot.semanticTypeId != null) {
+          semanticTypeIds.add(slot.semanticTypeId!);
+        }
+      }
+    }
+    final Map<int, String> out = <int, String>{};
+    for (final int id in semanticTypeIds) {
+      final String? text = await repository.resolveSemanticTagForMedia(
+        mediaType: item.type,
+        mediaId: item.id,
+        semanticTypeId: id,
+      );
+      out[id] = text ?? "";
+    }
+    return out;
   }
 
   Future<int> insertTagSemanticType({

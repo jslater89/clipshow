@@ -1,18 +1,22 @@
 import "dart:async";
 
 import "package:flutter/material.dart";
+import "package:path/path.dart" as p;
 import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
+import "package:obs_clipshow/src/bake/osg_bake_service.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_preview_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
 import "package:obs_clipshow/src/features/playout/osg_playout_layer.dart";
+import "package:obs_clipshow/src/util/reveal_file_in_folder.dart";
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -430,6 +434,18 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                     icon: const Icon(Icons.delete_outline),
                     label: const Text("Trash File"),
                   ),
+                FilledButton.tonalIcon(
+                  onPressed:
+                      selectedItem == null ||
+                          previewIssue != MediaIssue.none ||
+                          workspaceRoot == null ||
+                          viewModel.osgBakeRecipes.isEmpty ||
+                          viewModel.bakeActive
+                      ? null
+                      : () => unawaited(_startBake(context, viewModel)),
+                  icon: const Icon(Icons.movie_creation_outlined),
+                  label: const Text("Bake"),
+                ),
                 FilledButton.icon(
                   onPressed:
                       selectedItem == null ||
@@ -481,6 +497,117 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _startBake(
+    BuildContext context,
+    DashboardViewModel viewModel,
+  ) async {
+    final OsgBakeRecipe? recipe = await _pickBakeRecipe(
+      context,
+      viewModel.osgBakeRecipes,
+    );
+    if (recipe == null || !context.mounted) {
+      return;
+    }
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext ctx) {
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              content: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const CircularProgressIndicator(),
+                  SizedBox(width: scaleDimension(ctx, 16)),
+                  const Text("Rendering\u2026"),
+                ],
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => viewModel.requestBakeCancel(),
+                  child: const Text("Cancel"),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+    final OsgBakeResult result = await viewModel.bakeSelectedItem(recipe);
+    if (!context.mounted) {
+      return;
+    }
+    Navigator.of(context, rootNavigator: true).pop();
+    final String? destPath = result.destPath;
+    if (destPath != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Baked to ${p.basename(destPath)}"),
+          showCloseIcon: true,
+          action: SnackBarAction(
+            label: "Reveal",
+            onPressed: () {
+              unawaited(() async {
+                try {
+                  await revealFileInFolder(destPath);
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text("Could not open file manager: $e"),
+                      ),
+                    );
+                  }
+                }
+              }());
+            },
+          ),
+        ),
+      );
+    } else if (result.errorMessage == "Bake cancelled.") {
+      // Operator dismissed the bake; no follow-up snackbar.
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.errorMessage ?? "Bake failed.")),
+      );
+    }
+  }
+
+  Future<OsgBakeRecipe?> _pickBakeRecipe(
+    BuildContext context,
+    List<OsgBakeRecipe> recipes,
+  ) {
+    return showDialog<OsgBakeRecipe>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return SimpleDialog(
+          title: const Text("Bake with recipe"),
+          children: recipes
+              .map(
+                (OsgBakeRecipe recipe) => SimpleDialogOption(
+                  onPressed: () => Navigator.of(ctx).pop(recipe),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(recipe.name),
+                      Text(
+                        recipe.cues.map(osgBakeCueSummaryLabel).join("; "),
+                        style: Theme.of(ctx).textTheme.bodySmall,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              )
+              .toList(),
+        );
+      },
     );
   }
 

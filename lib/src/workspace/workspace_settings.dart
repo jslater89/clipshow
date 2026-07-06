@@ -1,6 +1,7 @@
 import "dart:io";
 import "dart:ui";
 
+import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 
 /// Defaults and bounds for directory-scan ffprobe batching and thumbnail [ffmpeg] jobs.
@@ -377,6 +378,7 @@ class WorkspaceSettingsBundle {
     required this.playoutOutputSize,
     required this.osgWorkspaceConfig,
     required this.tagSemanticTypes,
+    required this.osgBakeRecipes,
     required this.defaultClipVolume,
   });
 
@@ -408,6 +410,9 @@ class WorkspaceSettingsBundle {
 
   /// Workspace-defined semantic tag types (for OSG slots and typed media tags).
   final List<TagSemanticType> tagSemanticTypes;
+
+  /// Named OSG timing recipes for bake export.
+  final List<OsgBakeRecipe> osgBakeRecipes;
 
   /// Initial clip volume (0.0–1.0) used when the workspace loads, before the
   /// user adjusts via the volume hotkeys. Session adjustments are not persisted.
