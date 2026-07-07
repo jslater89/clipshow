@@ -1,0 +1,12 @@
+---
+description: Keep SPEC.md in sync when adding or changing product behavior
+alwaysApply: true
+---
+
+# SPEC Updates
+
+When building out new features or changing existing behavior, update **SPEC.md** in the same change—not only code.
+
+Cover what operators and contributors need at the architecture level: UI states and transitions, triggers and reversion, data model, OBS/webhook flows, and settings. Reserve **MANUAL.md** for end-user how-to; **SPEC.md** is the product spec and state machine.
+
+If the change is user-visible but not architectural, MANUAL alone may suffice; when in doubt, update both.

@@ -6,6 +6,7 @@ A custom, local desktop application built to serve as a unified media manager, v
 ## 2. Technology Stack
 * **Framework:** Flutter (targeting desktop OS: Windows/Linux)
 * **Video decoding:** `fvp` (hardware-accelerated wrapper for `video_player` via FFmpeg); decoder profiles and verbosity are configurable per workspace
+* **FFmpeg (CLI):** `ffmpeg` / `ffprobe` for thumbnails, duration and frame-rate probing, and bake trim/composite passes
 * **OBS integration:** `obs_websocket` (JSON-RPC–style requests such as `SetCurrentProgramScene`, `SetRecordDirectory`, `StartRecord`, `StopRecord`)
 * **Database:** `sqflite` with **`sqflite_common_ffi`** on desktop (SQLite file per workspace)
 * **Drawing engine:** Flutter `CustomPaint` with gesture-driven strokes (mouse/touch pan)
@@ -21,7 +22,7 @@ The application expects a practical OBS scene layout; **Video**, **Face**, and *
 
 ## 4. Workspace Management
 * **Definition:** A Workspace is a root directory on the local file system containing all media assets for a specific project or match.
-* **Database location:** The SQLite database file is **`obs_clipshow.db`** at the top level of the workspace directory. It stores master files, clips, tags, saved tags, workspace settings (including OBS profiles, webhooks, capture paths, ignored folders, telestrator defaults, decoder options), and related metadata.
+* **Database location:** The SQLite database file is **`obs_clipshow.db`** at the top level of the workspace directory. It stores master files, clips, tags, tag sets, saved tags, workspace settings (including OBS profiles, webhooks, capture paths, ignored folders, telestrator defaults, decoder options, default clip volume, OSG config, and bake recipes JSON), and related metadata.
 * **Background ingestion:** A file watcher plus scanning keeps the database in sync with the workspace tree. New video files under the workspace (respecting **ignored** paths such as the capture **recording** staging folder) get a **master** row; deletes and changes are reflected without a manual refresh.
 
 ## 5. Application UI States
@@ -33,7 +34,7 @@ The application operates in mutually exclusive UI states to prevent broadcast er
     * **Workspace header (top):** Current workspace path, open-folder and **Workspace settings** actions, and optional **OBS connection** status when an OBS profile is enabled.
     * **Main row:** A **left** column and a **right** column.
     * **Files (left card):** At the top of this card: **tag search** (with autocomplete to add filter chips), **filename or full-workspace path search** (toggleable), an **Untagged** filter chip, and **active tag filter** chips. Below that, the scrollable list of master files and saved clips (thumbnails, play actions, etc.).
-    * **Right column (tabs):** **Manage** — video preview (top) and a resizable split to the **tagging** panel (bottom): mark in/out, optional display name, tags, and save-clip flow. **Tag Sets** — create and tag **bare tag sets** (no video), assign quick slots (keys 1–5 in OSG Mode), and **Enter OSG Mode**. **Capture** — **OBS Capture Mode** in place of Preview+tagging: start/stop recording via WebSocket, **recording folder** (under workspace, ignored during writes) and **output folder** (empty = workspace root); after stop, the finished file is **copied** to the output folder so ingestion sees it once; tags from the panel are applied to the new **master** at stop time.
+    * **Right column (tabs):** **Manage** — video preview (top) and a resizable split to the **tagging** panel (bottom): mark in/out, optional display name, tags, save-clip flow, and preview actions (**Playout**, **Record**, **Bake** and **Export OSG Graphics** when recipes exist). **Capture** — **OBS Capture Mode** in place of Preview+tagging: start/stop recording via WebSocket, **recording folder** (under workspace, ignored during writes) and **output folder** (empty = workspace root); after stop, the finished file is **copied** to the output folder so ingestion sees it once; tags from the panel are applied to the new **master** at stop time. **Bake Queue** (visible when the workspace has bake recipes) — start/pause the bake runner, view running/pending/finished tasks. **Tag Sets** — create and tag **bare tag sets** (no video), assign quick slots (keys 1–5 in OSG Mode), and **Enter OSG Mode**.
 
 ### Workspace settings (capture)
 * **OBS:** Configured **Video** / **Face** / **OSG** scenes (names), connection host/port/password, plus optional **Capture** scene (program scene switched before recording when set).
@@ -50,7 +51,7 @@ The application operates in mutually exclusive UI states to prevent broadcast er
 * **Trigger:** User runs a **saved clip** from the dashboard (e.g. play action on a clip row).
 * **Execution sequence (actual order):**
     1. Dashboard is replaced by the playout surface (no dashboard chrome).
-    2. The window is sized for **16:9**, **title bar hidden**, and **windowed** by default (**fullscreen** exists as an alternate code path, not the default). Prior window bounds are remembered for restore on exit.
+    2. The window is sized to **Playout canvas size** (`PlayoutOutputSize` from workspace settings): exact logical width×height in windowed mode, OS aspect-ratio lock from that canvas, **title bar hidden**. **Fullscreen** exists as an alternate code path, not the default. Prior window bounds are remembered for restore on exit.
     3. The player loads the master file, seeks to the clip **in** time, and applies range behavior by **seeking** and **progress/clamp logic** (pause/hold at the **out** point)—there is **no** separate `setRange` API; range is enforced in the player layer.
     4. The player loads and seeks; after the **first video frame** is scheduled to paint, **scene switching** runs: for each **enabled** profile, the app connects to OBS and sends **`SetCurrentProgramScene`** to the configured **Video** scene name, and/or invokes configured **webhook** URLs with a **`video`** token. If no profile is enabled, scene switching is skipped (logged only). **Record playout** starts OBS recording immediately after that scene switch (not before).
     5. Playback runs (autoplay); a telestrator layer may sit above the video when enabled.
@@ -69,7 +70,7 @@ The application operates in mutually exclusive UI states to prevent broadcast er
 * **Trigger:** **Enter OSG Mode** on the Dashboard **Tag Sets** tab (requires **OSG Mode enabled** in workspace settings and at least one tag set).
 * **Execution sequence:**
     1. Dashboard is replaced by the OSG Mode surface (transparent background).
-    2. Same window sizing rules as playout (16:9, hidden title bar).
+    2. Same window sizing rules as playout (**Playout canvas size**, hidden title bar).
     3. After the first frame paints, if an **OSG** program scene name is configured, OBS switches to that scene (and/or webhooks with **`osg`** token). When the OSG scene name is empty, OBS program scene is unchanged (manual/nested-scene workflows).
     4. Operator toggles OSG presets with **6–0** and switches tag sets with **1–5** (quick slots configured on the Tag Sets tab).
 * **Reversion:** **`Escape`** → Dashboard restore (same window restore as playout exit). When an **OSG** program scene name is configured, OBS also switches to **Face**.
@@ -81,6 +82,22 @@ The application operates in mutually exclusive UI states to prevent broadcast er
 * **OBS sequence:** After first-frame-ready + **Video** scene: **`SetRecordDirectory`** (staging), **`StartRecord`**. On **`Escape`**: **`StopRecord`** → copy to output (staging file removed) → restore record directory → **Face** scene + window restore.
 * **Post-export:** SnackBar with **Reveal** to open the file in the system file manager. No library ingest or tag application.
 * **Conflicts:** Blocked when Capture recording is active, a playout record session is already active, or OBS reports record already active.
+
+### Bake export (offline OSG composite)
+* **Purpose:** Produce a shareable MP4 from a clip or master with **on-screen graphics** composited in per a **bake recipe**—offline `ffmpeg` rendering, not OBS program capture.
+* **Trigger:** **Bake** on the dashboard preview action bar (requires at least one **bake recipe** in workspace settings). Operator picks **Queue** or **Now** per recipe.
+* **Recipe:** Named workspace setting (`osg.bakeRecipes` JSON) listing **cues**: each cue binds an **OSG preset slot** to a visible window between **start** and **end** anchors (clip start/end, absolute ms from clip start, or offset ms from clip end).
+* **Validation:** At enqueue time, each cue’s preset **required semantic tags** must be satisfied on the target media row; otherwise the job is rejected with an error (no partial queue).
+* **Pipeline:** `ffmpeg` trim/re-encode segment → per-frame OSG render (`OsgFrameRenderer`, dart:ui) to PNG sequence → `ffmpeg` scale/letterbox + overlay composite → copy to **playout output** folder (default `export`, same as Record playout) as `{displayName}_baked.mp4` with numeric dedup suffix. Temp work dir deleted afterward.
+* **Queue:** Session-scoped pending/running/finished task lists; **Pause** stops dequeuing (in-flight bake continues); **Now** inserts at queue head and bypasses pause. Cancel cooperates at safe checkpoints during render/ffmpeg.
+* **Post-export:** SnackBar with **Reveal**; no library ingest.
+
+### OSG graphic export (ZIP)
+* **Purpose:** Hand off hold-state OSG pixels and timing metadata to an external NLE—no ffmpeg video composite.
+* **Trigger:** **Export OSG Graphics** on the dashboard preview action bar (requires bake recipes; same semantic-tag validation as Bake). Operator picks a recipe, then a save path via file dialog.
+* **Output:** ZIP containing `manifest.json` (`osgGraphicExportSchemaVersion` 1) and one transparent PNG per distinct cued slot (`osg6.png` … `osg0.png`) at **Playout canvas size**. PNGs are **hold state** (fully visible, no motion offset), rendered by `OsgFrameRenderer.renderSlotHoldStatePng`.
+* **Manifest:** Per slot: `frameNorm`, `frameCanvasPx`, `layerOpacity`, `enter`/`exit` motion blocks (`slideDistanceNorm`, `slideDistanceCanvasPx`, `durationMs`, easing), `cues` (raw `OsgBakeAnchor` JSON plus resolved ms and animation bounds), resolved text. Root includes recipe id/name, canvas size, and source clip `displayName`, `fileName`, `workspaceRelativePath`, `inMs`/`outMs`/`durationMs` (same duration probe as bake).
+* **Post-export:** SnackBar with **Reveal**; no library ingest.
 
 ## 6. Core Data Model
 Metadata lives in SQLite; masters and clips are normalized.
@@ -94,14 +111,16 @@ Metadata lives in SQLite; masters and clips are normalized.
     * **`created_at_ms`:** Creation time.
 * **Tags:** Normalized **`tags`** table and **`media_tags`** linking **masters**, **clips**, or **tag sets** to tag names for filtering, organization, and OSG semantic resolution.
 * **Tag set (`tag_sets`):** Named, video-less entity with optional **`annotations`** and tag attachments (same **`media_tags`** pattern as clips). Used to drive OSG Mode without a master file.
+* **Bake recipe (`osg.bakeRecipes` workspace setting):** JSON array of named recipes with **`cues`** referencing **`OsgPresetSlot`** and **`OsgBakeAnchor`** time ranges. Not a SQLite table; stored in workspace settings KV.
 
 Logical “clip” fields map as: **master path** via join to master row; **title** from **`display_name_override`** or derived display rules; **tags** via **`media_tags`**; range from **`in_ms` / `out_ms`**.
 
 ## 7. Key Functional Requirements
 * **Hardware acceleration:** Playback uses **`fvp`** with configurable decoder profiles (exact codecs depend on OS/GPU; workspace settings expose ordering and diagnostics).
-* **Aspect ratio locking:** In playout, the window is constrained to **16:9** (plus optional fullscreen path) so OBS window capture stays predictable.
+* **Playout canvas / window sizing:** In playout and OSG Mode, the OS window is sized and aspect-locked to workspace **Playout canvas size** (`PlayoutOutputSize`; default **1920×1080**). Any width×height is valid—not limited to 16:9. Decoded video uses **`BoxFit.contain`** (letterboxing/pillarboxing when source aspect differs). OSG and telestrator composite over the **full canvas** (normalized 0..1), including gutters—not only the fitted video rect.
 * **Audio routing:** Application audio should be capturable by OBS (virtual audio or **Application Audio Capture**, OS-dependent—the app does not install drivers).
-* **Non-destructive editing:** No rendered output files for clips. Highlight segments are **virtual**, defined by **in/out millisecond bounds** on existing masters.
+* **Non-destructive editing:** Clips in the library are **virtual** in/out bounds on masters. Optional **bake** and **Record playout** produce rendered files outside ingest paths; they do not alter master rows.
+* **Session clip volume:** Shared 0.0–1.0 volume for preview and playout; workspace **default** persisted (`playback.defaultClipVolume`); per-session nudge/mute not persisted.
 * **Live file watching:** Workspace changes propagate without requiring a manual refresh (subject to ignored paths and ingest pause options during preview/playout).
 
 ## 8. Phased Implementation Plan
@@ -119,25 +138,29 @@ Logical “clip” fields map as: **master path** via join to master row; **titl
 * **Phase 1 core:** Workspace selection and restore, **`obs_clipshow.db`** at workspace root, recursive ingest, watcher-driven updates for add/remove/modify.
 * **Ingestion logging:** Structured logging for workspace restore, ingest lifecycle, file events, and dashboard updates.
 * **Thumbnail pipeline:** `ffprobe` + `ffmpeg`, sidecar **`<video>.thumb.jpg`**, cleanup on delete, thumbs in the file list.
-* **Dashboard layout:** Header plus **left** file list and **right** Preview/Capture column; preview vs tagging split; capture tab.
+* **Dashboard layout:** Header plus **left** file list and **right** tab column (Manage, Capture, Bake Queue when recipes exist, Tag Sets); preview vs tagging split; capture tab; bake queue panel.
 * **OBS capture mode:** Preview vs Capture tab; **`SetRecordDirectory`**, optional capture scene, **`StartRecord`** / **`StopRecord`**, copy from staging to output (staging file removed), tags on new master; restore OBS record directory after stop.
 * **Record playout export:** Preview **Record** button; OBS record during Video-scene playout; copy to playout output on exit; ignored folders; reveal-in-folder SnackBar.
+* **Bake export:** Preview **Bake** button; offline ffmpeg pipeline with per-frame OSG compositing; bake recipes and queue in dashboard; semantic-tag validation at enqueue; output to playout output folder.
+* **OSG graphic export:** Preview **Export OSG Graphics** button; hold-state PNGs + manifest ZIP via `OsgGraphicExportService`; same semantic validation and clip duration probe as bake.
+* **OSG Mode:** Tag Sets tab; transparent graphics surface; optional OBS **OSG** scene + **`osg`** webhook on enter; **Face** on exit when configured; tag-set quick slots **1–5**, preset toggles **6–0**.
 * **Tagging and organization:** Clips in SQLite with **in/out**, tags, optional display names; saved clips and saved-tag workflows.
 * **Filters, search, and autocomplete:** **Untagged** filter and tag filter chips; with **no** filters applied, all matching items are shown (there is no separate **All** chip). Filename/path search and tag search autocomplete.
 * **Preview/playout player:** Shared **`ClipPlayerView`** and hotkey layers for dashboard preview and playout.
 * **Phase 2 core:** OBS service and **optional webhook** scene switching on enter (**video**) / exit (**face**); defaults **Video Scene** / **Face Scene** overridable in settings; playout help and hotkeys in UI.
 * **Phase 4 (telestrator):** Delivered in playout with lifecycle-safe reset on exit.
-* **Playout window:** Default **windowed 16:9**, hidden title bar; **fullscreen** optional in code; bounds/maximize restore on exit.
+* **Playout window:** Windowed size and aspect lock from **Playout canvas size**; hidden title bar; **fullscreen** optional in code; bounds/maximize restore on exit. Video letterboxed inside the canvas (`BoxFit.contain`).
 * **Telestrator overlay:** Draw layer, HUD, clear/undo/colors/brush hotkeys, visibility toggle.
 * **Seek and clamp:** Arrow seeks (with modifiers), Alt micro-seek, and clamping at segment bounds.
 * **Workspace settings & export:** Telestrator defaults, decoder preferences, MDK/fvp logging options, OBS + webhook profiles, capture paths, ignored folders, JSON export.
 * **Display names & clip UX:** Overrides for masters and clips, search considers display names, range nudging in preview.
-* **Playout canvas size:** Top-level **Workspace Settings** control for logical width/height (default **1920×1080**). Windowed playout sets the OS window to **that exact size in logical pixels** (same aspect ratio constraint); the video stack fills the client area **without** an outer scale-down. Video uses uniform `BoxFit.contain` inside the frame (letterboxing if source aspect differs).
-* **On-screen graphics (OSG):** Up to **three** presets stored in workspace settings (template image path under `osg/`, normalized **0..1** frame and text slots). Slots use **fixed** text or text resolved from **tag semantic types** on the current playout media row. **Semantic types** are defined in the OSG editor and stored in SQLite (`tag_semantic_types`); each **`media_tags`** row may carry an optional **`semantic_type_id`** (per attachment). Playout hotkeys **`8` / `9` / `0`** toggle presets **1 / 2 / 3** (above video, below telestrator). Workspace JSON export includes `playoutOutput`, `osgPresets`, `tagSemanticTypes`, and per-item **`tagRows`**.
+* **Playout canvas size:** Top-level **Workspace Settings** control for logical width/height (default **1920×1080**; any aspect ratio). Windowed playout and OSG Mode set the OS window to **that exact size in logical pixels** and apply the matching aspect-ratio constraint. Manage preview centers an **AspectRatio** frame at the same aspect with a visible border. Video uses **`BoxFit.contain`** inside the canvas; OSG and telestrator use normalized coords on the **full canvas** (gutters included).
+* **On-screen graphics (OSG):** Up to **five** presets stored in workspace settings (template image path under `osg/`, normalized **0..1** frame and text slots). Slots use **fixed** text or text resolved from **tag semantic types** on the current playout media row. **Semantic types** are defined in the OSG editor and stored in SQLite (`tag_semantic_types`); each **`media_tags`** row may carry an optional **`semantic_type_id`** (per attachment). Preview, playout, and OSG Mode hotkeys **`6`–`0`** toggle presets **1–5** (above video, below telestrator in playout). Workspace JSON export includes `playoutOutput`, `osgPresets`, `tagSemanticTypes`, and per-item **`tagRows`**.
+* **Clip volume:** Default workspace volume; **↑** / **↓** ±10% and **M** mute in preview and playout hotkey layers; session-only adjustments.
 * **Tag chip context menu:** Secondary click on a tag chip (file list or tag panel): **Edit tag value** (rename on that media item while keeping semantic type), assign or **clear semantic type**, or **bulk** assign a semantic type to all attachments sharing that canonical tag.
 
 ### Implemented interaction details
-* **Keyboard (preview and playout hotkey layers):** **`Space`** play/pause. **`Left` / `Right`** seek **±1 s**. **`Shift` + arrows** seek **±15 s**. **`Ctrl` + arrows** seek **±5 s**. **`Alt` + arrows** seek **±100 ms**. **`Home` / `End`** seek to clip start/end where implemented. In **playout**, **`8` / `9` / `0`** toggle OSG presets **1–3**.
+* **Keyboard (preview and playout hotkey layers):** **`Space`** play/pause. **`Left` / `Right`** seek **±1 s**. **`Shift` + arrows** seek **±15 s**. **`Ctrl` + arrows** seek **±5 s**. **`Alt` + arrows** seek **±100 ms**. **`Home` / `End`** seek to clip start/end where implemented. **`↑` / `↓`** volume **±10%**; **`M`** mute toggle. In **playout**, preview, and **OSG Mode**, **`6`–`0`** toggle OSG presets **1–5**; in **OSG Mode**, **`1`–`5`** select tag-set quick slots.
 * **Mouse:** In **dashboard preview**, clicking the video toggles play/pause. In **playout**, click-to-toggle is **off** by default (telestrator layer and defaults); use **Space** or on-screen affordances for playback control.
 * **Playout UX:** Short hint at start (e.g. Escape to return), optional help overlay; HUD reflects telestrator state.
 * **Dashboard UX:** File list **scroll offset** is saved before playout and **restored** after exit.
