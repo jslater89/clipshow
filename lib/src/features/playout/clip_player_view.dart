@@ -27,6 +27,13 @@ class ClipPlayerController {
     await _state?._seekToEnd();
   }
 
+  Future<void> seekTo(Duration position) async {
+    await _state?._seekToClamped(position);
+  }
+
+  /// The underlying [VideoPlayerController] when a player is attached.
+  VideoPlayerController? get videoController => _state?._controller;
+
   void _attach(_ClipPlayerViewState state) {
     _state = state;
   }
@@ -50,7 +57,7 @@ class ClipPlayerView extends StatefulWidget {
     this.seekStep = const Duration(seconds: 5),
     this.clickTogglesPlayback = false,
     this.overlay,
-    this.videoAreaOverlay,
+    this.canvasAreaOverlay,
     this.onPositionChanged,
     this.onPlayingChanged,
     this.controller,
@@ -70,10 +77,10 @@ class ClipPlayerView extends StatefulWidget {
   final bool clickTogglesPlayback;
   final Widget? overlay;
 
-  /// Drawn in the letterboxed video area (same bounds as [VideoPlayer] with
-  /// [videoBoxFit]), not over controls or unused pillar/letterbox outside the
-  /// fitted frame.
-  final Widget? videoAreaOverlay;
+  /// Drawn over the full playout canvas (the layout container), including
+  /// letterbox/pillarbox gutters. OSG and telestrator use normalized 0..1
+  /// coordinates relative to this area.
+  final Widget? canvasAreaOverlay;
   final ValueChanged<int>? onPositionChanged;
   final ValueChanged<bool>? onPlayingChanged;
   final ClipPlayerController? controller;
@@ -576,24 +583,18 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
                           onTap: widget.clickTogglesPlayback
                               ? _togglePlayPause
                               : null,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            clipBehavior: Clip.none,
-                            children: <Widget>[
-                              FittedBox(
-                                fit: widget.videoBoxFit,
-                                child: SizedBox(
-                                  width: intrinsic.width,
-                                  height: intrinsic.height,
-                                  child: VideoPlayer(controller),
-                                ),
-                              ),
-                              if (widget.videoAreaOverlay != null)
-                                widget.videoAreaOverlay!,
-                            ],
+                          child: FittedBox(
+                            fit: widget.videoBoxFit,
+                            child: SizedBox(
+                              width: intrinsic.width,
+                              height: intrinsic.height,
+                              child: VideoPlayer(controller),
+                            ),
                           ),
                         ),
                       ),
+                      if (widget.canvasAreaOverlay != null)
+                        Positioned.fill(child: widget.canvasAreaOverlay!),
                     ],
                   );
                 },
@@ -608,63 +609,15 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   }
 
   Widget _buildControls(VideoPlayerController controller) {
-    final double horizontalPad = scaleDimension(context, 10);
-    final double verticalPad = scaleDimension(context, 8);
-    final double progressVerticalPad = scaleDimension(context, 4);
-    final double controlsGap = scaleDimension(context, 8);
-    return Container(
-      color: Colors.black.withValues(alpha: 0.65),
-      padding: EdgeInsets.fromLTRB(
-        horizontalPad,
-        verticalPad,
-        horizontalPad,
-        verticalPad,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          _ClipBoundedProgressIndicator(
-            controller: controller,
-            startTimeMs: widget.startTimeMs,
-            endTimeMs: widget.endTimeMs,
-            allowScrubbing: true,
-            padding: EdgeInsets.symmetric(vertical: progressVerticalPad),
-            onScrub: _seekToClamped,
-          ),
-          Row(
-            children: <Widget>[
-              IconButton(
-                tooltip: "Back 5 Seconds",
-                onPressed: () => _seekBy(-widget.seekStep),
-                icon: const Icon(Icons.replay_5),
-                color: Colors.white,
-              ),
-              IconButton(
-                tooltip: controller.value.isPlaying ? "Pause" : "Play",
-                onPressed: _togglePlayPause,
-                icon: Icon(
-                  controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                ),
-                color: Colors.white,
-              ),
-              IconButton(
-                tooltip: "Forward 5 Seconds",
-                onPressed: () => _seekBy(widget.seekStep),
-                icon: const Icon(Icons.forward_5),
-                color: Colors.white,
-              ),
-              SizedBox(width: controlsGap),
-              Expanded(
-                child: Text(
-                  "${_formatDuration(controller.value.position)} / ${_formatDuration(controller.value.duration)}",
-                  style: const TextStyle(color: Colors.white),
-                  textAlign: TextAlign.right,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return ClipPlayerTransportBar(
+      playerController: widget.controller,
+      videoController: controller,
+      startTimeMs: widget.startTimeMs,
+      endTimeMs: widget.endTimeMs,
+      seekStep: widget.seekStep,
+      onTogglePlayPause: _togglePlayPause,
+      onSeekBy: _seekBy,
+      onScrub: _seekToClamped,
     );
   }
 
@@ -685,17 +638,111 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     final double top = (container.height - d.height) * 0.5;
     return Rect.fromLTWH(left, top, d.width, d.height);
   }
+}
 
-  String _formatDuration(Duration duration) {
-    final int totalSeconds = duration.inSeconds;
-    final int hours = totalSeconds ~/ 3600;
-    final int minutes = (totalSeconds % 3600) ~/ 60;
-    final int seconds = totalSeconds % 60;
-    if (hours > 0) {
-      return "$hours:${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
-    }
-    return "${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
+/// Transport controls for [ClipPlayerView]; may sit below a canvas-framed preview.
+class ClipPlayerTransportBar extends StatelessWidget {
+  const ClipPlayerTransportBar({
+    super.key,
+    this.playerController,
+    required this.videoController,
+    required this.startTimeMs,
+    required this.endTimeMs,
+    required this.onTogglePlayPause,
+    required this.onSeekBy,
+    required this.onScrub,
+    this.seekStep = const Duration(seconds: 5),
+  });
+
+  final ClipPlayerController? playerController;
+  final VideoPlayerController videoController;
+  final int startTimeMs;
+  final int? endTimeMs;
+  final Future<void> Function() onTogglePlayPause;
+  final Future<void> Function(Duration offset) onSeekBy;
+  final Future<void> Function(Duration position) onScrub;
+  final Duration seekStep;
+
+  @override
+  Widget build(BuildContext context) {
+    final double horizontalPad = scaleDimension(context, 10);
+    final double verticalPad = scaleDimension(context, 8);
+    final double progressVerticalPad = scaleDimension(context, 4);
+    final double controlsGap = scaleDimension(context, 8);
+    return Container(
+      color: Colors.black.withValues(alpha: 0.65),
+      padding: EdgeInsets.fromLTRB(
+        horizontalPad,
+        verticalPad,
+        horizontalPad,
+        verticalPad,
+      ),
+      child: AnimatedBuilder(
+        animation: videoController,
+        builder: (BuildContext context, Widget? child) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              _ClipBoundedProgressIndicator(
+                controller: videoController,
+                startTimeMs: startTimeMs,
+                endTimeMs: endTimeMs,
+                allowScrubbing: true,
+                padding: EdgeInsets.symmetric(vertical: progressVerticalPad),
+                onScrub: onScrub,
+              ),
+              Row(
+                children: <Widget>[
+                  IconButton(
+                    tooltip: "Back 5 Seconds",
+                    onPressed: () => onSeekBy(-seekStep),
+                    icon: const Icon(Icons.replay_5),
+                    color: Colors.white,
+                  ),
+                  IconButton(
+                    tooltip: videoController.value.isPlaying ? "Pause" : "Play",
+                    onPressed: onTogglePlayPause,
+                    icon: Icon(
+                      videoController.value.isPlaying
+                          ? Icons.pause
+                          : Icons.play_arrow,
+                    ),
+                    color: Colors.white,
+                  ),
+                  IconButton(
+                    tooltip: "Forward 5 Seconds",
+                    onPressed: () => onSeekBy(seekStep),
+                    icon: const Icon(Icons.forward_5),
+                    color: Colors.white,
+                  ),
+                  SizedBox(width: controlsGap),
+                  Expanded(
+                    child: Text(
+                      "${formatClipPlayerDuration(videoController.value.position)} / "
+                      "${formatClipPlayerDuration(videoController.value.duration)}",
+                      style: const TextStyle(color: Colors.white),
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
+}
+
+String formatClipPlayerDuration(Duration duration) {
+  final int totalSeconds = duration.inSeconds;
+  final int hours = totalSeconds ~/ 3600;
+  final int minutes = (totalSeconds % 3600) ~/ 60;
+  final int seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return "$hours:${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
+  }
+  return "${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
 }
 
 /// Progress bar scoped to clip in/out when bounds are set; otherwise matches

@@ -265,7 +265,7 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
               videoBoxFit: BoxFit.contain,
               volume: viewModel.effectiveClipVolume,
               onFirstFrameReady: widget.onFirstFrameReady,
-              videoAreaOverlay: _PlayoutVideoAreaOverlay(
+              canvasAreaOverlay: _PlayoutVideoAreaOverlay(
                 clip: widget.clip,
                 osgWorkspaceConfig: widget.osgWorkspaceConfig,
                 workspaceRoot: widget.workspaceRoot,
@@ -311,7 +311,7 @@ class _PlayoutScreenState extends State<PlayoutScreen> {
   }
 }
 
-/// OSG and telestrator share the letterboxed video rect (see [ClipPlayerView.videoAreaOverlay]).
+/// OSG and telestrator share the playout canvas (see [ClipPlayerView.canvasAreaOverlay]).
 class _PlayoutVideoAreaOverlay extends StatelessWidget {
   const _PlayoutVideoAreaOverlay({
     required this.clip,

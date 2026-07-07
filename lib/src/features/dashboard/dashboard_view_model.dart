@@ -1,6 +1,7 @@
 import "dart:async";
 import "dart:convert";
 import "dart:io";
+import "dart:typed_data";
 
 import "package:file_picker/file_picker.dart";
 import "package:flutter/material.dart";
@@ -23,6 +24,7 @@ import "package:obs_clipshow/src/media/tag_set.dart";
 import "package:obs_clipshow/src/obs/capture_path_utils.dart";
 import "package:obs_clipshow/src/obs/playout_record_path_utils.dart";
 import "package:obs_clipshow/src/osg/osg_bake_models.dart";
+import "package:obs_clipshow/src/osg/osg_graphic_export_service.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/obs/obs_capture_service.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -561,6 +563,99 @@ class DashboardViewModel extends ChangeNotifier {
       return OsgBakeResult(errorMessage: "Bake failed: $e");
     }
   }
+
+  /// Exports hold-state OSG PNGs and a manifest for [recipe] against the
+  /// currently selected media item. Returns an error message, or null on
+  /// success (including when the save dialog is cancelled).
+  Future<({String? error, String? savedPath})> exportOsgGraphics({
+    required OsgBakeRecipe recipe,
+  }) async {
+    final MediaListItem? item = selectedItem;
+    if (item == null) {
+      return (error: "No media item selected.", savedPath: null);
+    }
+    final String? requirementsError = bakeSemanticRequirementsError(
+      item,
+      recipe,
+    );
+    if (requirementsError != null) {
+      return (error: requirementsError, savedPath: null);
+    }
+    final String? workspaceRoot = _workspacePath;
+    final MediaRepository? repository = _mediaRepository;
+    if (workspaceRoot == null || repository == null) {
+      return (error: "No workspace open.", savedPath: null);
+    }
+    if (!playoutOutputSize.isValid) {
+      return (
+        error: "Invalid playout canvas size for OSG export.",
+        savedPath: null,
+      );
+    }
+
+    final String masterAbs = WorkspaceMediaPaths.absoluteMasterPath(
+      workspaceRoot,
+      item.filePath,
+    );
+    final int inMs = item.type == MediaListItemType.clip ? item.clip!.inMs : 0;
+    final int? outMs = item.type == MediaListItemType.clip
+        ? item.clip!.outMs
+        : null;
+
+    final List<OsgPreset> presets = osgWorkspaceConfig.workspacePresets;
+    final Map<int, String> semanticTextByTypeId =
+        await _resolveSemanticTextForBake(
+          repository: repository,
+          item: item,
+          recipe: recipe,
+          presets: presets,
+        );
+
+    final OsgGraphicExportResult result = await OsgGraphicExportService()
+        .buildZip(
+          OsgGraphicExportRequest(
+            masterFileAbsolute: masterAbs,
+            inMs: inMs,
+            outMs: outMs,
+            recipe: recipe,
+            presets: presets,
+            outputSize: playoutOutputSize,
+            semanticTextByTypeId: semanticTextByTypeId,
+            annotationsText: item.annotations ?? "",
+            workspaceRoot: workspaceRoot,
+            sourceClipDisplayName: item.displayName,
+            sourceClipFileName: item.fileName,
+            sourceClipWorkspaceRelativePath: WorkspaceMediaPaths.normalizeStored(
+              item.filePath,
+            ),
+            exportBaseName: p.basenameWithoutExtension(item.displayName),
+          ),
+        );
+    if (result.errorMessage != null) {
+      return (error: result.errorMessage, savedPath: null);
+    }
+    final Uint8List? zipBytes = result.zipBytes;
+    if (zipBytes == null) {
+      return (error: "OSG export produced no data.", savedPath: null);
+    }
+
+    final String? path = await FilePicker.saveFile(
+      dialogTitle: "Export OSG graphics",
+      fileName: result.suggestedFileName,
+      type: FileType.custom,
+      allowedExtensions: const <String>["zip"],
+    );
+    if (path == null) {
+      return (error: null, savedPath: null);
+    }
+    try {
+      await File(path).writeAsBytes(zipBytes, flush: true);
+      return (error: null, savedPath: path);
+    } on Object catch (e) {
+      return (error: "Could not write export file: $e", savedPath: null);
+    }
+  }
+
   List<ShelfTagEntry> get captureTags =>
       List<ShelfTagEntry>.unmodifiable(_captureTags);
   bool get obsCaptureRecording => _obsCaptureRecording;

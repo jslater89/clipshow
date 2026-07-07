@@ -167,5 +167,56 @@ void main() {
         renderer.dispose();
       }
     });
+
+    test("renderSlotHoldStatePng draws only the requested slot", () async {
+      final OsgPreset preset1 = OsgPreset.empty().copyWith(
+        enabled: true,
+        templateSolidArgb: 0xFF2255AA,
+        frame: const OsgNormRect(x: 0, y: 0, width: 0.5, height: 0.5),
+      );
+      final OsgPreset preset2 = OsgPreset.empty().copyWith(
+        enabled: true,
+        templateSolidArgb: 0xFFAA5522,
+        frame: const OsgNormRect(x: 0.5, y: 0, width: 0.5, height: 0.5),
+      );
+      final OsgFrameRenderer renderer = OsgFrameRenderer(
+        presets: <OsgPreset>[
+          preset1,
+          preset2,
+          OsgPreset.empty(),
+          OsgPreset.empty(),
+          OsgPreset.empty(),
+        ],
+        cues: const <OsgBakeCue>[],
+        clipDurationMs: 10000,
+        outputWidthPx: outW,
+        outputHeightPx: outH,
+        semanticTextByTypeId: const <int, String>{},
+        annotationsText: "",
+        workspaceRoot: "",
+      );
+      await renderer.loadAssetsForSlots(<OsgPresetSlot>[
+        OsgPresetSlot.preset1,
+        OsgPresetSlot.preset2,
+      ]);
+      try {
+        final Uint8List slot1 = await renderer.renderSlotHoldStatePng(
+          OsgPresetSlot.preset1,
+        );
+        final Uint8List slot2 = await renderer.renderSlotHoldStatePng(
+          OsgPresetSlot.preset2,
+        );
+        final ui.Image image1 = await _decodePng(slot1);
+        final ui.Image image2 = await _decodePng(slot2);
+        expect(image1.width, outW);
+        expect(image1.height, outH);
+        expect(await _hasVisiblePixels(image1), isTrue);
+        expect(await _hasVisiblePixels(image2), isTrue);
+        image1.dispose();
+        image2.dispose();
+      } finally {
+        renderer.dispose();
+      }
+    });
   });
 }

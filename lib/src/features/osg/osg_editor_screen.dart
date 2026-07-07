@@ -682,7 +682,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
             style: Theme.of(context).textTheme.titleSmall,
           ),
           Text(
-            "Left: template only."
+            "Left: template only. "
             "Right: template in screen space.",
             style: Theme.of(context).textTheme.bodySmall,
           ),

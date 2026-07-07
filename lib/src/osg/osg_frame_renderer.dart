@@ -70,8 +70,11 @@ class OsgFrameRenderer {
   /// Decodes template images for cued, enabled, image-backed presets.
   /// Presets whose template cannot be loaded are skipped at render time
   /// (mirrors playout's `canRenderImage` guard).
-  Future<void> loadAssets() async {
-    for (final OsgPresetSlot slot in _cuedSlots) {
+  Future<void> loadAssets() => loadAssetsForSlots(_cuedSlots);
+
+  /// Decodes template images for [slots] only (graphic export, partial bake).
+  Future<void> loadAssetsForSlots(Iterable<OsgPresetSlot> slots) async {
+    for (final OsgPresetSlot slot in slots) {
       final int index = slot.presetIndex;
       if (index < 0 || index >= presets.length) {
         continue;
@@ -107,6 +110,46 @@ class OsgFrameRenderer {
       image.dispose();
     }
     _templateImageByPresetIndex.clear();
+    _assetsLoaded = false;
+  }
+
+  /// Renders [slot] at full hold visibility on a transparent canvas
+  /// ([outputWidthPx] x [outputHeightPx]). Bypasses cue sampling.
+  Future<Uint8List> renderSlotHoldStatePng(OsgPresetSlot slot) async {
+    assert(_assetsLoaded, "Call loadAssetsForSlots() before renderSlotHoldStatePng().");
+    final int index = slot.presetIndex;
+    if (index < 0 || index >= presets.length) {
+      return _encodeEmptyPng();
+    }
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final ui.Canvas canvas = ui.Canvas(recorder);
+    final double w = outputWidthPx.toDouble();
+    final double h = outputHeightPx.toDouble();
+    _drawPresetHoldState(canvas, slot, presets[index], w, h);
+    return _encodePicturePng(recorder);
+  }
+
+  Future<Uint8List> _encodeEmptyPng() async {
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    ui.Canvas(recorder);
+    return _encodePicturePng(recorder);
+  }
+
+  Future<Uint8List> _encodePicturePng(ui.PictureRecorder recorder) async {
+    final ui.Picture picture = recorder.endRecording();
+    final ui.Image image = await picture.toImage(outputWidthPx, outputHeightPx);
+    picture.dispose();
+    try {
+      final ByteData? bytes = await image.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
+      if (bytes == null) {
+        throw StateError("PNG encode returned null byte data.");
+      }
+      return bytes.buffer.asUint8List();
+    } finally {
+      image.dispose();
+    }
   }
 
   /// Renders the full OSG overlay at [tMs] as a transparent PNG of
@@ -126,20 +169,79 @@ class OsgFrameRenderer {
       _drawPreset(canvas, slot, presets[index], tMs, w, h);
     }
 
-    final ui.Picture picture = recorder.endRecording();
-    final ui.Image image = await picture.toImage(outputWidthPx, outputHeightPx);
-    picture.dispose();
-    try {
-      final ByteData? bytes = await image.toByteData(
-        format: ui.ImageByteFormat.png,
-      );
-      if (bytes == null) {
-        throw StateError("PNG encode returned null byte data.");
-      }
-      return bytes.buffer.asUint8List();
-    } finally {
-      image.dispose();
+    return _encodePicturePng(recorder);
+  }
+
+  void _drawPresetHoldState(
+    ui.Canvas canvas,
+    OsgPresetSlot slot,
+    OsgPreset preset,
+    double w,
+    double h,
+  ) {
+    if (!preset.enabled) {
+      return;
     }
+    final bool useSolid =
+        preset.templateBackgroundKind == OsgTemplateBackgroundKind.solid;
+    final ui.Image? templateImage =
+        _templateImageByPresetIndex[slot.presetIndex];
+    if (!useSolid && templateImage == null) {
+      return;
+    }
+
+    final OsgNormRect fr = preset.frame;
+    final double left = fr.x * w;
+    final double top = fr.y * h;
+    final double fw = fr.width * w;
+    final double fh = fr.height * h;
+    if (fw <= 0 || fh <= 0) {
+      return;
+    }
+
+    final double opacity = preset.layerOpacity.clamp(0.0, 1.0);
+    if (opacity <= 0) {
+      return;
+    }
+
+    canvas.save();
+    canvas.translate(left, top);
+    final bool needsLayer = opacity < 1.0;
+    if (needsLayer) {
+      canvas.saveLayer(
+        null,
+        ui.Paint()..color = const ui.Color(0xFFFFFFFF).withValues(alpha: opacity),
+      );
+    }
+
+    final double cornerR = preset.templateCornerRadiusPx(fw, fh);
+    if (cornerR > 0) {
+      canvas.clipRRect(
+        ui.RRect.fromRectAndRadius(
+          ui.Rect.fromLTWH(0, 0, fw, fh),
+          ui.Radius.circular(cornerR),
+        ),
+      );
+    }
+
+    final ui.Rect frameRect = ui.Rect.fromLTWH(0, 0, fw, fh);
+    if (useSolid) {
+      canvas.drawRect(
+        frameRect,
+        ui.Paint()..color = ui.Color(preset.templateSolidArgb),
+      );
+    } else {
+      _drawImageCover(canvas, templateImage!, frameRect);
+    }
+
+    for (final OsgSlot textSlot in preset.slots) {
+      _drawSlotText(canvas, textSlot, fw, fh);
+    }
+
+    if (needsLayer) {
+      canvas.restore();
+    }
+    canvas.restore();
   }
 
   void _drawPreset(

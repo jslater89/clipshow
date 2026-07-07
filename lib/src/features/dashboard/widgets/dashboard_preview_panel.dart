@@ -8,6 +8,7 @@ import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/bake/osg_bake_service.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/bake_recipe_picker_dialog.dart";
+import "package:obs_clipshow/src/features/dashboard/widgets/osg_graphic_export_recipe_picker_dialog.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_preview_hotkeys_layer.dart";
 import "package:obs_clipshow/src/features/dashboard/widgets/dashboard_shared_helpers.dart";
 import "package:obs_clipshow/src/features/playout/clip_player_view.dart";
@@ -17,9 +18,11 @@ import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
 import "package:obs_clipshow/src/features/playout/playout_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
+import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
+import "package:video_player/video_player.dart";
 
 class DashboardPreviewPanel extends StatefulWidget {
   const DashboardPreviewPanel({
@@ -101,6 +104,20 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                 viewModel.semanticTypeIdsOnMedia(selectedItem),
           )
         : null;
+    final PlayoutOutputSize playoutCanvas = viewModel.playoutOutputSize;
+    final double canvasAspect = playoutCanvas.isValid
+        ? playoutCanvas.aspectRatio
+        : PlayoutOutputSize.fallback.aspectRatio;
+    final int previewStartMs = selectedItem != null &&
+            selectedItem.type == MediaListItemType.clip
+        ? selectedItem.clip!.inMs
+        : 0;
+    final int? previewEndMs = selectedItem != null &&
+            selectedItem.type == MediaListItemType.clip
+        ? selectedItem.clip!.outMs
+        : null;
+    final VideoPlayerController? previewTransportController =
+        _previewPlayerController.videoController;
     return Card(
       child: Padding(
         padding: EdgeInsets.all(pad12),
@@ -152,95 +169,146 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                             onVolumeDownRequested: () => viewModel
                                 .nudgeClipVolume(-PlaybackVolumeDefaults.step),
                             onMuteToggleRequested: viewModel.toggleClipMute,
-                            child: Stack(
-                              fit: StackFit.expand,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: <Widget>[
-                                ClipPlayerView(
-                                  clickTogglesPlayback: true,
-                                  controller: _previewPlayerController,
-                                  beforeVideoInitialize:
-                                      viewModel.awaitPreviewPlayerInitGate,
-                                  filePath: workspaceRoot == null
-                                      ? selectedItem.filePath
-                                      : WorkspaceMediaPaths.absoluteMasterPath(
-                                          workspaceRoot,
-                                          selectedItem.filePath,
-                                        ),
-                                  startTimeMs:
-                                      selectedItem.type ==
-                                          MediaListItemType.clip
-                                      ? selectedItem.clip!.inMs
-                                      : 0,
-                                  endTimeMs:
-                                      selectedItem.type ==
-                                          MediaListItemType.clip
-                                      ? selectedItem.clip!.outMs
-                                      : null,
-                                  autoPlay: false,
-                                  showControls: true,
-                                  volume: viewModel.effectiveClipVolume,
-                                  onPositionChanged:
-                                      viewModel.setPreviewPositionMs,
-                                  onPlayingChanged: _onPreviewPlayingChanged,
-                                  videoAreaOverlay: previewOsgClip != null &&
-                                          workspaceRoot != null
-                                      ? OsgPlayoutLayer(
-                                          key: ValueKey<String>(
-                                            "${selectedItem.stableKey}-${viewModel.semanticTagSnapshotForItem(selectedItem)}",
+                                Expanded(
+                                  child: Center(
+                                    child: AspectRatio(
+                                      aspectRatio: canvasAspect,
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          border: Border.all(
+                                            color: Colors.white38,
                                           ),
-                                          mediaType: previewOsgClip.mediaType,
-                                          mediaId: previewOsgClip.mediaId,
-                                          annotationsText:
-                                              previewOsgClip.annotationsText,
-                                          semanticTagSnapshotVersion:
-                                              previewOsgClip
-                                                  .semanticTagSnapshotVersion,
-                                          config: viewModel.osgWorkspaceConfig,
-                                          workspaceRoot: workspaceRoot,
-                                          resolveSemantic:
-                                              (int semanticTypeId) =>
-                                                  viewModel
-                                                      .resolveSemanticTagText(
-                                                    previewOsgClip,
-                                                    semanticTypeId,
+                                        ),
+                                        child: Stack(
+                                          fit: StackFit.expand,
+                                          children: <Widget>[
+                                            ClipPlayerView(
+                                              clickTogglesPlayback: true,
+                                              controller:
+                                                  _previewPlayerController,
+                                              beforeVideoInitialize: viewModel
+                                                  .awaitPreviewPlayerInitGate,
+                                              filePath: workspaceRoot == null
+                                                  ? selectedItem.filePath
+                                                  : WorkspaceMediaPaths
+                                                      .absoluteMasterPath(
+                                                    workspaceRoot,
+                                                    selectedItem.filePath,
                                                   ),
-                                          visible: viewModel.previewOsgPresetVisibility,
-                                        )
-                                      : null,
+                                              startTimeMs: previewStartMs,
+                                              endTimeMs: previewEndMs,
+                                              autoPlay: false,
+                                              showControls: false,
+                                              volume: viewModel
+                                                  .effectiveClipVolume,
+                                              onPositionChanged: viewModel
+                                                  .setPreviewPositionMs,
+                                              onPlayingChanged:
+                                                  _onPreviewPlayingChanged,
+                                              onFirstFrameReady: () {
+                                                if (mounted) {
+                                                  setState(() {});
+                                                }
+                                              },
+                                              canvasAreaOverlay:
+                                                  previewOsgClip != null &&
+                                                      workspaceRoot != null
+                                                  ? OsgPlayoutLayer(
+                                                      key: ValueKey<String>(
+                                                        "${selectedItem.stableKey}-"
+                                                        "${viewModel.semanticTagSnapshotForItem(selectedItem)}",
+                                                      ),
+                                                      mediaType: previewOsgClip
+                                                          .mediaType,
+                                                      mediaId:
+                                                          previewOsgClip.mediaId,
+                                                      annotationsText:
+                                                          previewOsgClip
+                                                              .annotationsText,
+                                                      semanticTagSnapshotVersion:
+                                                          previewOsgClip
+                                                              .semanticTagSnapshotVersion,
+                                                      config: viewModel
+                                                          .osgWorkspaceConfig,
+                                                      workspaceRoot:
+                                                          workspaceRoot,
+                                                      resolveSemantic:
+                                                          (int semanticTypeId) =>
+                                                              viewModel
+                                                                  .resolveSemanticTagText(
+                                                                previewOsgClip,
+                                                                semanticTypeId,
+                                                              ),
+                                                      visible: viewModel
+                                                          .previewOsgPresetVisibility,
+                                                    )
+                                                  : null,
+                                            ),
+                                            if (viewModel
+                                                    .previewOsgRequirementFlashToken >
+                                                0)
+                                              Positioned(
+                                                left: pad12,
+                                                top: pad12,
+                                                child: TransientHudBanner(
+                                                  key: ValueKey<int>(
+                                                    viewModel
+                                                        .previewOsgRequirementFlashToken,
+                                                  ),
+                                                  text: viewModel
+                                                      .previewOsgRequirementFlashText,
+                                                  onDismissed: () => viewModel
+                                                      .clearPreviewOsgRequirementFlash(),
+                                                ),
+                                              ),
+                                            if (viewModel.previewVolumeHudToken >
+                                                0)
+                                              Positioned(
+                                                right: pad12,
+                                                top: pad12,
+                                                child: TransientHudBanner(
+                                                  key: ValueKey<int>(
+                                                    viewModel
+                                                        .previewVolumeHudToken,
+                                                  ),
+                                                  text: viewModel
+                                                      .previewVolumeHudText,
+                                                  onDismissed: viewModel
+                                                      .clearPreviewVolumeHud,
+                                                ),
+                                              ),
+                                            if (_showPreviewHelp)
+                                              _PreviewHelpOverlay(
+                                                showMarkHotkeys:
+                                                    selectedMedia != null &&
+                                                    !isClipSelection,
+                                                isClipPreview: isClipSelection,
+                                                showOsgHotkeys:
+                                                    workspaceRoot != null,
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                if (viewModel.previewOsgRequirementFlashToken > 0)
-                                  Positioned(
-                                    left: pad12,
-                                    top: pad12,
-                                    child: TransientHudBanner(
-                                      key: ValueKey<int>(
-                                        viewModel.previewOsgRequirementFlashToken,
-                                      ),
-                                      text: viewModel.previewOsgRequirementFlashText,
-                                      onDismissed: () => viewModel
-                                          .clearPreviewOsgRequirementFlash(),
-                                    ),
-                                  ),
-                                if (viewModel.previewVolumeHudToken > 0)
-                                  Positioned(
-                                    right: pad12,
-                                    top: pad12,
-                                    child: TransientHudBanner(
-                                      key: ValueKey<int>(
-                                        viewModel.previewVolumeHudToken,
-                                      ),
-                                      text: viewModel.previewVolumeHudText,
-                                      onDismissed:
-                                          viewModel.clearPreviewVolumeHud,
-                                    ),
-                                  ),
-                                if (_showPreviewHelp)
-                                  _PreviewHelpOverlay(
-                                    showMarkHotkeys:
-                                        selectedMedia != null &&
-                                        !isClipSelection,
-                                    isClipPreview: isClipSelection,
-                                    showOsgHotkeys: workspaceRoot != null,
+                                if (previewTransportController != null &&
+                                    previewTransportController
+                                        .value.isInitialized)
+                                  ClipPlayerTransportBar(
+                                    playerController: _previewPlayerController,
+                                    videoController:
+                                        previewTransportController,
+                                    startTimeMs: previewStartMs,
+                                    endTimeMs: previewEndMs,
+                                    onTogglePlayPause: () =>
+                                        _previewPlayerController
+                                            .togglePlayPause(),
+                                    onSeekBy: _previewPlayerController.seekBy,
+                                    onScrub: _previewPlayerController.seekTo,
                                   ),
                               ],
                             ),
@@ -457,6 +525,22 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   icon: const Icon(Icons.movie_creation_outlined),
                   label: const Text("Bake"),
                 ),
+                FilledButton.tonalIcon(
+                  onPressed:
+                      selectedItem == null ||
+                          previewIssue != MediaIssue.none ||
+                          workspaceRoot == null ||
+                          viewModel.osgBakeRecipes.isEmpty
+                      ? null
+                      : () => unawaited(
+                          _startOsgGraphicExport(
+                            context,
+                            viewModel,
+                          ),
+                        ),
+                  icon: const Icon(Icons.image_outlined),
+                  label: const Text("Export OSG Graphics"),
+                ),
                 FilledButton.icon(
                   onPressed:
                       selectedItem == null ||
@@ -639,6 +723,84 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
         SnackBar(content: Text(result.errorMessage ?? "Bake failed.")),
       );
     }
+  }
+
+  Future<void> _startOsgGraphicExport(
+    BuildContext context,
+    DashboardViewModel viewModel,
+  ) async {
+    final OsgBakeRecipe? recipe = await showOsgGraphicExportRecipePickerDialog(
+      context,
+      recipes: viewModel.osgBakeRecipes,
+    );
+    if (recipe == null || !context.mounted) {
+      return;
+    }
+
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext ctx) {
+          return const PopScope(
+            canPop: false,
+            child: AlertDialog(
+              content: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  CircularProgressIndicator(),
+                  SizedBox(width: 16),
+                  Text("Exporting OSG graphics\u2026"),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    final ({String? error, String? savedPath}) exportResult =
+        await viewModel.exportOsgGraphics(recipe: recipe);
+    if (!context.mounted) {
+      return;
+    }
+    Navigator.of(context, rootNavigator: true).pop();
+
+    final String? error = exportResult.error;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error)),
+      );
+      return;
+    }
+    final String? savedPath = exportResult.savedPath;
+    if (savedPath == null) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Exported to ${p.basename(savedPath)}"),
+        showCloseIcon: true,
+        action: SnackBarAction(
+          label: "Reveal",
+          onPressed: () {
+            unawaited(() async {
+              try {
+                await revealFileInFolder(savedPath);
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text("Could not open file manager: $e"),
+                    ),
+                  );
+                }
+              }
+            }());
+          },
+        ),
+      ),
+    );
   }
 
   Future<bool> _confirmDeleteClip(BuildContext context) async {
