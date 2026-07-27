@@ -1,24 +1,24 @@
 # Product Specification: Vanalyst Playout & Telestration Client
 
 ## 1. System Overview
-A custom, local desktop application built to serve as a unified media manager, video playout engine, and telestrator for a solo-operated live broadcast. The application interfaces with **OBS Studio** via WebSockets. **Optional HTTP webhooks** can also be called on playout enter/exit (fixed `video` / `face` / `osg` scene tokens) for external automation. It operates based on a "Workspace" concept, automatically tracking local media files and allowing the operator to cue highlights, trigger scene transitions, and draw over video playback from a single pane of glass without cluttering the OBS source list.
+A custom, local desktop application built to serve as a unified media manager, video playout engine, and telestrator for a solo-operated live broadcast. The application interfaces with **OBS Studio** via WebSockets. **Optional HTTP webhooks** can also be called on playout and OSG Mode transitions (fixed `video` / `face` / `osg_on` / `osg_off` tokens) for external automation. It operates based on a "Workspace" concept, automatically tracking local media files and allowing the operator to cue highlights, trigger scene transitions, and draw over video playback from a single pane of glass without cluttering the OBS source list.
 
 ## 2. Technology Stack
 * **Framework:** Flutter (targeting desktop OS: Windows/Linux)
 * **Video decoding:** `fvp` (hardware-accelerated wrapper for `video_player` via FFmpeg); decoder profiles and verbosity are configurable per workspace
 * **FFmpeg (CLI):** `ffmpeg` / `ffprobe` for thumbnails, duration and frame-rate probing, and bake trim/composite passes
-* **OBS integration:** `obs_websocket` (JSON-RPC–style requests such as `SetCurrentProgramScene`, `SetRecordDirectory`, `StartRecord`, `StopRecord`)
+* **OBS integration:** `obs_websocket` (JSON-RPC–style requests such as `SetCurrentProgramScene`, `GetCurrentProgramScene`, `GetSceneItemId`, `SetSceneItemEnabled`, `SetRecordDirectory`, `StartRecord`, `StopRecord`)
 * **Database:** `sqflite` with **`sqflite_common_ffi`** on desktop (SQLite file per workspace)
 * **Drawing engine:** Flutter `CustomPaint` with gesture-driven strokes (mouse/touch pan)
 * **File system:** `watcher` for monitoring directory changes
 * **Windowing:** `window_manager` for aspect ratio, optional fullscreen, title bar visibility, bounds restore
 
 ## 3. OBS Studio Configuration Requirements
-The application expects a practical OBS scene layout; **Video**, **Face**, and **OSG** scene names are configurable in workspace settings (defaults below).
+The application expects a practical OBS scene layout; **Video** and **Face** program scene names are configurable in workspace settings (defaults below). OSG Mode optionally enables a **named source** on whatever scene is currently program.
 * **WebSocket server:** OBS WebSocket plugin enabled (default port **4455**, password as configured in the app).
-* **Scene: "Face Scene" (default name):** Primary camera and microphone inputs.
+* **Scene: "Face Scene" (default name):** Primary camera and microphone inputs (return target after clip playout).
 * **Scene: "Video Scene" (default name):** A source that shows the app (e.g. Window Capture on the Flutter window), scaled to fit the program canvas (e.g. 1920×1080). Used during clip playout.
-* **Scene: "OSG Scene" (default name):** Window Capture on the same app window during **OSG Mode** (graphics-only, transparent background). Place a background layer under the capture (e.g. Face camera or nested Face scene) so transparency composites correctly.
+* **OSG overlay source (optional):** A scene item (typically Window Capture of the Clipshow window, or a nested scene containing that capture) with a configured **source name**. The operator places that same-named item on every program scene used when entering OSG Mode. Clipshow enables the item on the **current** program scene on enter and disables that same item on exit; program scene is not changed. Enter fails with an error if the source is missing from the current scene.
 
 ## 4. Workspace Management
 * **Definition:** A Workspace is a root directory on the local file system containing all media assets for a specific project or match.
@@ -37,7 +37,7 @@ The application operates in mutually exclusive UI states to prevent broadcast er
     * **Right column (tabs):** **Manage** — video preview (top) and a resizable split to the **tagging** panel (bottom): mark in/out, optional display name, tags, save-clip flow, and preview actions (**Playout**, **Record**, **Bake** and **Export OSG Graphics** when recipes exist). **Capture** — **OBS Capture Mode** in place of Preview+tagging: start/stop recording via WebSocket, **recording folder** (under workspace, ignored during writes) and **output folder** (empty = workspace root); after stop, the finished file is **copied** to the output folder so ingestion sees it once; tags from the panel are applied to the new **master** at stop time. **Bake Queue** (visible when the workspace has bake recipes) — start/pause the bake runner, view running/pending/finished tasks. **Tag Sets** — create and tag **bare tag sets** (no video), assign quick slots (keys 1–5 in OSG Mode), and **Enter OSG Mode**.
 
 ### Workspace settings (capture)
-* **OBS:** Configured **Video** / **Face** / **OSG** scenes (names), connection host/port/password, plus optional **Capture** scene (program scene switched before recording when set).
+* **OBS:** Configured **Video** / **Face** scenes (names), optional **OSG overlay source** name, connection host/port/password, plus optional **Capture** scene (program scene switched before recording when set).
 * **Capture paths:** **Recording folder** (relative, default `recordings`) is kept in **ignored folders** so partial files do not spam ingest; **output folder** (relative, empty = workspace root) receives the copy after recording stops and the staging file is removed. **Output** must not lie inside the **recording** directory tree (validated in app).
 * **Playout record paths:** **Staging** (default `recordings/export`) and **output** (default `export`) for Record playout; both ignored when under the workspace. **Output** must not lie inside **staging**.
 
@@ -66,14 +66,15 @@ The application operates in mutually exclusive UI states to prevent broadcast er
     6. Dashboard returns; **scroll position** is restored when possible.
 
 ### State 3: OSG Mode (graphics mode)
-* **Purpose:** Graphics-only output driven by a **tag set** (semantic tags + workspace OSG presets). No video decoder. Transparent window background for OBS Window Capture on the **OSG** scene.
+* **Purpose:** Graphics-only output driven by a **tag set** (semantic tags + workspace OSG presets). No video decoder. Transparent window background for OBS Window Capture as an overlay source.
 * **Trigger:** **Enter OSG Mode** on the Dashboard **Tag Sets** tab (requires **OSG Mode enabled** in workspace settings and at least one tag set).
 * **Execution sequence:**
-    1. Dashboard is replaced by the OSG Mode surface (transparent background).
-    2. Same window sizing rules as playout (**Playout canvas size**, hidden title bar).
-    3. After the first frame paints, if an **OSG** program scene name is configured, OBS switches to that scene (and/or webhooks with **`osg`** token). When the OSG scene name is empty, OBS program scene is unchanged (manual/nested-scene workflows).
-    4. Operator toggles OSG presets with **6–0** and switches tag sets with **1–5** (quick slots configured on the Tag Sets tab).
-* **Reversion:** **`Escape`** → Dashboard restore (same window restore as playout exit). When an **OSG** program scene name is configured, OBS also switches to **Face**.
+    1. If an **OSG overlay source** is configured (OBS profile enabled + non-empty source name), resolve that source on the **current** OBS program scene (`GetCurrentProgramScene` + `GetSceneItemId`). If missing, abort enter with an operator-visible error (no OSG Mode UI).
+    2. Dashboard is replaced by the OSG Mode surface (transparent background).
+    3. Same window sizing rules as playout (**Playout canvas size**, hidden title bar).
+    4. After the first frame paints, enable the resolved scene item (`SetSceneItemEnabled`) and/or invoke webhooks with an **`osg_on`** token. Program scene is unchanged. When overlay automation is not configured, only webhooks run (if any).
+    5. Operator toggles OSG presets with **6–0** and switches tag sets with **1–5** (quick slots configured on the Tag Sets tab).
+* **Reversion:** **`Escape`** → disable the **same** scene item that was enabled on enter (cached scene + item id), fire **`osg_off`** webhooks, then Dashboard restore (same window restore as playout exit). Does **not** switch OBS program to Face.
 
 ### Record playout (OBS export)
 * **Purpose:** Produce a shareable video file (OBS-encoded program output) from a clip or master playout session—OSGs, telestrator, and live voiceover via the OBS audio chain—without offline ffmpeg rendering.
@@ -143,7 +144,7 @@ Logical “clip” fields map as: **master path** via join to master row; **titl
 * **Record playout export:** Preview **Record** button; OBS record during Video-scene playout; copy to playout output on exit; ignored folders; reveal-in-folder SnackBar.
 * **Bake export:** Preview **Bake** button; offline ffmpeg pipeline with per-frame OSG compositing; bake recipes and queue in dashboard; semantic-tag validation at enqueue; output to playout output folder.
 * **OSG graphic export:** Preview **Export OSG Graphics** button; hold-state PNGs + manifest ZIP via `OsgGraphicExportService`; same semantic validation and clip duration probe as bake.
-* **OSG Mode:** Tag Sets tab; transparent graphics surface; optional OBS **OSG** scene + **`osg`** webhook on enter; **Face** on exit when configured; tag-set quick slots **1–5**, preset toggles **6–0**.
+* **OSG Mode:** Tag Sets tab; transparent graphics surface; optional OBS **overlay source** enable on current program + **`osg_on`** webhook on enter; disable that item + **`osg_off`** webhook on exit; tag-set quick slots **1–5**, preset toggles **6–0**.
 * **Tagging and organization:** Clips in SQLite with **in/out**, tags, optional display names; saved clips and saved-tag workflows.
 * **Filters, search, and autocomplete:** **Untagged** filter and tag filter chips; with **no** filters applied, all matching items are shown (there is no separate **All** chip). Filename/path search and tag search autocomplete.
 * **Preview/playout player:** Shared **`ClipPlayerView`** and hotkey layers for dashboard preview and playout.

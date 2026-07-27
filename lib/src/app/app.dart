@@ -26,7 +26,7 @@ import "package:path/path.dart" as p;
 
 enum PlayoutWindowMode { windowed, fullscreen }
 
-enum _SceneSwitchTarget { face, video, osg }
+enum _SceneSwitchTarget { face, video, osgOn, osgOff }
 
 class ObsClipshowApp extends StatefulWidget {
   const ObsClipshowApp({super.key});
@@ -58,6 +58,8 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   bool _wasMaximizedBeforePlayout = false;
   PlayoutClip? _activeClip;
   OsgModeSession? _activeOsgModeSession;
+  /// Scene item enabled for the current OSG Mode session (disabled on exit).
+  OsgOverlayTarget? _osgOverlayTarget;
   Completer<void>? _playoutFirstFrameCompleter;
   Completer<void>? _osgModeFirstFrameCompleter;
   bool _pendingPlayoutRecord = false;
@@ -127,7 +129,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       return;
     }
     final String nextKey =
-        "${obsConfig.serverAddress}:${obsConfig.port}:${obsConfig.password}:${obsConfig.videoScene}:${obsConfig.faceScene}:${obsConfig.osgScene}";
+        "${obsConfig.serverAddress}:${obsConfig.port}:${obsConfig.password}:${obsConfig.videoScene}:${obsConfig.faceScene}:${obsConfig.osgOverlaySource}";
     if (_obsConfigKey != nextKey) {
       _obsConfigKey = nextKey;
       if (mounted) {
@@ -211,11 +213,38 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       password: obsConfig.password.isEmpty ? null : obsConfig.password,
       videoSceneName: obsConfig.videoScene,
       faceSceneName: obsConfig.faceScene,
-      osgSceneName: obsConfig.osgScene,
     );
   }
 
   Future<void> _enterOsgMode(OsgModeSession session) async {
+    final bool automation = _viewModel.isOsgOverlayAutomationConfigured;
+    OsgOverlayTarget? resolvedTarget;
+
+    if (automation) {
+      final ObsSceneSwitchConfig obsConfig = _viewModel.obsSceneSwitchConfig!;
+      final ObsService service = _buildObsService(obsConfig);
+      try {
+        await service.ensureConnected();
+        resolvedTarget = await service.resolveOsgOverlayInCurrentProgram(
+          obsConfig.osgOverlaySource,
+        );
+        _markObsRequestSuccess();
+      } catch (error, stackTrace) {
+        _markObsRequestFailure();
+        _logger.warning(
+          "OSG overlay source check failed before enter: $error\n$stackTrace",
+        );
+        _showAppSnackBar(
+          error is OsgOverlaySourceNotFoundException
+              ? error.toString()
+              : "Unable to start OSG Mode: OBS overlay source check failed.",
+        );
+        return;
+      } finally {
+        await service.close();
+      }
+    }
+
     _osgModeFirstFrameCompleter = Completer<void>();
     _viewModel.setPlayoutActive(true);
     if (_dashboardScrollController.hasClients) {
@@ -243,7 +272,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       } on TimeoutException {
         _logger.warning(
           "OSG Mode first frame not ready within "
-          "${_playoutFirstFrameTimeout.inSeconds}s; switching OBS anyway.",
+          "${_playoutFirstFrameTimeout.inSeconds}s; enabling OBS overlay anyway.",
         );
         _completeOsgModeFirstFrameGate();
       }
@@ -251,14 +280,32 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     if (!mounted || _activeOsgModeSession == null) {
       return;
     }
-    if (_viewModel.isOsgObsSceneSwitchConfigured) {
-      await _switchToOsgScene();
-    } else {
-      await _runSceneSwitch(
-        target: _SceneSwitchTarget.osg,
-        skipObsProgramSceneSwitch: true,
-      );
+
+    if (automation && resolvedTarget != null) {
+      final ObsSceneSwitchConfig obsConfig = _viewModel.obsSceneSwitchConfig!;
+      final ObsService service = _buildObsService(obsConfig);
+      try {
+        await service.ensureConnected();
+        await service.setOsgOverlayEnabled(resolvedTarget, enabled: true);
+        _osgOverlayTarget = resolvedTarget;
+        _markObsRequestSuccess();
+      } catch (error, stackTrace) {
+        _markObsRequestFailure();
+        _logger.warning(
+          "Unable to enable OSG overlay source: $error\n$stackTrace",
+        );
+        _showAppSnackBar("Unable to enable OSG overlay in OBS: $error");
+        await _exitOsgMode();
+        return;
+      } finally {
+        await service.close();
+      }
     }
+
+    await _runSceneSwitch(
+      target: _SceneSwitchTarget.osgOn,
+      skipObsProgramSceneSwitch: true,
+    );
   }
 
   void _onOsgModeFirstFrameReady() {
@@ -279,9 +326,32 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
   Future<void> _exitOsgMode() async {
     _playoutRootCompositingOverlay.unmount();
     _completeOsgModeFirstFrameGate();
-    if (_viewModel.isOsgObsSceneSwitchConfigured) {
-      await _switchToFaceScene();
+
+    final OsgOverlayTarget? overlay = _osgOverlayTarget;
+    _osgOverlayTarget = null;
+    if (overlay != null) {
+      final ObsSceneSwitchConfig? obsConfig = _viewModel.obsSceneSwitchConfig;
+      if (obsConfig != null && obsConfig.enabled) {
+        final ObsService service = _buildObsService(obsConfig);
+        try {
+          await service.ensureConnected();
+          await service.setOsgOverlayEnabled(overlay, enabled: false);
+          _markObsRequestSuccess();
+        } catch (error, stackTrace) {
+          _markObsRequestFailure();
+          _logger.warning(
+            "Unable to disable OSG overlay source: $error\n$stackTrace",
+          );
+        } finally {
+          await service.close();
+        }
+      }
     }
+    await _runSceneSwitch(
+      target: _SceneSwitchTarget.osgOff,
+      skipObsProgramSceneSwitch: true,
+    );
+
     await windowManager.setFullScreen(false);
     await windowManager.setTitleBarStyle(TitleBarStyle.normal);
     await _unlockAspectRatio();
@@ -626,10 +696,6 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     await _runSceneSwitch(target: _SceneSwitchTarget.face);
   }
 
-  Future<void> _switchToOsgScene() async {
-    await _runSceneSwitch(target: _SceneSwitchTarget.osg);
-  }
-
   Future<void> _runSceneSwitch({
     required _SceneSwitchTarget target,
     bool skipObsProgramSceneSwitch = false,
@@ -645,14 +711,10 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
         await service.ensureConnected();
         if (target == _SceneSwitchTarget.video) {
           await service.switchToVideoScene();
-        } else if (target == _SceneSwitchTarget.osg) {
-          final String osgScene = obsConfig.osgScene.trim();
-          if (osgScene.isNotEmpty) {
-            await service.switchToOsgScene();
-          }
-        } else {
+        } else if (target == _SceneSwitchTarget.face) {
           await service.switchToFaceScene();
         }
+        // OSG Mode uses source enable/disable, not program-scene switching.
         _markObsRequestSuccess();
       } catch (error) {
         _markObsRequestFailure();
@@ -688,10 +750,12 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     required _SceneSwitchTarget target,
   }) async {
     // Fixed tokens for receivers; not tied to OBS scene strings.
+    // video/face = playout scene transitions; osg_on/osg_off = OSG Mode lifecycle.
     final String sceneToken = switch (target) {
       _SceneSwitchTarget.video => "video",
-      _SceneSwitchTarget.osg => "osg",
       _SceneSwitchTarget.face => "face",
+      _SceneSwitchTarget.osgOn => "osg_on",
+      _SceneSwitchTarget.osgOff => "osg_off",
     };
     final Uri uri = Uri.parse(webhook.url);
     final HttpClient client = HttpClient();

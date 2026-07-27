@@ -775,8 +775,15 @@ void main() {
             videoScene: "video",
             faceScene: "face",
             captureScene: "Cap",
-            osgScene: "OSG Scene",
+            osgOverlaySource: "Clipshow OSG",
           ),
+        );
+        final WorkspaceSettingsBundle midSettings = await repository
+            .loadWorkspaceSettings();
+        expect(midSettings.obsSceneSwitchConfig, isNotNull);
+        expect(
+          midSettings.obsSceneSwitchConfig!.osgOverlaySource,
+          "Clipshow OSG",
         );
         await repository.saveObsSceneSwitchConfig(
           const ObsSceneSwitchConfig(
@@ -787,7 +794,7 @@ void main() {
             videoScene: "video2",
             faceScene: "face2",
             captureScene: "",
-            osgScene: "",
+            osgOverlaySource: "",
           ),
         );
 
@@ -832,6 +839,7 @@ void main() {
         expect(settings.obsSceneSwitchConfig!.serverAddress, "10.0.0.30");
         expect(settings.obsSceneSwitchConfig!.enabled, isFalse);
         expect(settings.obsSceneSwitchConfig!.captureScene, "");
+        expect(settings.obsSceneSwitchConfig!.osgOverlaySource, "");
         expect(
           settings.capturePathsSettings.recordingRelativeDir,
           CapturePathsSettings.defaultRecordingRelativeDir,
@@ -1403,7 +1411,7 @@ void main() {
         final List<Map<String, Object?>> versionRow = await upgraded.rawQuery(
           "PRAGMA user_version",
         );
-        expect(versionRow.single["user_version"], 12);
+        expect(versionRow.single["user_version"], 13);
 
         final List<Map<String, Object?>> indexRows = await upgraded.rawQuery(
           """
@@ -1412,6 +1420,15 @@ void main() {
           """,
         );
         expect(indexRows, hasLength(1));
+
+        final List<Map<String, Object?>> sceneSwitchColumns =
+            await upgraded.rawQuery("PRAGMA table_info(scene_switch_profiles);");
+        expect(
+          sceneSwitchColumns.any(
+            (Map<String, Object?> row) => row["name"] == "obs_osg_source",
+          ),
+          isTrue,
+        );
 
         final List<Map<String, Object?>> mtDef = await upgraded.rawQuery(
           "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media_tags'",

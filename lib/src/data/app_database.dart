@@ -12,7 +12,7 @@ class AppDatabase {
     return databaseFactoryFfi.openDatabase(
       workspace.databasePath,
       options: OpenDatabaseOptions(
-        version: 12,
+        version: 13,
         onConfigure: (Database db) async {
           await db.execute("PRAGMA foreign_keys = ON;");
         },
@@ -88,6 +88,9 @@ class AppDatabase {
           }
           if (oldVersion < 12) {
             await _upgradeToV12TagSetsIdempotent(db);
+          }
+          if (oldVersion < 13) {
+            await _addObsOsgSourceColumnIfMissing(db);
           }
         },
       ),
@@ -200,6 +203,28 @@ class AppDatabase {
     }
   }
 
+  Future<void> _addObsOsgSourceColumnIfMissing(Database db) async {
+    final List<Map<String, Object?>> tables = await db.rawQuery("""
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name = 'scene_switch_profiles'
+      """);
+    if (tables.isEmpty) {
+      return;
+    }
+    final List<Map<String, Object?>> columns = await db.rawQuery(
+      "PRAGMA table_info(scene_switch_profiles);",
+    );
+    final bool hasColumn = columns.any(
+      (Map<String, Object?> row) => row["name"] == "obs_osg_source",
+    );
+    if (!hasColumn) {
+      await db.execute("""
+        ALTER TABLE scene_switch_profiles
+        ADD COLUMN obs_osg_source TEXT;
+      """);
+    }
+  }
+
   Future<bool> _mediaTagsSupportsTagSet(Database db) async {
     final List<Map<String, Object?>> rows = await db.rawQuery(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media_tags'",
@@ -273,6 +298,7 @@ class AppDatabase {
         obs_face_scene TEXT,
         obs_capture_scene TEXT,
         obs_osg_scene TEXT,
+        obs_osg_source TEXT,
         webhook_url TEXT,
         webhook_method TEXT CHECK(webhook_method IN ('GET', 'POST')),
         webhook_get_query_param TEXT,

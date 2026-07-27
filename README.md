@@ -11,12 +11,12 @@ Use the dashboard to search, filter, create **clips** (in/out marks on a master 
 - Workspace-scoped library with background ingestion (common container formats under configurable ignored paths).
 - File list with tag and text search, clip editing and bulk tagging.
 - On-screen graphics with semantic tags; preview and playout toggles and a workspace editor.
-- Tag Sets and OSG Mode for graphics-only live output (optional OBS OSG scene).
+- Tag Sets and OSG Mode for graphics-only live output (optional OBS overlay source toggle).
 - Playout with keyboard-driven seek help, end-of-file pause, telestrator (colors, brush, undo), and OSG preset hotkeys.
 - Bake queue for offline clips with composited graphics; bake recipes in workspace settings.
 - Record playout export via OBS (program capture, separate from Capture ingest).
-- Optional OBS WebSocket integration: scene switches during playout, OSG Mode, and capture; recording path staging with copy-to-output ingest workflow.
-- Optional webhooks with fixed `video`, `osg`, and `face` tokens for companion automation.
+- Optional OBS WebSocket integration: scene switches during playout and capture; OSG Mode overlay source enable/disable; recording path staging with copy-to-output ingest workflow.
+- Optional webhooks with fixed `video`, `face`, `osg_on`, and `osg_off` tokens for companion automation.
 - Workspace settings: telestrator defaults, decoder tuning, OBS and webhook profiles, capture and export paths, JSON metadata export.
 
 ## Requirements
@@ -24,7 +24,7 @@ Use the dashboard to search, filter, create **clips** (in/out marks on a master 
 - **Flutter** (see `pubspec.yaml` for the SDK constraint).
 - **Desktop:** Linux and Windows are the current targets for this repository; building for other platforms may require extra validation.
 - **FFmpeg:** `ffmpeg` and `ffprobe` on your `PATH` for thumbnails, duration probing, and bake export—install via your OS package manager or [winget](https://winget.run/pkg/Gyan/FFmpeg) on Windows (`Gyan.FFmpeg`). Details are in [MANUAL.md](MANUAL.md) §2.2.
-- **OBS Studio** when you use capture, scene switching, OSG Mode scene automation, or record playout (WebSocket, typically port 4455).
+- **OBS Studio** when you use capture, scene switching, OSG Mode overlay automation, or record playout (WebSocket, typically port 4455).
 
 ## Run from source
 

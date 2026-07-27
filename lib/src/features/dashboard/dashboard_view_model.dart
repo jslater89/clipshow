@@ -689,13 +689,15 @@ class DashboardViewModel extends ChangeNotifier {
   /// (independent of the current dashboard selection or quick slots).
   bool canEnterOsgModeForTagSet(TagSet tagSet) => osgModeEnabled;
 
-  /// True when OBS integration is enabled and an OSG program scene is configured
-  /// for automatic switching on OSG Mode enter/exit.
-  bool get isOsgModeBroadcastEnabled => isOsgObsSceneSwitchConfigured;
+  /// True when OBS integration is enabled and an OSG overlay source is
+  /// configured for enable/disable on OSG Mode enter/exit.
+  bool get isOsgModeBroadcastEnabled => isOsgOverlayAutomationConfigured;
 
-  bool get isOsgObsSceneSwitchConfigured {
+  bool get isOsgOverlayAutomationConfigured {
     final ObsSceneSwitchConfig? config = obsSceneSwitchConfig;
-    return config != null && config.enabled && config.osgScene.trim().isNotEmpty;
+    return config != null &&
+        config.enabled &&
+        config.osgOverlaySource.trim().isNotEmpty;
   }
 
   void clearPreviewOsgRequirementFlash() {
@@ -2563,7 +2565,8 @@ class DashboardViewModel extends ChangeNotifier {
                   "videoScene": settings.obsSceneSwitchConfig!.videoScene,
                   "faceScene": settings.obsSceneSwitchConfig!.faceScene,
                   "captureScene": settings.obsSceneSwitchConfig!.captureScene,
-                  "osgScene": settings.obsSceneSwitchConfig!.osgScene,
+                  "osgOverlaySource":
+                      settings.obsSceneSwitchConfig!.osgOverlaySource,
                 },
           "webhooks": settings.webhookSceneSwitchConfigs
               .map(

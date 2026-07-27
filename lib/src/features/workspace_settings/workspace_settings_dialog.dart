@@ -30,7 +30,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
   final TextEditingController _obsFaceSceneController = TextEditingController();
   final TextEditingController _obsCaptureSceneController =
       TextEditingController();
-  final TextEditingController _obsOsgSceneController = TextEditingController();
+  final TextEditingController _obsOsgOverlaySourceController =
+      TextEditingController();
   final TextEditingController _captureRecordingDirController =
       TextEditingController();
   final TextEditingController _captureOutputDirController =
@@ -79,7 +80,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
     _obsVideoSceneController.dispose();
     _obsFaceSceneController.dispose();
     _obsCaptureSceneController.dispose();
-    _obsOsgSceneController.dispose();
+    _obsOsgOverlaySourceController.dispose();
     _captureRecordingDirController.dispose();
     _captureOutputDirController.dispose();
     _playoutRecordStagingController.dispose();
@@ -178,7 +179,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
       _obsVideoSceneController.text = obsConfig.videoScene;
       _obsFaceSceneController.text = obsConfig.faceScene;
       _obsCaptureSceneController.text = obsConfig.captureScene;
-      _obsOsgSceneController.text = obsConfig.osgScene;
+      _obsOsgOverlaySourceController.text = obsConfig.osgOverlaySource;
       final CapturePathsSettings capturePaths = viewModel.capturePathsSettings;
       _captureRecordingDirController.text = capturePaths.recordingRelativeDir;
       _captureOutputDirController.text = capturePaths.outputRelativeDir;
@@ -743,7 +744,9 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
                 title: const Text("OSG Mode Enabled"),
                 subtitle: Text(
                   "When enabled, Enter OSG Mode is available on the Tag Sets tab. "
-                  "Leave the OBS OSG Scene name empty (§ OBS) to control program scenes manually—for example nested scenes with and without graphics.",
+                  "Optional OBS overlay automation uses the OSG Overlay Source "
+                  "name on the Scene Switch tab (enabled on the current program "
+                  "scene when entering OSG Mode).",
                   style: theme.textTheme.bodySmall,
                 ),
                 value: viewModel.osgModeEnabled,
@@ -996,12 +999,15 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
               ),
               SizedBox(height: _gap(context)),
               TextField(
-                controller: _obsOsgSceneController,
+                controller: _obsOsgOverlaySourceController,
                 decoration: const InputDecoration(
-                  labelText: "OSG Scene (optional)",
+                  labelText: "OSG Overlay Source (optional)",
                   helperText:
-                      "Program scene switched on OSG Mode enter/exit when set. "
-                      "Leave empty for manual OBS (nested scenes).",
+                      "Source name enabled on the current OBS program scene "
+                      "when entering OSG Mode; disabled on Escape. Program "
+                      "scene is unchanged. The source must exist on every "
+                      "scene you enter from, or enter fails. Leave blank to "
+                      "disable overlay automation.",
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -1020,7 +1026,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
                       videoScene: _obsVideoSceneController.text.trim(),
                       faceScene: _obsFaceSceneController.text.trim(),
                       captureScene: _obsCaptureSceneController.text.trim(),
-                      osgScene: _obsOsgSceneController.text.trim(),
+                      osgOverlaySource:
+                          _obsOsgOverlaySourceController.text.trim(),
                     ),
                   );
                 },

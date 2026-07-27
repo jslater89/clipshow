@@ -40,7 +40,7 @@ Clipshow does not require OBS Studio. The library, dashboard, Manage mode, and p
 
 Enable OBS’s WebSocket server (default port 4455; use a password in OBS if you configure one in Clipshow). The app uses that connection for program scene switches during playout and, when you use Capture, for recording control.
 
-For the integration to make sense visually, OBS should expose program scenes you can map in Clipshow: one for your live look when you are *not* playing a clip (**Face**), one where this application’s window is captured for **clip playout** (**Video**), and optionally one for **graphics-only OSG Mode** (**OSG**) with a background layer under a transparent Window Capture. You choose the actual scene names on the **Scene Switch** tab in Workspace settings (§11.3); defaults are “Face Scene,” “Video Scene,” and “OSG Scene.”
+For the integration to make sense visually, OBS should expose program scenes you can map in Clipshow: one for your live look when you are *not* playing a clip (**Face**), and one where this application’s window is captured for **clip playout** (**Video**). For **OSG Mode**, configure an optional **OSG Overlay Source** name—a scene item (Window Capture of Clipshow, or a nested scene that contains it) that you place on every program scene you might enter OSG Mode from. Clipshow enables that source on the current program scene and leaves program unchanged. You choose the Video/Face scene names and overlay source on the **Scene Switch** tab in Workspace settings (§11.3); defaults for the program scenes are “Face Scene” and “Video Scene.”
 
 > Screenshot (placeholder): OBS scene list with Face and Video scenes, and the WebSocket server settings panel.
 
@@ -190,9 +190,9 @@ This is separate from **Export OSG presets (ZIP)** in the on-screen graphics edi
 
 The **Tag Sets** tab manages **bare tag sets**—named bundles of tags and annotations with no video file. Use them to pre-build data-driven on-screen graphics (OSGs) that read semantic tag values from the active tag set.
 
-Create tag sets, attach tags (with optional semantic types), and assign up to five **quick slots** (keys **1–5** while in OSG Mode). Enable **OSG Mode** on the **On-Screen Graphics** tab in Workspace settings (§11.2). **Enter OSG Mode** switches the app to a transparent full-window graphics surface. When OBS integration is enabled and an **OSG Scene** name is set, Clipshow selects that program scene after the first frame paints and returns to the configured face scene on **Escape**; leave **OSG Scene** empty to control OBS yourself (for example nested scenes with and without the graphics layer). Hotkeys **6–0** toggle OSG presets; **1–5** switch among quick-slot tag sets.
+Create tag sets, attach tags (with optional semantic types), and assign up to five **quick slots** (keys **1–5** while in OSG Mode). Enable **OSG Mode** on the **On-Screen Graphics** tab in Workspace settings (§11.2). **Enter OSG Mode** switches the app to a transparent full-window graphics surface. When OBS integration is enabled and an **OSG Overlay Source** is set, Clipshow looks up that source on the **current** OBS program scene, enables it after the first frame paints, and disables the same item on **Escape**—program scene is not switched. If the source is missing from the current scene, enter fails with an error. Leave the overlay source empty to skip OBS overlay automation (webhooks may still fire). Hotkeys **6–0** toggle OSG presets; **1–5** switch among quick-slot tag sets.
 
-Build an **OSG** scene in OBS with a background layer (for example your camera or a nested Face scene) under a Window Capture of Clipshow’s window so transparency composites correctly. You can nest that scene inside other program layouts and switch between “OSG on” and “OSG off” variants manually.
+Build each live look in OBS with your camera (or other) background and a same-named Clipshow Window Capture (or nested overlay scene) so OSG Mode can sit over stage, booth, or any other program scene.
 
 ---
 
@@ -364,11 +364,11 @@ The dialog has three tabs. Each section has its own **Save** (or **Apply**) cont
 
 Scene switching is modeled as **profiles** shown at the top of the tab: one **OBS** connection plus any number of **HTTP webhooks**. Each profile can be enabled or disabled without deleting it.
 
-**OBS** — WebSocket address, port, password, and **program** scene names for **video** (clip playout), **face** (your live/camera layout), optionally **osg** (automatic OSG Mode enter/exit), and optionally **capture** (switched before OBS recording starts in Capture mode—§8). An empty **OSG Scene** leaves program scene unchanged during OSG Mode—use that for nested-scene workflows. **Save OBS** applies that block.
+**OBS** — WebSocket address, port, password, and **program** scene names for **video** (clip playout), **face** (return after playout), optionally **OSG Overlay Source** (scene-item name enabled on the current program scene during OSG Mode—§7), and optionally **capture** (switched before OBS recording starts in Capture mode—§8). An empty overlay source disables OSG overlay automation. **Save OBS** applies that block.
 
 **OBS Paths** — **Capture Recording** and **Capture Output** for Capture mode (§8). **Playout Record** is staging for **Record** playout (§9.7); default `recordings/export`. **Playout Output** is where finished Record and Bake exports land (default `export`). Playout output must not sit inside playout staging. **Save Paths** persists all path fields; each path under the workspace is auto-added to **ignored folders** when not already covered by an existing ignored prefix.
 
-**Webhooks** — HTTP endpoints that fire on the same transitions as OBS (method, URL, and body/query shape). The payload value is a fixed token—**video** when entering Playout, **osg** when entering OSG Mode, and **face** when leaving either—under your chosen query parameter or JSON/form key (not your OBS scene names).
+**Webhooks** — HTTP endpoints that fire on playout and OSG Mode transitions (method, URL, and body/query shape). The payload value is a fixed token—**video** when entering Playout, **face** when leaving Playout, **osg_on** when entering OSG Mode, and **osg_off** when leaving OSG Mode—under your chosen query parameter or JSON/form key (not your OBS scene names).
 
 Invalid capture/output pairings are blocked or explained inline when you save paths.
 
@@ -416,7 +416,7 @@ Keep `**obs_clipshow.db`** at the workspace root together with your media tree. 
 
 ### 13.7 Webhooks or companion automation out of sync
 
-Confirm each webhook entry is enabled, URLs are reachable, and method and body or query settings match what your receiver expects (§11.3). Payload values are the literals **video** (enter Playout), **osg** (enter OSG Mode), and **face** (leave either)—not your OBS scene names. Webhooks fire on the same transitions as OBS **program** scene switches when OBS integration is enabled. Each transition attempts every enabled webhook once, and failures are logged rather than retried automatically.
+Confirm each webhook entry is enabled, URLs are reachable, and method and body or query settings match what your receiver expects (§11.3). Payload values are the literals **video** (enter Playout), **face** (leave Playout), **osg_on** (enter OSG Mode), and **osg_off** (leave OSG Mode)—not your OBS scene names. Playout webhooks align with OBS program scene switches when OBS integration is enabled; OSG Mode webhooks track overlay/lifecycle, not a Face scene cut. Each transition attempts every enabled webhook once, and failures are logged rather than retried automatically.
 
 ### 13.8 Bake failed or blocked
 
