@@ -5,7 +5,7 @@ import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 
 /// Serialized OSG graphic export manifest schema version.
-const int osgGraphicExportSchemaVersion = 1;
+const int osgGraphicExportSchemaVersion = 2;
 
 /// Manifest entry name inside the export ZIP.
 const String osgGraphicExportManifestEntry = "manifest.json";
@@ -55,8 +55,15 @@ Map<String, Object?> osgGraphicExportMotionBlock({
   required double frameWidthPx,
   required double frameHeightPx,
   required int durationMs,
+  required int fadeDurationMs,
   required String easing,
 }) {
+  final int transitionMs = OsgPreset.clampVisibilityDurationMs(durationMs);
+  final int fadeMs = OsgPreset.effectiveVisibilityFadeDurationMs(
+    fadeMs: fadeDurationMs,
+    transitionMs: transitionMs,
+    motion: motion,
+  );
   return <String, Object?>{
     "motion": motion.name,
     "slideDistanceNorm": OsgPreset.clampVisibilitySlideDistanceNorm(
@@ -68,7 +75,8 @@ Map<String, Object?> osgGraphicExportMotionBlock({
       frameWidthPx: frameWidthPx,
       frameHeightPx: frameHeightPx,
     ),
-    "durationMs": OsgPreset.clampVisibilityDurationMs(durationMs),
+    "durationMs": transitionMs,
+    "fadeDurationMs": fadeMs,
     "easing": easing,
   };
 }
@@ -142,6 +150,7 @@ Map<String, Object?> osgGraphicExportSlotManifest({
       frameWidthPx: frameWidthPx,
       frameHeightPx: frameHeightPx,
       durationMs: preset.visibilityEnterDurationMs,
+      fadeDurationMs: preset.visibilityEnterFadeDurationMs,
       easing: "easeOutCubic",
     ),
     "exit": osgGraphicExportMotionBlock(
@@ -150,6 +159,7 @@ Map<String, Object?> osgGraphicExportSlotManifest({
       frameWidthPx: frameWidthPx,
       frameHeightPx: frameHeightPx,
       durationMs: preset.visibilityExitDurationMs,
+      fadeDurationMs: preset.visibilityExitFadeDurationMs,
       easing: "easeInCubic",
     ),
     "cues": slotCues

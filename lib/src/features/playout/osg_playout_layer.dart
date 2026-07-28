@@ -264,6 +264,10 @@ class _OsgSinglePresetLayerState extends State<_OsgSinglePresetLayer>
                 exitSlideDistanceNorm: preset.visibilityExitSlideDistanceNorm,
                 frameWidthPx: fw,
                 frameHeightPx: fh,
+                enterDurationMs: preset.visibilityEnterDurationMs,
+                exitDurationMs: preset.visibilityExitDurationMs,
+                enterFadeDurationMs: preset.visibilityEnterFadeDurationMs,
+                exitFadeDurationMs: preset.visibilityExitFadeDurationMs,
               );
           final Widget templateStack = Stack(
             clipBehavior: Clip.none,

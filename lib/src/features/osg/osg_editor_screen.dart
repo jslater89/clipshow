@@ -72,6 +72,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
   late OsgWorkspaceConfig _draftOsg;
   late TabController _tabController;
   late AnimationController _motionPreviewSequence;
+  final ScrollController _semanticTypesScrollController = ScrollController();
   List<String> _systemFontNames = <String>[];
   bool _systemFontsLoading = true;
   bool _motionPreviewActive = false;
@@ -93,11 +94,6 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
       duration: const Duration(milliseconds: 1080),
     );
     _motionPreviewSequence.addStatusListener(_onMotionPreviewSequenceStatus);
-    _motionPreviewSequence.addListener(() {
-      if (mounted) {
-        setState(() {});
-      }
-    });
     _tabController.addListener(_onOsgEditorTabChanged);
   }
 
@@ -129,7 +125,16 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
         setState(() {
           _motionPreviewActive = false;
         });
-        _motionPreviewSequence.value = 0;
+        // Defer reset: setting value inside a status callback re-enters
+        // notifyListeners/status while the controller is still notifying.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) {
+            return;
+          }
+          if (!_motionPreviewActive && !_motionPreviewSequence.isAnimating) {
+            _motionPreviewSequence.value = 0;
+          }
+        });
       }
     }
   }
@@ -216,6 +221,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
     _tabController.dispose();
     _motionPreviewSequence.removeStatusListener(_onMotionPreviewSequenceStatus);
     _motionPreviewSequence.dispose();
+    _semanticTypesScrollController.dispose();
     super.dispose();
   }
 
@@ -520,7 +526,9 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                         const SizedBox(height: 4),
                         Expanded(
                           child: Scrollbar(
+                            controller: _semanticTypesScrollController,
                             child: ListView(
+                              controller: _semanticTypesScrollController,
                               padding: EdgeInsets.zero,
                               children: vm.tagSemanticTypes
                                   .map(
@@ -754,21 +762,30 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                           ),
                           const SizedBox(height: 4),
                           Expanded(
-                            child: OsgPresetCanvasPreview(
-                              playoutOutputSize: vm.playoutOutputSize,
-                              workspaceRoot: widget.workspaceRoot,
-                              preset: _draftOsg.workspacePresets[index],
-                              interaction: OsgEditorPreviewInteraction.frame,
-                              graphicLocalLayout: false,
-                              dimOutsideFrame: false,
-                              applyLayerOpacity: true,
-                              semanticTypeNamesById: semanticPreviewNames,
-                              motionPreviewSample:
-                                  _motionPreviewSampleForTab(index),
-                              onFrameChanged: (OsgNormRect next) {
-                                final OsgPreset p =
-                                    _draftOsg.workspacePresets[index];
-                                _replacePreset(index, p.copyWith(frame: next));
+                            child: AnimatedBuilder(
+                              animation: _motionPreviewSequence,
+                              builder: (BuildContext context, Widget? child) {
+                                return OsgPresetCanvasPreview(
+                                  playoutOutputSize: vm.playoutOutputSize,
+                                  workspaceRoot: widget.workspaceRoot,
+                                  preset: _draftOsg.workspacePresets[index],
+                                  interaction:
+                                      OsgEditorPreviewInteraction.frame,
+                                  graphicLocalLayout: false,
+                                  dimOutsideFrame: false,
+                                  applyLayerOpacity: true,
+                                  semanticTypeNamesById: semanticPreviewNames,
+                                  motionPreviewSample:
+                                      _motionPreviewSampleForTab(index),
+                                  onFrameChanged: (OsgNormRect next) {
+                                    final OsgPreset p =
+                                        _draftOsg.workspacePresets[index];
+                                    _replacePreset(
+                                      index,
+                                      p.copyWith(frame: next),
+                                    );
+                                  },
+                                );
                               },
                             ),
                           ),
@@ -1023,7 +1040,9 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
             Text(
               "Slide distance is percent of the overlay frame along the chosen axis "
               "(above 100% travels farther than one frame width or height). "
-              "Durations are in milliseconds (80–4000). "
+              "Enter/Exit Duration is the full transition (80–4000 ms). "
+              "When a slide is selected, Fade Duration may be shorter so the fade "
+              "finishes while motion continues. "
               "Preview motion assumes the overlay is on screen: it plays exit, pauses, then enter.",
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -1072,7 +1091,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                           OsgPresetVisibilityMotion.none) ...<Widget>[
                         const SizedBox(height: 6),
                         Text(
-                          "Enter slide",
+                          "Enter Slide",
                           style: Theme.of(context).textTheme.labelSmall,
                         ),
                         Slider(
@@ -1113,6 +1132,43 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                           ),
                         ),
                       ),
+                      if (preset.visibilityEnterMotion !=
+                          OsgPresetVisibilityMotion.none) ...<Widget>[
+                        const SizedBox(height: 6),
+                        Text(
+                          "Enter Fade Duration",
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                        Builder(
+                          builder: (BuildContext context) {
+                            final int enterDur =
+                                OsgPreset.clampVisibilityDurationMs(
+                              preset.visibilityEnterDurationMs,
+                            );
+                            final int enterFade =
+                                OsgPreset.effectiveVisibilityFadeDurationMs(
+                              fadeMs: preset.visibilityEnterFadeDurationMs,
+                              transitionMs: enterDur,
+                              motion: preset.visibilityEnterMotion,
+                            );
+                            return Slider(
+                              value: enterFade.toDouble(),
+                              min: 80,
+                              max: enterDur.toDouble(),
+                              divisions: enterDur <= 80
+                                  ? 1
+                                  : ((enterDur - 80) / 80).round().clamp(1, 49),
+                              label: "$enterFade ms",
+                              onChanged: (double v) => _replacePreset(
+                                index,
+                                preset.copyWith(
+                                  visibilityEnterFadeDurationMs: v.round(),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1158,7 +1214,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                           OsgPresetVisibilityMotion.none) ...<Widget>[
                         const SizedBox(height: 6),
                         Text(
-                          "Exit slide",
+                          "Exit Slide",
                           style: Theme.of(context).textTheme.labelSmall,
                         ),
                         Slider(
@@ -1199,6 +1255,43 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
                           ),
                         ),
                       ),
+                      if (preset.visibilityExitMotion !=
+                          OsgPresetVisibilityMotion.none) ...<Widget>[
+                        const SizedBox(height: 6),
+                        Text(
+                          "Exit Fade Duration",
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                        Builder(
+                          builder: (BuildContext context) {
+                            final int exitDur =
+                                OsgPreset.clampVisibilityDurationMs(
+                              preset.visibilityExitDurationMs,
+                            );
+                            final int exitFade =
+                                OsgPreset.effectiveVisibilityFadeDurationMs(
+                              fadeMs: preset.visibilityExitFadeDurationMs,
+                              transitionMs: exitDur,
+                              motion: preset.visibilityExitMotion,
+                            );
+                            return Slider(
+                              value: exitFade.toDouble(),
+                              min: 80,
+                              max: exitDur.toDouble(),
+                              divisions: exitDur <= 80
+                                  ? 1
+                                  : ((exitDur - 80) / 80).round().clamp(1, 49),
+                              label: "$exitFade ms",
+                              onChanged: (double v) => _replacePreset(
+                                index,
+                                preset.copyWith(
+                                  visibilityExitFadeDurationMs: v.round(),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ],
                   ),
                 ),

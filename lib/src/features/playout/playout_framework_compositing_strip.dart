@@ -9,6 +9,10 @@ import "package:flutter/material.dart";
 /// tunable constants below. A 1px opaque strip in this slot does not fix the
 /// FVP/Linux chroma bug; this corner paint path does. Used for playout and
 /// OSG Mode on Linux.
+///
+/// Painted in all four corners to nudge the compositor off a broken fast path
+/// (small transparent PNGs / non-layer alpha) onto a working slow path—large
+/// or permanently layer-opaque OSGs rarely need this.
 const bool kPlayoutFrameworkRootCompositingStrip = true;
 
 /// Diagonal strip half-width before rotation (~Banner `_kOffset`).
@@ -94,9 +98,7 @@ class _PlayoutRootCompositingShimOverlay extends StatelessWidget {
       height: size.height,
       child: IgnorePointer(
         child: CustomPaint(
-          foregroundPainter: _PlayoutCompositingCornerPainter(
-            layoutDirection: Directionality.of(context),
-          ),
+          foregroundPainter: const _PlayoutCompositingCornerPainter(),
           child: SizedBox(
             width: size.width,
             height: size.height,
@@ -107,11 +109,19 @@ class _PlayoutRootCompositingShimOverlay extends StatelessWidget {
   }
 }
 
-/// Minimal [BannerPainter]-style corner paint (top-end, LTR layout).
+/// Minimal [BannerPainter]-style corner paint in all four corners.
 class _PlayoutCompositingCornerPainter extends CustomPainter {
-  const _PlayoutCompositingCornerPainter({required this.layoutDirection});
+  const _PlayoutCompositingCornerPainter();
 
-  final TextDirection layoutDirection;
+  /// Origin + rotation for each corner, matching Flutter [BannerLocation] LTR
+  /// transforms (topStart / topEnd / bottomStart / bottomEnd).
+  static const List<({double dxFactor, double dyFactor, double rotation})>
+      _corners = <({double dxFactor, double dyFactor, double rotation})>[
+    (dxFactor: 0, dyFactor: 0, rotation: -math.pi / 4), // top-start
+    (dxFactor: 1, dyFactor: 0, rotation: math.pi / 4), // top-end
+    (dxFactor: 0, dyFactor: 1, rotation: -math.pi / 4), // bottom-start
+    (dxFactor: 1, dyFactor: 1, rotation: math.pi / 4), // bottom-end
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -124,47 +134,40 @@ class _PlayoutCompositingCornerPainter extends CustomPainter {
       height,
     );
 
-    canvas.save();
-    canvas.translate(_translationX(size.width), 0);
-    canvas.rotate(_rotation);
-
+    Paint? shadowPaint;
     if (kPlayoutCompositingShimDrawShadow) {
-      canvas.drawRect(
-        stripRect,
-        Paint()
-          ..color = kPlayoutCompositingShimShadowColor
-          ..maskFilter = MaskFilter.blur(
-            BlurStyle.normal,
-            kPlayoutCompositingShimShadowBlur,
-          ),
-      );
+      shadowPaint = Paint()
+        ..color = kPlayoutCompositingShimShadowColor
+        ..maskFilter = MaskFilter.blur(
+          BlurStyle.normal,
+          kPlayoutCompositingShimShadowBlur,
+        );
     }
+    Paint? fillPaint;
     if (kPlayoutCompositingShimDrawFill) {
-      canvas.drawRect(
-        stripRect,
-        Paint()..color = kPlayoutCompositingShimFillColor,
-      );
+      fillPaint = Paint()..color = kPlayoutCompositingShimFillColor;
     }
 
-    canvas.restore();
-  }
-
-  double _translationX(double width) {
-    return switch (layoutDirection) {
-      TextDirection.rtl => 0,
-      TextDirection.ltr => width,
-    };
-  }
-
-  double get _rotation {
-    return switch (layoutDirection) {
-      TextDirection.rtl => -math.pi / 4,
-      TextDirection.ltr => math.pi / 4,
-    };
+    for (final ({double dxFactor, double dyFactor, double rotation}) corner
+        in _corners) {
+      canvas.save();
+      canvas.translate(
+        corner.dxFactor * size.width,
+        corner.dyFactor * size.height,
+      );
+      canvas.rotate(corner.rotation);
+      if (shadowPaint != null) {
+        canvas.drawRect(stripRect, shadowPaint);
+      }
+      if (fillPaint != null) {
+        canvas.drawRect(stripRect, fillPaint);
+      }
+      canvas.restore();
+    }
   }
 
   @override
   bool shouldRepaint(covariant _PlayoutCompositingCornerPainter oldDelegate) {
-    return oldDelegate.layoutDirection != layoutDirection;
+    return false;
   }
 }

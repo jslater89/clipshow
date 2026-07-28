@@ -62,7 +62,7 @@ Use Open workspace in the top bar (folder icon) to choose a directory. The app r
 
 ### 3.2 Ingestion
 
-While a workspace is open, the app watches the tree for supported video files. Creating, editing, or removing a file under the workspace updates the corresponding **master** row and refreshes the file list; you do not import files through a separate dialog. (Files added while Clipshow is closed will be scanned on application start.) Paths configured as ignored folders on the **Workspace and Canvas** tab (§11.1) are skipped together with their subtrees, which keeps scratch or in-progress capture directories out of the library.
+While a workspace is open, the app watches the tree for supported video files. Creating, editing, or removing a file under the workspace updates the corresponding **master** row and refreshes the file list; you do not import files through a separate dialog. (Files added while Clipshow is closed will be scanned on application start.) Large copies may take a couple of seconds after the last write before size/duration settle in the list—MODIFY events are debounced so in-progress transfers do not thrash the database. Paths configured as ignored folders on the **Workspace and Canvas** tab (§11.1) are skipped together with their subtrees, which keeps scratch or in-progress capture directories out of the library.
 
 The built-in supported extensions are `.mp4`, `.mov`, `.mkv`, `.avi`, and `.webm`.
 
@@ -124,7 +124,7 @@ When the workspace defines **on-screen graphics**, the preview can draw those ov
 
 Scrub with the timeline and transport controls; clicking the video toggles play/pause. **Mark In** and **Mark Out** stamp the current playhead into working marks (shown on the buttons). Setting Mark In after Mark Out clears Mark Out if the pair would be invalid. **Save clip** persists a new **clip** row from those marks on the selected master; if both marks exist, Mark Out must be later than Mark In. Mark Out may stay unset for an open-ended clip. Keyboard shortcuts **I**, **O**, and **S** mirror Mark In, Mark Out, and Save clip when focus is on the player—click the video surface if shortcuts stop responding.
 
-**Trash file** confirms, then moves the underlying video to the system trash when possible (otherwise a fallback folder under the workspace), removes the master from the database, and drops clips that depended on that file.
+**Trash file** confirms, then moves the underlying video to the system trash when possible (otherwise a fallback folder under the workspace), removes the master from the database, and drops clips that depended on that file. If the video is already missing from disk, a second confirm offers to remove the orphaned master (and its clips) from the library without touching the filesystem.
 
 ### 6.3 With a clip selected
 
@@ -178,9 +178,9 @@ When the workspace has bake recipes, the **Bake Queue** tab shows the runner (**
 Each distinct OSG slot referenced by the recipe becomes one **playout-canvas-sized** transparent PNG (`osg6.png` … `osg0.png`, matching hotkeys **6–0**). The ZIP also contains **`manifest.json`** with:
 
 - **Canvas** size and **source clip** identity (`fileName`, `workspaceRelativePath` under the workspace root), plus range (`inMs`, `outMs`, `durationMs`) used to resolve timing
-- Per slot: **`frameNorm`** and **`frameCanvasPx`** (placement), **`enter`** / **`exit`** motion (`slideDistanceNorm`, **`slideDistanceCanvasPx`**, duration, easing), **`cues`** (raw bake anchors plus resolved `inResolvedMs` / `outResolvedMs` and enter/exit animation bounds), and resolved **text**
+- Per slot: **`frameNorm`** and **`frameCanvasPx`** (placement), **`enter`** / **`exit`** motion (`slideDistanceNorm`, **`slideDistanceCanvasPx`**, **`durationMs`**, **`fadeDurationMs`**, easing), **`cues`** (raw bake anchors plus resolved `inResolvedMs` / `outResolvedMs` and enter/exit animation bounds), and resolved **text**
 
-Slide distance in pixels is along the motion axis, computed from the preset frame size on the canvas (same rules as playout and bake). Timing in the manifest matches the bake recipe resolved against the selected clip; you place and keyframe in the NLE.
+Slide distance in pixels is along the motion axis, computed from the preset frame size on the canvas (same rules as playout and bake). **`durationMs`** is the full transition; **`fadeDurationMs`** may be shorter when the motion includes a slide (fade and slide start together). Timing in the manifest matches the bake recipe resolved against the selected clip; you place and keyframe in the NLE.
 
 This is separate from **Export OSG presets (ZIP)** in the on-screen graphics editor, which shares preset templates and JSON between workspaces.
 
@@ -319,6 +319,7 @@ For each preset you can:
 - **Place the frame** — In the **screen** preview (right), drag the overlay on the gray canvas and resize with the corner handle, or type **X**, **Y**, **W**, and **H** in playout canvas pixels. The frame’s aspect follows the template (image pixels or solid aspect).
 - **Add text slots** — In the **template-only** preview (left), drag boxes and resize, or edit position and size as percentages of the template; slot **Source** can be fixed text, **Tag value** (semantic type), or **Annotation** (from the selected item’s annotation field in the Tags card). Adjust font size (% of template height), alignment, and color.
 - Set **layer opacity**, optional **rounded corners** on the template, and **required semantic tags** — if the current media row does not satisfy those tag types, the preset stays hidden even when toggled on.
+- Configure **Show / Hide Motion**: enter and exit as **Fade Only** or **Fade + slide** from/to an edge. **Enter/Exit Duration** is the full transition (slide window). When a slide is selected, **Enter/Exit Fade Duration** may be shorter so the fade finishes while motion continues (both start together; remaining slide is fully opaque on enter, fully invisible on exit). Use **Preview Motion** to play exit → pause → enter on the editor canvas.
 
 ### 10.3 Manage preview (dashboard)
 

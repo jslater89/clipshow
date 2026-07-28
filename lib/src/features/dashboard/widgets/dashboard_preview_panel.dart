@@ -503,7 +503,28 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                             }
                             final String? error = await viewModel
                                 .trashSelectedMasterFile();
-                            if (error != null && context.mounted) {
+                            if (!context.mounted) {
+                              return;
+                            }
+                            if (error ==
+                                DashboardViewModel.masterFileNotFoundMessage) {
+                              final bool remove =
+                                  await _confirmRemoveMissingMasterFromLibrary(
+                                    context,
+                                  );
+                              if (!remove || !context.mounted) {
+                                return;
+                              }
+                              final String? removeError = await viewModel
+                                  .removeSelectedMasterFromLibrary();
+                              if (removeError != null && context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(removeError)),
+                                );
+                              }
+                              return;
+                            }
+                            if (error != null) {
                               ScaffoldMessenger.of(
                                 context,
                               ).showSnackBar(SnackBar(content: Text(error)));
@@ -846,6 +867,34 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
             FilledButton(
               onPressed: () => Navigator.of(ctx).pop(true),
               child: const Text("Move To Trash"),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
+  }
+
+  Future<bool> _confirmRemoveMissingMasterFromLibrary(
+    BuildContext context,
+  ) async {
+    final bool? result = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: const Text("File Not Found"),
+          content: const Text(
+            "This video is not on disk. Remove it from the library anyway? "
+            "All clips that reference this file will be removed.",
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text("Remove From Library"),
             ),
           ],
         );

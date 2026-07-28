@@ -109,6 +109,8 @@ void main() {
         enabled: true,
         visibilityEnterMotion: OsgPresetVisibilityMotion.bottom,
         visibilityEnterSlideDistanceNorm: 1.0,
+        visibilityEnterDurationMs: 500,
+        visibilityEnterFadeDurationMs: 250,
         frame: const OsgNormRect(x: 0, y: 0.8, width: 1, height: 0.2),
       );
       final List<OsgPreset> presets = <OsgPreset>[
@@ -156,6 +158,14 @@ void main() {
       expect(
         (osg6["enter"]! as Map<Object?, Object?>)["slideDistanceCanvasPx"],
         216,
+      );
+      expect(
+        (osg6["enter"]! as Map<Object?, Object?>)["durationMs"],
+        500,
+      );
+      expect(
+        (osg6["enter"]! as Map<Object?, Object?>)["fadeDurationMs"],
+        250,
       );
       final List<dynamic> cues = osg6["cues"]! as List<dynamic>;
       expect(cues.length, 1);

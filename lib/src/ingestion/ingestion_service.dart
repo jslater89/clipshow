@@ -68,6 +68,14 @@ class IngestionService {
   final Map<String, MasterMediaFile> _snapshotByPath =
       <String, MasterMediaFile>{};
 
+  /// Coalesces rapid MODIFY events (e.g. large file copy) into one upsert after
+  /// quiet. Keyed by normalized absolute path.
+  final Map<String, Timer> _modifyDebounceTimers = <String, Timer>{};
+  final Map<String, String> _modifyDebounceAbsolutePaths = <String, String>{};
+
+  /// Quiet window after the last MODIFY before upsert/ffprobe/UI refresh.
+  static const Duration _modifyDebounceWindow = Duration(milliseconds: 2000);
+
   /// While the post-start directory walk runs, thumbnail settlement can clear
   /// many identical-looking DB rows; defer stream updates until the walk ends.
   bool _initialDirectoryScanActive = false;
@@ -93,6 +101,7 @@ class IngestionService {
     required MediaRepository repository,
   }) async {
     _logger.info("Starting ingestion for workspace: $workspacePath");
+    _cancelAllModifyDebounces();
     _repository = repository;
     _workspacePath = workspacePath;
     await _refreshIgnoredFolders();
@@ -166,6 +175,11 @@ class IngestionService {
     _logger.info("Stopping ingestion service.");
     await _watchSubscription?.cancel();
     _watchSubscription = null;
+    if (_disposed) {
+      _cancelAllModifyDebounces();
+    } else {
+      await _flushPendingModifyUpserts();
+    }
     await _workspaceWatcher.stop();
   }
 
@@ -281,7 +295,6 @@ class IngestionService {
     if (_disposed) {
       return;
     }
-    final MediaRepository repository = _requireRepository();
     if (_isIgnoredPath(event.path)) {
       return;
     }
@@ -292,6 +305,8 @@ class IngestionService {
     _logger.fine("Watch event ${event.type} for path: ${event.path}");
 
     if (event.type == ChangeType.REMOVE) {
+      _cancelModifyDebounceForPath(event.path);
+      final MediaRepository repository = _requireRepository();
       final String storedPath = _storedPathForEvent(event.path);
       await _thumbnailService.deleteThumbnailForVideoPath(
         _absoluteVideoPath(storedPath),
@@ -303,17 +318,75 @@ class IngestionService {
       return;
     }
 
-    if (event.type == ChangeType.ADD || event.type == ChangeType.MODIFY) {
-      final String storedPath = _storedPathForEvent(event.path);
-      await repository.clearUnreadableIssue(storedPath);
-      final bool changed = await _upsertFromPath(
-        repository: repository,
-        filePath: event.path,
-      );
-      _logger.info("Upserted media record: $storedPath");
-      if (changed) {
-        await _emitSnapshot();
+    if (event.type == ChangeType.ADD) {
+      // New path: ingest promptly; further growth is coalesced via MODIFY debounce.
+      _cancelModifyDebounceForPath(event.path);
+      await _processWatchedUpsert(event.path);
+      return;
+    }
+
+    if (event.type == ChangeType.MODIFY) {
+      _scheduleModifyUpsert(event.path);
+    }
+  }
+
+  void _scheduleModifyUpsert(String eventPath) {
+    final String key = _normalizedAbsolutePath(eventPath);
+    _modifyDebounceTimers[key]?.cancel();
+    _modifyDebounceAbsolutePaths[key] = eventPath;
+    _modifyDebounceTimers[key] = Timer(_modifyDebounceWindow, () {
+      _modifyDebounceTimers.remove(key);
+      final String? path = _modifyDebounceAbsolutePaths.remove(key);
+      if (path == null || _disposed) {
+        return;
       }
+      _logger.fine(
+        "MODIFY debounce fired for $path "
+        "(${_modifyDebounceWindow.inMilliseconds}ms quiet).",
+      );
+      unawaited(_processWatchedUpsert(path));
+    });
+  }
+
+  void _cancelModifyDebounceForPath(String eventPath) {
+    final String key = _normalizedAbsolutePath(eventPath);
+    _modifyDebounceTimers.remove(key)?.cancel();
+    _modifyDebounceAbsolutePaths.remove(key);
+  }
+
+  void _cancelAllModifyDebounces() {
+    for (final Timer timer in _modifyDebounceTimers.values) {
+      timer.cancel();
+    }
+    _modifyDebounceTimers.clear();
+    _modifyDebounceAbsolutePaths.clear();
+  }
+
+  Future<void> _flushPendingModifyUpserts() async {
+    final List<String> paths = _modifyDebounceAbsolutePaths.values.toList();
+    _cancelAllModifyDebounces();
+    for (final String path in paths) {
+      if (_disposed) {
+        return;
+      }
+      await _processWatchedUpsert(path);
+    }
+  }
+
+  Future<void> _processWatchedUpsert(String eventPath) async {
+    if (_disposed) {
+      return;
+    }
+    final MediaRepository repository = _requireRepository();
+    final String storedPath = _storedPathForEvent(eventPath);
+    await repository.clearUnreadableIssue(storedPath);
+    final bool changed = await _upsertFromPath(
+      repository: repository,
+      filePath: eventPath,
+    );
+    _logger.info("Upserted media record: $storedPath");
+    if (changed) {
+      await _emitSnapshot();
     }
   }
 

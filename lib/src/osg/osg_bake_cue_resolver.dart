@@ -67,6 +67,10 @@ import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
       exitSlideDistanceNorm: preset.visibilityExitSlideDistanceNorm,
       frameWidthPx: frameWidthPx,
       frameHeightPx: frameHeightPx,
+      enterDurationMs: preset.visibilityEnterDurationMs,
+      exitDurationMs: preset.visibilityExitDurationMs,
+      enterFadeDurationMs: preset.visibilityEnterFadeDurationMs,
+      exitFadeDurationMs: preset.visibilityExitFadeDurationMs,
     );
   }
   if (tMs < windowEndMs) {
@@ -80,6 +84,10 @@ import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
       exitSlideDistanceNorm: preset.visibilityExitSlideDistanceNorm,
       frameWidthPx: frameWidthPx,
       frameHeightPx: frameHeightPx,
+      enterDurationMs: preset.visibilityEnterDurationMs,
+      exitDurationMs: preset.visibilityExitDurationMs,
+      enterFadeDurationMs: preset.visibilityEnterFadeDurationMs,
+      exitFadeDurationMs: preset.visibilityExitFadeDurationMs,
     );
   }
   final double shown = exitMs <= 0
@@ -95,6 +103,10 @@ import "package:obs_clipshow/src/osg/osg_visibility_motion.dart";
     exitSlideDistanceNorm: preset.visibilityExitSlideDistanceNorm,
     frameWidthPx: frameWidthPx,
     frameHeightPx: frameHeightPx,
+    enterDurationMs: preset.visibilityEnterDurationMs,
+    exitDurationMs: preset.visibilityExitDurationMs,
+    enterFadeDurationMs: preset.visibilityEnterFadeDurationMs,
+    exitFadeDurationMs: preset.visibilityExitFadeDurationMs,
   );
 }
 

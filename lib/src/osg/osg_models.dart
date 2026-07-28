@@ -271,6 +271,8 @@ class OsgPreset {
     this.visibilityExitSlideDistanceNorm = 1.0,
     this.visibilityEnterDurationMs = defaultVisibilityTransitionDurationMs,
     this.visibilityExitDurationMs = defaultVisibilityTransitionDurationMs,
+    this.visibilityEnterFadeDurationMs = defaultVisibilityTransitionDurationMs,
+    this.visibilityExitFadeDurationMs = defaultVisibilityTransitionDurationMs,
   });
 
   /// Width ÷ height of the template image in pixels; used to lock [frame] aspect on screen.
@@ -316,15 +318,25 @@ class OsgPreset {
   /// Slide distance for [visibilityExitMotion] as a multiple of frame width or height.
   final double visibilityExitSlideDistanceNorm;
 
-  /// Fade (+ slide) duration when the preset becomes visible (milliseconds).
+  /// Full enter transition duration (slide + fade window) in milliseconds.
   final int visibilityEnterDurationMs;
 
-  /// Fade (+ slide) duration when the preset is hidden (milliseconds).
+  /// Full exit transition duration (slide + fade window) in milliseconds.
   final int visibilityExitDurationMs;
 
-  static const int osgPresetSchemaVersion = 10;
+  /// Fade-only portion of enter when [visibilityEnterMotion] includes a slide.
+  /// Ignored when motion is [OsgPresetVisibilityMotion.none]; effective value
+  /// is capped at [visibilityEnterDurationMs].
+  final int visibilityEnterFadeDurationMs;
 
-  /// Default for [visibilityEnterDurationMs] and [visibilityExitDurationMs].
+  /// Fade-only portion of exit when [visibilityExitMotion] includes a slide.
+  /// Ignored when motion is [OsgPresetVisibilityMotion.none]; effective value
+  /// is capped at [visibilityExitDurationMs].
+  final int visibilityExitFadeDurationMs;
+
+  static const int osgPresetSchemaVersion = 11;
+
+  /// Default for transition and fade duration fields.
   static const int defaultVisibilityTransitionDurationMs = 240;
 
   /// Fallback aspect (W÷H) for solid presets when pixel dimensions are missing.
@@ -368,10 +380,39 @@ class OsgPreset {
     return ms;
   }
 
+  /// Effective fade length for sampling: full transition when [motion] is fade-only,
+  /// otherwise min(clamped fade, clamped transition).
+  static int effectiveVisibilityFadeDurationMs({
+    required int fadeMs,
+    required int transitionMs,
+    required OsgPresetVisibilityMotion motion,
+  }) {
+    final int transition = clampVisibilityDurationMs(transitionMs);
+    if (motion == OsgPresetVisibilityMotion.none) {
+      return transition;
+    }
+    final int fade = clampVisibilityDurationMs(fadeMs);
+    return fade <= transition ? fade : transition;
+  }
+
   static int _visibilityDurationFromJson(Object? raw) {
     final int v = (raw is num ? raw.round() : null) ??
         defaultVisibilityTransitionDurationMs;
     return clampVisibilityDurationMs(v);
+  }
+
+  /// When [raw] is absent, defaults to [fallbackTransitionMs] so older presets
+  /// keep fade ≡ full transition.
+  static int _visibilityFadeDurationFromJson(
+    Object? raw,
+    int fallbackTransitionMs,
+  ) {
+    final int transition = clampVisibilityDurationMs(fallbackTransitionMs);
+    if (raw is! num) {
+      return transition;
+    }
+    final int fade = clampVisibilityDurationMs(raw.round());
+    return fade <= transition ? fade : transition;
   }
 
   static OsgTemplateBackgroundKind _kindFromJson(
@@ -414,6 +455,8 @@ class OsgPreset {
       visibilityExitSlideDistanceNorm: 1.0,
       visibilityEnterDurationMs: defaultVisibilityTransitionDurationMs,
       visibilityExitDurationMs: defaultVisibilityTransitionDurationMs,
+      visibilityEnterFadeDurationMs: defaultVisibilityTransitionDurationMs,
+      visibilityExitFadeDurationMs: defaultVisibilityTransitionDurationMs,
     );
   }
 
@@ -482,11 +525,29 @@ class OsgPreset {
     double? visibilityExitSlideDistanceNorm,
     int? visibilityEnterDurationMs,
     int? visibilityExitDurationMs,
+    int? visibilityEnterFadeDurationMs,
+    int? visibilityExitFadeDurationMs,
   }) {
     final double? nextEnterSlide = visibilityEnterSlideDistanceNorm;
     final double? nextExitSlide = visibilityExitSlideDistanceNorm;
-    final int? nextEnterDur = visibilityEnterDurationMs;
-    final int? nextExitDur = visibilityExitDurationMs;
+    final int nextEnterDur = _copyWithDurationMs(
+      visibilityEnterDurationMs,
+      this.visibilityEnterDurationMs,
+    );
+    final int nextExitDur = _copyWithDurationMs(
+      visibilityExitDurationMs,
+      this.visibilityExitDurationMs,
+    );
+    final int nextEnterFade = _copyWithFadeDurationMs(
+      requested: visibilityEnterFadeDurationMs,
+      current: this.visibilityEnterFadeDurationMs,
+      transitionMs: nextEnterDur,
+    );
+    final int nextExitFade = _copyWithFadeDurationMs(
+      requested: visibilityExitFadeDurationMs,
+      current: this.visibilityExitFadeDurationMs,
+      transitionMs: nextExitDur,
+    );
     return OsgPreset(
       enabled: enabled ?? this.enabled,
       templateRelativePath: templateRelativePath ?? this.templateRelativePath,
@@ -515,13 +576,28 @@ class OsgPreset {
       visibilityExitSlideDistanceNorm: nextExitSlide != null
           ? OsgPreset.clampVisibilitySlideDistanceNorm(nextExitSlide)
           : this.visibilityExitSlideDistanceNorm,
-      visibilityEnterDurationMs: nextEnterDur != null
-          ? OsgPreset.clampVisibilityDurationMs(nextEnterDur)
-          : this.visibilityEnterDurationMs,
-      visibilityExitDurationMs: nextExitDur != null
-          ? OsgPreset.clampVisibilityDurationMs(nextExitDur)
-          : this.visibilityExitDurationMs,
+      visibilityEnterDurationMs: nextEnterDur,
+      visibilityExitDurationMs: nextExitDur,
+      visibilityEnterFadeDurationMs: nextEnterFade,
+      visibilityExitFadeDurationMs: nextExitFade,
     );
+  }
+
+  static int _copyWithDurationMs(int? requested, int current) {
+    return requested != null
+        ? OsgPreset.clampVisibilityDurationMs(requested)
+        : OsgPreset.clampVisibilityDurationMs(current);
+  }
+
+  static int _copyWithFadeDurationMs({
+    required int? requested,
+    required int current,
+    required int transitionMs,
+  }) {
+    final int fade = requested != null
+        ? OsgPreset.clampVisibilityDurationMs(requested)
+        : OsgPreset.clampVisibilityDurationMs(current);
+    return fade <= transitionMs ? fade : transitionMs;
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -552,7 +628,24 @@ class OsgPreset {
         OsgPreset.clampVisibilityDurationMs(visibilityEnterDurationMs),
     "visibilityExitDurationMs":
         OsgPreset.clampVisibilityDurationMs(visibilityExitDurationMs),
+    "visibilityEnterFadeDurationMs": _persistedFadeDurationMs(
+      fadeMs: visibilityEnterFadeDurationMs,
+      transitionMs: visibilityEnterDurationMs,
+    ),
+    "visibilityExitFadeDurationMs": _persistedFadeDurationMs(
+      fadeMs: visibilityExitFadeDurationMs,
+      transitionMs: visibilityExitDurationMs,
+    ),
   };
+
+  static int _persistedFadeDurationMs({
+    required int fadeMs,
+    required int transitionMs,
+  }) {
+    final int transition = clampVisibilityDurationMs(transitionMs);
+    final int fade = clampVisibilityDurationMs(fadeMs);
+    return fade <= transition ? fade : transition;
+  }
 
   factory OsgPreset.fromJson(Map<String, Object?> json) {
     final int presetSlotTextFallback =
@@ -605,6 +698,12 @@ class OsgPreset {
         solidH = fh;
       }
     }
+    final int enterDur = _visibilityDurationFromJson(
+      json["visibilityEnterDurationMs"],
+    );
+    final int exitDur = _visibilityDurationFromJson(
+      json["visibilityExitDurationMs"],
+    );
     OsgPreset preset = OsgPreset(
       enabled: json["enabled"] == true,
       templateRelativePath: path,
@@ -630,11 +729,15 @@ class OsgPreset {
       visibilityExitSlideDistanceNorm: _visibilitySlideDistanceFromJson(
         json["visibilityExitSlideDistanceNorm"],
       ),
-      visibilityEnterDurationMs: _visibilityDurationFromJson(
-        json["visibilityEnterDurationMs"],
+      visibilityEnterDurationMs: enterDur,
+      visibilityExitDurationMs: exitDur,
+      visibilityEnterFadeDurationMs: _visibilityFadeDurationFromJson(
+        json["visibilityEnterFadeDurationMs"],
+        enterDur,
       ),
-      visibilityExitDurationMs: _visibilityDurationFromJson(
-        json["visibilityExitDurationMs"],
+      visibilityExitFadeDurationMs: _visibilityFadeDurationFromJson(
+        json["visibilityExitFadeDurationMs"],
+        exitDur,
       ),
     );
     if (ver < 2) {
@@ -685,6 +788,8 @@ class OsgPreset {
       visibilityExitSlideDistanceNorm: visibilityExitSlideDistanceNorm,
       visibilityEnterDurationMs: visibilityEnterDurationMs,
       visibilityExitDurationMs: visibilityExitDurationMs,
+      visibilityEnterFadeDurationMs: visibilityEnterFadeDurationMs,
+      visibilityExitFadeDurationMs: visibilityExitFadeDurationMs,
     );
   }
 

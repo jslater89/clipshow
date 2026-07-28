@@ -2195,10 +2195,32 @@ class DashboardViewModel extends ChangeNotifier {
     return null;
   }
 
+  /// Returned by [trashSelectedMasterFile] when the master path is absent on
+  /// disk so the UI can offer [removeSelectedMasterFromLibrary].
+  static const String masterFileNotFoundMessage = "File not found on disk.";
+
+  /// Removes the selected master's DB row (clips cascade via FK) and syncs the
+  /// ingestion snapshot. Does not touch the filesystem.
+  Future<String?> removeSelectedMasterFromLibrary() async {
+    final MediaRepository? repository = _mediaRepository;
+    final MasterMediaFile? master = selectedMedia;
+    if (repository == null || master == null) {
+      return "Select a master file first.";
+    }
+    final String storedPath = master.filePath;
+    await repository.deleteByPath(storedPath);
+    await _ingestionService.removeMasterFromSnapshotAfterDbDelete(storedPath);
+    await _reloadFromRepository();
+    return null;
+  }
+
   /// Sends the master video to the **system** trash when possible; otherwise moves
   /// it to [WorkspaceTrash.relativeFolder] under the workspace. Then removes its
   /// DB row (clips referencing this master are removed via FK cascade and tag
   /// cleanup in [MediaRepository.deleteByPath]) and syncs ingestion snapshot.
+  ///
+  /// If the file is missing, returns [masterFileNotFoundMessage] without changing
+  /// the DB so the UI can offer library-only removal.
   Future<String?> trashSelectedMasterFile() async {
     final MediaRepository? repository = _mediaRepository;
     final MasterMediaFile? master = selectedMedia;
@@ -2213,7 +2235,7 @@ class DashboardViewModel extends ChangeNotifier {
     );
     final File sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
-      return "File not found on disk.";
+      return masterFileNotFoundMessage;
     }
     try {
       await moveFileToSystemTrash(sourcePath);
@@ -2233,10 +2255,7 @@ class DashboardViewModel extends ChangeNotifier {
         return "Could not move file to trash: $e2";
       }
     }
-    await repository.deleteByPath(storedPath);
-    await _ingestionService.removeMasterFromSnapshotAfterDbDelete(storedPath);
-    await _reloadFromRepository();
-    return null;
+    return removeSelectedMasterFromLibrary();
   }
 
   Future<void> nudgeSelectedClipStart(int deltaMs) async {

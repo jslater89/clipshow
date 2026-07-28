@@ -292,6 +292,10 @@ class _OsgPresetCanvasPreviewState extends State<OsgPresetCanvasPreview> {
         exitSlideDistanceNorm: preset.visibilityExitSlideDistanceNorm,
         frameWidthPx: fw,
         frameHeightPx: fh,
+        enterDurationMs: preset.visibilityEnterDurationMs,
+        exitDurationMs: preset.visibilityExitDurationMs,
+        enterFadeDurationMs: preset.visibilityEnterFadeDurationMs,
+        exitFadeDurationMs: preset.visibilityExitFadeDurationMs,
       );
       graphicAndBorder = Opacity(
         opacity: vis.opacity.clamp(0.0, 1.0),
