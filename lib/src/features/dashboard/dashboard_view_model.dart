@@ -1684,6 +1684,36 @@ class DashboardViewModel extends ChangeNotifier {
         .toList();
   }
 
+  /// Autocomplete suggestions for OSG Mode quick-slot assignment: tag set
+  /// names that contain [query] (case-insensitive). Empty query returns the
+  /// first 20 names in list order.
+  List<String> tagSetNameSuggestionsFor(String query) {
+    final Iterable<String> names = tagSets.map((TagSet t) => t.name);
+    final String normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return names.take(20).toList();
+    }
+    return names
+        .where((String name) => name.toLowerCase().contains(normalized))
+        .take(20)
+        .toList();
+  }
+
+  /// Resolves a typed/selected tag set name to its id (case-insensitive).
+  /// Returns null when no tag set matches.
+  int? tagSetIdForName(String name) {
+    final String normalized = name.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    for (final TagSet tagSet in tagSets) {
+      if (tagSet.name.toLowerCase() == normalized) {
+        return tagSet.id;
+      }
+    }
+    return null;
+  }
+
   List<String> searchTagSuggestionsFor(String query) {
     final String normalized = query.trim().toLowerCase();
     if (normalized.isEmpty) {

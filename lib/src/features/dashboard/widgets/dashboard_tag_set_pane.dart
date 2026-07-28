@@ -1,3 +1,5 @@
+import "dart:async";
+
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
@@ -95,7 +97,7 @@ class _QuickSlotsCard extends StatelessWidget {
     final double pad12 = scaleDimension(context, 12);
     final double gap8 = scaleDimension(context, 8);
     final double gap12 = scaleDimension(context, 12);
-    final double slotWidth = scaleDimension(context, 170);
+    final double slotWidth = scaleDimension(context, 200);
     final OsgModeSession? initialSession = viewModel.canEnterOsgMode
         ? viewModel.buildInitialOsgModeSession()
         : null;
@@ -122,9 +124,9 @@ class _QuickSlotsCard extends StatelessWidget {
                       child: _QuickSlotPicker(
                         slotLabel: "${i + 1}",
                         selectedTagSetId: viewModel.osgModeQuickSlotTagSetIds[i],
-                        tagSets: viewModel.tagSets,
-                        onChanged: (int? tagSetId) =>
-                            viewModel.setOsgModeQuickSlotTagSetId(i, tagSetId),
+                        onChanged: (int? tagSetId) => unawaited(
+                          viewModel.setOsgModeQuickSlotTagSetId(i, tagSetId),
+                        ),
                       ),
                     ),
                 ],
@@ -145,38 +147,160 @@ class _QuickSlotsCard extends StatelessWidget {
   }
 }
 
-class _QuickSlotPicker extends StatelessWidget {
+/// Type-to-filter picker for one OSG Mode quick slot. Mirrors the Add Tag
+/// autocomplete pattern: suggestions filter by substring of tag set name;
+/// selecting assigns the slot, clearing empties it.
+class _QuickSlotPicker extends StatefulWidget {
   const _QuickSlotPicker({
     required this.slotLabel,
     required this.selectedTagSetId,
-    required this.tagSets,
     required this.onChanged,
   });
 
   final String slotLabel;
   final int? selectedTagSetId;
-  final List<TagSet> tagSets;
   final ValueChanged<int?> onChanged;
 
   @override
+  State<_QuickSlotPicker> createState() => _QuickSlotPickerState();
+}
+
+class _QuickSlotPickerState extends State<_QuickSlotPicker> {
+  TextEditingController? _controller;
+  FocusNode? _focusNode;
+  bool _handledAutocompleteSelection = false;
+
+  String? _selectedName(DashboardViewModel viewModel) {
+    final int? id = widget.selectedTagSetId;
+    if (id == null) {
+      return null;
+    }
+    for (final TagSet tagSet in viewModel.tagSets) {
+      if (tagSet.id == id) {
+        return tagSet.name;
+      }
+    }
+    return null;
+  }
+
+  void _syncControllerText(DashboardViewModel viewModel) {
+    final TextEditingController? controller = _controller;
+    final FocusNode? focusNode = _focusNode;
+    if (controller == null) {
+      return;
+    }
+    if (focusNode != null && focusNode.hasFocus) {
+      return;
+    }
+    final String display = _selectedName(viewModel) ?? "";
+    if (controller.text != display) {
+      controller.text = display;
+    }
+  }
+
+  void _assignFromText(DashboardViewModel viewModel, String raw) {
+    final String trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      widget.onChanged(null);
+      _controller?.clear();
+      return;
+    }
+    final int? id = viewModel.tagSetIdForName(trimmed);
+    if (id == null) {
+      _syncControllerText(viewModel);
+      return;
+    }
+    String canonicalName = trimmed;
+    for (final TagSet tagSet in viewModel.tagSets) {
+      if (tagSet.id == id) {
+        canonicalName = tagSet.name;
+        break;
+      }
+    }
+    widget.onChanged(id);
+    _controller?.text = canonicalName;
+  }
+
+  @override
+  void didUpdateWidget(covariant _QuickSlotPicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedTagSetId != widget.selectedTagSetId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        _syncControllerText(context.read<DashboardViewModel>());
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final DashboardViewModel viewModel = context.watch<DashboardViewModel>();
+    final String? selectedName = _selectedName(viewModel);
+    final double clearIconSize = scaleDimension(context, 16);
+
     return Row(
       children: <Widget>[
-        SizedBox(width: scaleDimension(context, 20), child: Text(slotLabel)),
+        SizedBox(width: scaleDimension(context, 20), child: Text(widget.slotLabel)),
         Expanded(
-          child: DropdownButton<int?>(
-            isExpanded: true,
-            isDense: true,
-            value: selectedTagSetId,
-            items: <DropdownMenuItem<int?>>[
-              const DropdownMenuItem<int?>(value: null, child: Text("Empty")),
-              for (final TagSet tagSet in tagSets)
-                DropdownMenuItem<int?>(
-                  value: tagSet.id,
-                  child: Text(tagSet.name, overflow: TextOverflow.ellipsis),
-                ),
-            ],
-            onChanged: onChanged,
+          child: AdaptiveAutocomplete<String>(
+            optionsBuilder: (TextEditingValue textEditingValue) {
+              return viewModel.tagSetNameSuggestionsFor(textEditingValue.text);
+            },
+            onSelected: (String value) {
+              _handledAutocompleteSelection = true;
+              _assignFromText(viewModel, value);
+            },
+            fieldViewBuilder:
+                (
+                  BuildContext context,
+                  TextEditingController textEditingController,
+                  FocusNode focusNode,
+                  VoidCallback onFieldSubmitted,
+                ) {
+                  _controller = textEditingController;
+                  _focusNode = focusNode;
+                  _syncControllerText(viewModel);
+                  return TextField(
+                    controller: textEditingController,
+                    focusNode: focusNode,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: "Empty",
+                      border: const OutlineInputBorder(),
+                      suffixIcon: selectedName == null
+                          ? null
+                          : IconButton(
+                              tooltip: "Clear Slot",
+                              padding: EdgeInsets.zero,
+                              constraints: BoxConstraints(
+                                minWidth: scaleDimension(context, 28),
+                                minHeight: scaleDimension(context, 28),
+                              ),
+                              icon: Icon(Icons.clear, size: clearIconSize),
+                              onPressed: () {
+                                widget.onChanged(null);
+                                textEditingController.clear();
+                              },
+                            ),
+                      suffixIconConstraints: selectedName == null
+                          ? null
+                          : BoxConstraints(
+                              minWidth: scaleDimension(context, 28),
+                              minHeight: scaleDimension(context, 28),
+                            ),
+                    ),
+                    onSubmitted: (_) {
+                      onFieldSubmitted();
+                      if (_handledAutocompleteSelection) {
+                        _handledAutocompleteSelection = false;
+                        return;
+                      }
+                      _assignFromText(viewModel, textEditingController.text);
+                    },
+                  );
+                },
           ),
         ),
       ],
