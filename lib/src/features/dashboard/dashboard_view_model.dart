@@ -1714,7 +1714,7 @@ class DashboardViewModel extends ChangeNotifier {
 
   Future<void> pickAndSetWorkspace() async {
     final String? selectedDirectory = await FilePicker.getDirectoryPath(
-      dialogTitle: "Select Workspace Directory",
+      dialogTitle: "Select workspace directory",
     );
     if (selectedDirectory == null || selectedDirectory.isEmpty) {
       _logger.info("Workspace selection cancelled.");
@@ -2614,7 +2614,7 @@ class DashboardViewModel extends ChangeNotifier {
       return;
     }
     final String? outputPath = await FilePicker.saveFile(
-      dialogTitle: "Export Workspace JSON",
+      dialogTitle: "Export workspace JSON",
       fileName: "workspace_export.json",
       type: FileType.custom,
       allowedExtensions: <String>["json"],

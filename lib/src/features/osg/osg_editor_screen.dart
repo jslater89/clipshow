@@ -231,6 +231,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
 
   Future<void> _importTemplate(int presetIndex) async {
     final FilePickerResult? result = await FilePicker.pickFiles(
+      dialogTitle: "Select OSG template image",
       type: FileType.image,
       allowMultiple: false,
     );
@@ -391,6 +392,7 @@ class _OsgEditorScreenState extends State<OsgEditorScreen>
 
   Future<void> _importOsgPresetPack(BuildContext context) async {
     final FilePickerResult? result = await FilePicker.pickFiles(
+      dialogTitle: "Import OSG presets",
       type: FileType.custom,
       allowedExtensions: const <String>["zip"],
       withData: true,
