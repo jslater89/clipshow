@@ -58,7 +58,7 @@ Inside the database, paths to video files are stored relative to the workspace r
 
 ### 3.1 Opening a workspace
 
-Use Open workspace in the top bar (folder icon) to choose a directory. The app remembers the last selection in its own application data and reopens it on the next launch until you pick something else. If no workspace is selected yet, the dashboard tells you that no workspace is selected and expects you to choose one before the library UI is meaningful.
+Use Open workspace in the top bar (folder icon) to choose a directory. The app remembers the last selection in its own application data and reopens it on the next launch until you pick something else. If no workspace is selected yet, the dashboard tells you that no workspace is selected and expects you to choose one before the library UI is meaningful. Opening a folder creates `obs_clipshow.db` there if needed with default **ignored folders** (`recordings`, `export`) so Capture staging and Record/Bake output stay out of the library until you choose otherwise.
 
 ### 3.2 Ingestion
 
@@ -285,7 +285,7 @@ Leaving Playout clears the canvas for the next session.
 
 **Requirements:** An **enabled** OBS profile on the **Scene Switch** tab (§11.3). Capture mode cannot be recording at the same time; OBS must not already be recording on its own.
 
-**Paths:** Under **OBS Paths** (§11.3), **Playout Record** is where OBS writes the growing file (default `recordings/export`). **Playout Output** is where the finished copy lands (default `export`). Both folders are added to **ignored folders** automatically so exports are not ingested into the library. Capture paths are separate—Capture still uses **Capture Recording** / **Capture Output**. Bake exports use the same **Playout Output** folder (§6.6).
+**Paths:** Under **OBS Paths** (§11.3), **Playout Record** is where OBS writes the growing file (default `recordings/export`). **Playout Output** is where the finished copy lands (default `export`). New workspaces ignore `export` by default so finished files are not ingested; you can remove that ignore under **Ignored folders** if you want baked/recorded videos in the library later. Capture paths are separate—Capture still uses **Capture Recording** / **Capture Output**. Bake exports use the same **Playout Output** folder (§6.6).
 
 **Audio and picture:** Whatever your **Video** scene sends to program—including window capture of Clipshow and your mic if routed in OBS—is what the file contains. Route commentary in OBS, not only in Clipshow.
 
@@ -349,7 +349,7 @@ The dialog has three tabs. Each section has its own **Save** (or **Apply**) cont
 
 **Ingestion and preview** — **Pause background ingest during Manage playback** reduces concurrent disk access while the dashboard preview player is running (useful on slow USB disks). Full-window **Playout** always pauses background ingest regardless of this toggle. **Ffprobe batch size** and **thumbnail concurrency** tune how aggressively the workspace scanner probes durations and generates sidecar thumbnails.
 
-**Ignored folders** — Workspace-relative paths that ingestion skips entirely (including nested files). You can add paths manually; capture and export staging folders may also be registered here automatically.
+**Ignored folders** — Workspace-relative paths that ingestion skips entirely (including nested files). New workspaces start with `recordings` and `export`. You can add or remove paths manually; removing `export` lets Record/Bake output ingest for later playback, and Clipshow will not put that ignore back on open.
 
 **Export workspace** — **Export JSON** writes workspace metadata and media rows for backup or tooling (full shape in §12). Video files are not copied.
 
@@ -367,7 +367,7 @@ Scene switching is modeled as **profiles** shown at the top of the tab: one **OB
 
 **OBS** — WebSocket address, port, password, and **program** scene names for **video** (clip playout), **face** (return after playout), optionally **OSG Overlay Source** (scene-item name enabled on the current program scene during OSG Mode—§7), and optionally **capture** (switched before OBS recording starts in Capture mode—§8). An empty overlay source disables OSG overlay automation. **Save OBS** applies that block.
 
-**OBS Paths** — **Capture Recording** and **Capture Output** for Capture mode (§8). **Playout Record** is staging for **Record** playout (§9.7); default `recordings/export`. **Playout Output** is where finished Record and Bake exports land (default `export`). Playout output must not sit inside playout staging. **Save Paths** persists all path fields; each path under the workspace is auto-added to **ignored folders** when not already covered by an existing ignored prefix.
+**OBS Paths** — **Capture Recording** and **Capture Output** for Capture mode (§8). **Playout Record** is staging for **Record** playout (§9.7); default `recordings/export`. **Playout Output** is where finished Record and Bake exports land (default `export`). Playout output must not sit inside playout staging. **Save Paths** persists all path fields; capture recording and playout staging are kept in **ignored folders** when not already covered. Changing **Playout Output** to a new folder adds that folder to ignored once; clearing an ignore for the current output folder is preserved across later saves of the same path.
 
 **Webhooks** — HTTP endpoints that fire on playout and OSG Mode transitions (method, URL, and body/query shape). The payload value is a fixed token—**video** when entering Playout, **face** when leaving Playout, **osg_on** when entering OSG Mode, and **osg_off** when leaving OSG Mode—under your chosen query parameter or JSON/form key (not your OBS scene names).
 

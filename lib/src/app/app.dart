@@ -829,7 +829,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       builder: (BuildContext context, Widget? child) {
         final MediaQueryData mediaQueryData = MediaQuery.of(context);
         return UiScaleScope(
-          scale: _uiScale,
+        scale: _uiScale,
           increaseScale: _increaseUiScale,
           decreaseScale: _decreaseUiScale,
           child: Shortcuts(

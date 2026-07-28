@@ -12,7 +12,7 @@ class AppDatabase {
     return databaseFactoryFfi.openDatabase(
       workspace.databasePath,
       options: OpenDatabaseOptions(
-        version: 13,
+        version: 14,
         onConfigure: (Database db) async {
           await db.execute("PRAGMA foreign_keys = ON;");
         },
@@ -39,9 +39,15 @@ class AppDatabase {
           await _createClipAndTagTables(db);
           await _createTagSetsTable(db);
           await _createWorkspaceSettingsTables(db);
+          // Defaults aligned with CapturePathsSettings / PlayoutRecordPathsSettings.
+          // Operators may remove these; open/save does not force them back.
           await db.rawInsert(
             "INSERT OR IGNORE INTO ignored_folders (relative_path) VALUES (?)",
             <Object?>["recordings"],
+          );
+          await db.rawInsert(
+            "INSERT OR IGNORE INTO ignored_folders (relative_path) VALUES (?)",
+            <Object?>["export"],
           );
         },
         onUpgrade: (Database db, int oldVersion, int newVersion) async {
@@ -91,6 +97,13 @@ class AppDatabase {
           }
           if (oldVersion < 13) {
             await _addObsOsgSourceColumnIfMissing(db);
+          }
+          if (oldVersion < 14) {
+            // One-time seed for workspaces created before playout output default.
+            await db.rawInsert(
+              "INSERT OR IGNORE INTO ignored_folders (relative_path) VALUES (?)",
+              <Object?>["export"],
+            );
           }
         },
       ),

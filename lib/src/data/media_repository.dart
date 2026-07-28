@@ -1339,6 +1339,8 @@ class MediaRepository {
   Future<void> savePlayoutRecordPathsSettings(
     PlayoutRecordPathsSettings value,
   ) async {
+    final PlayoutRecordPathsSettings previous =
+        await _loadPlayoutRecordPathsSettings();
     final String staging = value.stagingRelativeDir.trim().isEmpty
         ? PlayoutRecordPathsSettings.defaultStagingRelativeDir
         : value.stagingRelativeDir.trim();
@@ -1347,8 +1349,17 @@ class MediaRepository {
         : value.outputRelativeDir.trim();
     await _putWorkspaceSetting("playout.record.stagingRelativeDir", staging);
     await _putWorkspaceSetting("playout.record.outputRelativeDir", output);
+    // In-progress OBS writes must stay out of ingest.
     await ensureRecordingRelativeDirIgnored(staging);
-    await ensureRecordingRelativeDirIgnored(output);
+    // Finished Record/Bake files: ignore when the operator picks a new output
+    // folder, but do not re-add after they remove that ignore to ingest exports.
+    final String previousOutput = previous.outputRelativeDir.trim().isEmpty
+        ? PlayoutRecordPathsSettings.defaultOutputRelativeDir
+        : previous.outputRelativeDir.trim();
+    if (IgnoredPathUtils.normalizeRelative(output) !=
+        IgnoredPathUtils.normalizeRelative(previousOutput)) {
+      await ensureRecordingRelativeDirIgnored(output);
+    }
   }
 
   /// Ensures [relativePath] is listed under ignored folders when non-empty (workspace-relative).

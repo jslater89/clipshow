@@ -954,6 +954,57 @@ void main() {
     );
 
     test(
+      "new workspace DB seeds export ignore; Save Paths does not restore it",
+      () async {
+        final AppDatabase appDatabase = AppDatabase();
+        final Workspace workspace = Workspace(rootPath: tempDirectory.path);
+        final database = await appDatabase.openForWorkspace(workspace);
+        final MediaRepository repository = MediaRepository(database);
+
+        final List<String> onCreateIgnored =
+            await repository.listIgnoredFolders();
+        expect(onCreateIgnored, contains("recordings"));
+        expect(onCreateIgnored, contains("export"));
+        expect(onCreateIgnored, isNot(contains("recordings/export")));
+
+        await repository.removeIgnoredFolder("export");
+        expect(await repository.listIgnoredFolders(), isNot(contains("export")));
+
+        // Unchanged playout output must not force the default ignore back.
+        await repository.savePlayoutRecordPathsSettings(
+          PlayoutRecordPathsSettings.fallback(),
+        );
+        expect(await repository.listIgnoredFolders(), isNot(contains("export")));
+
+        // Changing output to a new folder does ignore that folder once.
+        await repository.savePlayoutRecordPathsSettings(
+          const PlayoutRecordPathsSettings(
+            stagingRelativeDir: "recordings/export",
+            outputRelativeDir: "custom/out",
+          ),
+        );
+        final List<String> afterCustom = await repository.listIgnoredFolders();
+        expect(afterCustom, contains("recordings"));
+        expect(afterCustom, contains("custom/out"));
+        expect(afterCustom, isNot(contains("export")));
+
+        await repository.removeIgnoredFolder("custom/out");
+        await repository.savePlayoutRecordPathsSettings(
+          const PlayoutRecordPathsSettings(
+            stagingRelativeDir: "recordings/export",
+            outputRelativeDir: "custom/out",
+          ),
+        );
+        expect(
+          await repository.listIgnoredFolders(),
+          isNot(contains("custom/out")),
+        );
+
+        await database.close();
+      },
+    );
+
+    test(
       "deletes tag row when it is no longer attached to any media",
       () async {
         final AppDatabase appDatabase = AppDatabase();
