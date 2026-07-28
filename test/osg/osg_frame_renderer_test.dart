@@ -218,5 +218,93 @@ void main() {
         renderer.dispose();
       }
     });
+
+    test("renderFrameRawRgba is W*H*4 with visible hold pixels", () async {
+      final OsgFrameRenderer renderer = buildRenderer();
+      await renderer.loadAssets();
+      try {
+        final Uint8List raw = await renderer.renderFrameRawRgba(2000);
+        expect(raw.length, outW * outH * 4);
+        bool anyVisible = false;
+        for (int i = 3; i < raw.length; i += 4) {
+          if (raw[i] != 0) {
+            anyVisible = true;
+            break;
+          }
+        }
+        expect(anyVisible, isTrue);
+      } finally {
+        renderer.dispose();
+      }
+    });
+
+    test(
+      "visibility fingerprint is stable on hold and empty; differs mid-enter",
+      () async {
+        final OsgFrameRenderer renderer = OsgFrameRenderer(
+          presets: <OsgPreset>[
+            OsgPreset.empty().copyWith(
+              enabled: true,
+              templateSolidArgb: 0xFF2255AA,
+              slots: <OsgSlot>[
+                const OsgSlot(
+                  textSource: OsgTextSource.fixed,
+                  fixedText: "Hello Bake",
+                  box: OsgNormRect(x: 0.05, y: 0.1, width: 0.9, height: 0.8),
+                  fontSizeNorm: 0.4,
+                ),
+              ],
+            ),
+            OsgPreset.empty(),
+            OsgPreset.empty(),
+            OsgPreset.empty(),
+            OsgPreset.empty(),
+          ],
+          cues: const <OsgBakeCue>[
+            OsgBakeCue(
+              slot: OsgPresetSlot.preset1,
+              start: OsgBakeAnchor.absoluteMs(2000),
+              end: OsgBakeAnchor.absoluteMs(6000),
+            ),
+          ],
+          clipDurationMs: 10000,
+          outputWidthPx: outW,
+          outputHeightPx: outH,
+          semanticTextByTypeId: const <int, String>{},
+          annotationsText: "",
+          workspaceRoot: "",
+        );
+        await renderer.loadAssets();
+        try {
+          // Hold span: identical fingerprints.
+          expect(
+            renderer.visibilityFingerprintAt(3000),
+            renderer.visibilityFingerprintAt(3500),
+          );
+          // Empty before enter lead-in (active starts at 2000-240=1760).
+          expect(
+            renderer.visibilityFingerprintAt(1000),
+            renderer.visibilityFingerprintAt(1500),
+          );
+          // Empty after exit (active ends at 6000+240=6240).
+          expect(
+            renderer.visibilityFingerprintAt(7000),
+            renderer.visibilityFingerprintAt(8000),
+          );
+          // Mid-enter differs from hold.
+          expect(
+            renderer.visibilityFingerprintAt(1880),
+            isNot(renderer.visibilityFingerprintAt(3000)),
+          );
+          // Empty differs from hold.
+          expect(
+            renderer.visibilityFingerprintAt(1000),
+            isNot(renderer.visibilityFingerprintAt(3000)),
+          );
+        } finally {
+          renderer.dispose();
+        }
+      },
+    );
   });
 }

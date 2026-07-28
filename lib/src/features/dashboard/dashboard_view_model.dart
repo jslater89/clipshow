@@ -142,6 +142,9 @@ class DashboardViewModel extends ChangeNotifier {
   final List<OsgBakeQueueTask> _bakeQueuePending = <OsgBakeQueueTask>[];
   final List<OsgBakeQueueTask> _bakeQueueFinished = <OsgBakeQueueTask>[];
   OsgBakeQueueTask? _bakeQueueRunningTask;
+  /// 0…1 while a bake is streaming frames; null when idle or before first tick.
+  double? _bakeQueueProgress;
+  DateTime? _lastBakeProgressNotify;
   bool _bakeQueuePaused = false;
   bool _bakeQueuePumpActive = false;
   final Map<String, Completer<OsgBakeResult>> _bakeNowWaiters =
@@ -268,6 +271,10 @@ class DashboardViewModel extends ChangeNotifier {
 
   /// The task currently being baked, if any.
   OsgBakeQueueTask? get bakeQueueRunningTask => _bakeQueueRunningTask;
+
+  /// Overlay-frame progress for the running bake (`0`…`1`), or null when idle
+  /// / not yet started streaming frames.
+  double? get bakeQueueProgress => _bakeQueueProgress;
 
   /// True when the queue should stop after the current task finishes.
   bool get bakeQueuePaused => _bakeQueuePaused;
@@ -461,6 +468,8 @@ class DashboardViewModel extends ChangeNotifier {
     );
     _bakeActive = true;
     _bakeCancelRequested = false;
+    _bakeQueueProgress = null;
+    _lastBakeProgressNotify = null;
     notifyListeners();
 
     final OsgBakeResult result = await _runBakeForTask(task);
@@ -480,6 +489,8 @@ class DashboardViewModel extends ChangeNotifier {
       ),
     );
     _bakeQueueRunningTask = null;
+    _bakeQueueProgress = null;
+    _lastBakeProgressNotify = null;
     _bakeActive = false;
     _bakeCancelRequested = false;
     notifyListeners();
@@ -557,11 +568,30 @@ class DashboardViewModel extends ChangeNotifier {
       );
       return await OsgBakeService(
         shouldCancel: () => _bakeCancelRequested,
+        onProgress: _onBakeProgress,
       ).bake(request);
     } catch (e, st) {
       _logger.warning("Bake task ${task.id} failed: $e\n$st");
       return OsgBakeResult(errorMessage: "Bake failed: $e");
     }
+  }
+
+  /// Throttled UI updates for [bakeQueueProgress] (stdin frame fraction).
+  void _onBakeProgress(int framesDone, int frameCount) {
+    if (frameCount <= 0) {
+      return;
+    }
+    _bakeQueueProgress = (framesDone / frameCount).clamp(0.0, 1.0);
+    final DateTime now = DateTime.now();
+    final bool force = framesDone >= frameCount;
+    if (!force &&
+        _lastBakeProgressNotify != null &&
+        now.difference(_lastBakeProgressNotify!) <
+            const Duration(milliseconds: 100)) {
+      return;
+    }
+    _lastBakeProgressNotify = now;
+    notifyListeners();
   }
 
   /// Exports hold-state OSG PNGs and a manifest for [recipe] against the
@@ -1716,6 +1746,8 @@ class DashboardViewModel extends ChangeNotifier {
     _bakeQueuePending.clear();
     _bakeQueueFinished.clear();
     _bakeQueuePaused = false;
+    _bakeQueueProgress = null;
+    _lastBakeProgressNotify = null;
     _mediaRepository = session.mediaRepository;
     _workspacePath = session.workspace.rootPath;
     await _loadWorkspaceSettings();

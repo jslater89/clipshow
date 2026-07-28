@@ -57,21 +57,7 @@ class DashboardBakeQueuePanel extends StatelessWidget {
               if (running == null)
                 _emptyLabel(theme, "Nothing baking right now.")
               else
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  leading: const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  ),
-                  title: Text(running.mediaDisplayName),
-                  subtitle: Text(running.recipeName),
-                  trailing: TextButton(
-                    onPressed: viewModel.requestBakeCancel,
-                    child: const Text("Cancel"),
-                  ),
-                ),
+                _runningBakeRow(theme, viewModel, running, gap8),
               SizedBox(height: gap16),
               Text(
                 "Pending (${pending.length})",
@@ -138,6 +124,38 @@ class DashboardBakeQueuePanel extends StatelessWidget {
       color: theme.colorScheme.onSurfaceVariant,
     ),
   );
+
+  Widget _runningBakeRow(
+    ThemeData theme,
+    DashboardViewModel viewModel,
+    OsgBakeQueueTask running,
+    double gap8,
+  ) {
+    final double? progress = viewModel.bakeQueueProgress;
+    final String pctLabel = progress == null
+        ? "Starting\u2026"
+        : "${(progress * 100).floor()}%";
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(running.mediaDisplayName),
+          subtitle: Text("${running.recipeName} \u00b7 $pctLabel"),
+          trailing: TextButton(
+            onPressed: viewModel.requestBakeCancel,
+            child: const Text("Cancel"),
+          ),
+        ),
+        LinearProgressIndicator(
+          value: progress,
+          minHeight: 4,
+        ),
+        SizedBox(height: gap8),
+      ],
+    );
+  }
 
   Widget _finishedRow(
     BuildContext context,

@@ -6,7 +6,7 @@ A custom, local desktop application built to serve as a unified media manager, v
 ## 2. Technology Stack
 * **Framework:** Flutter (targeting desktop OS: Windows/Linux)
 * **Video decoding:** `fvp` (hardware-accelerated wrapper for `video_player` via FFmpeg); decoder profiles and verbosity are configurable per workspace
-* **FFmpeg (CLI):** `ffmpeg` / `ffprobe` for thumbnails, duration and frame-rate probing, and bake trim/composite passes
+* **FFmpeg (CLI):** `ffmpeg` / `ffprobe` for thumbnails, duration and frame-rate probing, and bake one-pass seek + raw-RGBA overlay encode
 * **OBS integration:** `obs_websocket` (JSON-RPC–style requests such as `SetCurrentProgramScene`, `GetCurrentProgramScene`, `GetSceneItemId`, `SetSceneItemEnabled`, `SetRecordDirectory`, `StartRecord`, `StopRecord`)
 * **Database:** `sqflite` with **`sqflite_common_ffi`** on desktop (SQLite file per workspace)
 * **Drawing engine:** Flutter `CustomPaint` with gesture-driven strokes (mouse/touch pan)
@@ -90,8 +90,8 @@ The application operates in mutually exclusive UI states to prevent broadcast er
 * **Trigger:** **Bake** on the dashboard preview action bar (requires at least one **bake recipe** in workspace settings). Operator picks **Queue** or **Now** per recipe.
 * **Recipe:** Named workspace setting (`osg.bakeRecipes` JSON) listing **cues**: each cue binds an **OSG preset slot** to a visible window between **start** and **end** anchors (clip start/end, absolute ms from clip start, or offset ms from clip end).
 * **Validation:** At enqueue time, each cue’s preset **required semantic tags** must be satisfied on the target media row; otherwise the job is rejected with an error (no partial queue).
-* **Pipeline:** `ffmpeg` trim/re-encode segment → per-frame OSG render (`OsgFrameRenderer`, dart:ui) to PNG sequence → `ffmpeg` scale/letterbox + overlay composite → copy to **playout output** folder (default `export`, same as Record playout) as `{displayName}_baked.mp4` with numeric dedup suffix. Temp work dir deleted afterward.
-* **Queue:** Session-scoped pending/running/finished task lists; **Pause** stops dequeuing (in-flight bake continues); **Now** inserts at queue head and bypasses pause. Cancel cooperates at safe checkpoints during render/ffmpeg.
+* **Pipeline:** One-pass `ffmpeg`: seek/limit the master (`-ss`/`-t`), scale/letterbox to playout canvas, overlay OSG frames streamed as raw straight RGBA on stdin (`OsgFrameRenderer.renderFrameRawRgba`, dart:ui). Static hold/empty spans reuse the previous overlay buffer (visibility fingerprint) without re-rasterizing; enter/exit still render every frame. Encode once (H.264 + AAC) → copy to **playout output** folder (default `export`, same as Record playout) as `{displayName}_baked.mp4` with numeric dedup suffix. Temp work dir deleted afterward.
+* **Queue:** Session-scoped pending/running/finished task lists; **Pause** stops dequeuing (in-flight bake continues); **Now** inserts at queue head and bypasses pause. Cancel cooperates at safe checkpoints during render/ffmpeg. Running (and **Now** dialog) show **frame-stream progress** (`framesDone`/`frameCount` from the stdin overlay loop).
 * **Post-export:** SnackBar with **Reveal**; no library ingest.
 
 ### OSG graphic export (ZIP)
@@ -143,7 +143,7 @@ Logical “clip” fields map as: **master path** via join to master row; **titl
 * **Dashboard layout:** Header plus **left** file list and **right** tab column (Manage, Capture, Bake Queue when recipes exist, Tag Sets); preview vs tagging split; capture tab; bake queue panel.
 * **OBS capture mode:** Preview vs Capture tab; **`SetRecordDirectory`**, optional capture scene, **`StartRecord`** / **`StopRecord`**, copy from staging to output (staging file removed), tags on new master; restore OBS record directory after stop.
 * **Record playout export:** Preview **Record** button; OBS record during Video-scene playout; copy to playout output on exit; ignored folders; reveal-in-folder SnackBar.
-* **Bake export:** Preview **Bake** button; offline ffmpeg pipeline with per-frame OSG compositing; bake recipes and queue in dashboard; semantic-tag validation at enqueue; output to playout output folder.
+* **Bake export:** Preview **Bake** button; offline one-pass ffmpeg with streamed OSG overlays; bake recipes and queue in dashboard; semantic-tag validation at enqueue; output to playout output folder.
 * **OSG graphic export:** Preview **Export OSG Graphics** button; hold-state PNGs + manifest ZIP via `OsgGraphicExportService`; same semantic validation and clip duration probe as bake.
 * **OSG Mode:** Tag Sets tab; transparent graphics surface; optional OBS **overlay source** enable on current program + **`osg_on`** webhook on enter; disable that item + **`osg_off`** webhook on exit; tag-set quick slots **1–5**, preset toggles **6–0**.
 * **Tagging and organization:** Clips in SQLite with **in/out**, tags, optional display names; saved clips and saved-tag workflows.

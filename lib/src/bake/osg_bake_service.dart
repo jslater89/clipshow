@@ -1,7 +1,8 @@
 import "dart:async";
+import "dart:convert";
 import "dart:io";
-import "dart:typed_data";
 
+import "package:flutter/foundation.dart";
 import "package:logging/logging.dart";
 import "package:path/path.dart" as p;
 
@@ -57,20 +58,25 @@ class OsgBakeRequest {
   final String exportBaseName;
 }
 
-/// Offline single-item bake: ffmpeg trim, OSG PNG frame sequence render,
-/// ffmpeg scale/letterbox + overlay composite, copy into the export folder.
+/// Offline single-item bake: one-pass ffmpeg (seek master + scale/letterbox +
+/// overlay) with OSG frames streamed as raw straight RGBA on stdin.
 ///
 /// Frame rendering happens on the root isolate (dart:ui restriction) with
-/// periodic event-loop yields; ffmpeg passes run as external processes.
+/// periodic event-loop yields and last-frame reuse when visibility is static.
 class OsgBakeService {
-  OsgBakeService({this.shouldCancel});
+  OsgBakeService({this.shouldCancel, this.onProgress});
 
   /// When this returns true, the bake aborts at the next safe checkpoint.
   final bool Function()? shouldCancel;
 
+  /// Called as overlay frames are written to ffmpeg stdin (`framesDone` is
+  /// 1…[frameCount]). Suitable for UI progress; may fire every frame.
+  final void Function(int framesDone, int frameCount)? onProgress;
+
   final Logger _logger = Logger("OsgBakeService");
 
   static const int _yieldEveryNFrames = 5;
+  static const int _logProgressEveryPct = 5;
 
   bool get _cancelled => shouldCancel?.call() ?? false;
 
@@ -89,6 +95,7 @@ class OsgBakeService {
 
     Directory? tempDir;
     OsgFrameRenderer? renderer;
+    Process? ffmpeg;
     try {
       // Resolve the effective clip range in ms.
       int? outMs = request.outMs;
@@ -115,102 +122,46 @@ class OsgBakeService {
       );
 
       tempDir = await Directory.systemTemp.createTemp("obs_clipshow_bake_");
-      final String trimmedPath = p.join(tempDir.path, "trimmed.mp4");
-      final Directory framesDir = Directory(p.join(tempDir.path, "frames"));
-      await framesDir.create();
+      final String bakedPath = p.join(tempDir.path, "baked.mp4");
+      final int w = request.outputSize.width;
+      final int h = request.outputSize.height;
+      final int frameCount = (durationMs * fps / 1000).ceil().clamp(1, 1 << 24);
+      final int expectedRawBytes = w * h * 4;
 
-      final DateTime trimStart = DateTime.now();
-      // 1) Trim (re-encode for frame-accurate in/out; scaling happens in the
-      // composite pass so there is a single scale+pad).
-      final String? trimError = await _runFfmpeg(<String>[
-        "-y",
-        "-ss",
-        (request.inMs / 1000).toStringAsFixed(3),
-        "-i",
-        request.masterFileAbsolute,
-        "-t",
-        (durationMs / 1000).toStringAsFixed(3),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "18",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        trimmedPath,
-      ], phase: "trim");
-      if (trimError != null) {
-        return OsgBakeResult(errorMessage: trimError);
-      }
-      if (_cancelled) {
-        return const OsgBakeResult(errorMessage: "Bake cancelled.");
-      }
-      final Duration trimDuration = DateTime.now().difference(trimStart);
-      _logger.info("Trim complete: $trimDuration");
-
-      // 2) Render the OSG overlay PNG sequence at canvas resolution.
-      final DateTime renderStart = DateTime.now();
       renderer = OsgFrameRenderer(
         presets: request.presets,
         cues: request.recipe.cues,
         clipDurationMs: durationMs,
-        outputWidthPx: request.outputSize.width,
-        outputHeightPx: request.outputSize.height,
+        outputWidthPx: w,
+        outputHeightPx: h,
         semanticTextByTypeId: request.semanticTextByTypeId,
         annotationsText: request.annotationsText,
         workspaceRoot: request.workspaceRoot,
       );
       await renderer.loadAssets();
-      final int frameCount = (durationMs * fps / 1000).ceil().clamp(1, 1 << 24);
-      _logger.info(
-        "Bake render: $frameCount frames at ${fps.toStringAsFixed(3)} fps "
-        "(${request.outputSize.width}x${request.outputSize.height}).",
-      );
 
-      for (int i = 0; i < frameCount; i++) {
-        if (_cancelled) {
-          return const OsgBakeResult(errorMessage: "Bake cancelled.");
-        }
-        final int tMs = (i * 1000 / fps).round();
-        final Uint8List png = await renderer.renderFramePng(tMs);
-        final String framePath = p.join(
-          framesDir.path,
-          "frame_${i.toString().padLeft(6, "0")}.png",
-        );
-        await File(framePath).writeAsBytes(png, flush: false);
-        if (i % _yieldEveryNFrames == 0) {
-          await Future<void>.delayed(Duration.zero);
-        }
-        //_logger.finest("rendered frame $i/$frameCount");
-      }
-
-      final Duration renderDuration = DateTime.now().difference(renderStart);
-      _logger.info("Render OSG frames complete: $renderDuration");
-
-      if (_cancelled) {
-        return const OsgBakeResult(errorMessage: "Bake cancelled.");
-      }
-
-      final DateTime compositeStart = DateTime.now();
-      // 3) Composite: scale/letterbox source into the canvas, overlay OSG.
-      final int w = request.outputSize.width;
-      final int h = request.outputSize.height;
-      final String bakedPath = p.join(tempDir.path, "baked.mp4");
       final String filter =
           "[0:v]scale=$w:$h:force_original_aspect_ratio=decrease,"
           "pad=$w:$h:(ow-iw)/2:(oh-ih)/2[bg];"
           "[bg][1:v]overlay=0:0,format=yuv420p[v]";
-      final String? compositeError = await _runFfmpeg(<String>[
+      final List<String> args = <String>[
         "-y",
+        "-ss",
+        (request.inMs / 1000).toStringAsFixed(3),
+        "-t",
+        (durationMs / 1000).toStringAsFixed(3),
         "-i",
-        trimmedPath,
+        request.masterFileAbsolute,
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgba",
+        "-video_size",
+        "${w}x$h",
         "-framerate",
         fps.toStringAsFixed(6),
         "-i",
-        p.join(framesDir.path, "frame_%06d.png"),
+        "pipe:0",
         "-filter_complex",
         filter,
         "-map",
@@ -224,20 +175,108 @@ class OsgBakeService {
         "-crf",
         "18",
         "-c:a",
-        "copy",
+        "aac",
+        "-b:a",
+        "192k",
         "-shortest",
         bakedPath,
-      ], phase: "composite");
-      if (compositeError != null) {
-        return OsgBakeResult(errorMessage: compositeError);
+      ];
+
+      _logger.info(
+        "Bake render+composite: $frameCount frames at "
+        "${fps.toStringAsFixed(3)} fps (${w}x$h).",
+      );
+      _logger.fine("ffmpeg (bake): ${args.join(" ")}");
+
+      final DateTime bakeStart = DateTime.now();
+      ffmpeg = await Process.start("ffmpeg", args);
+      final StringBuffer stderrBuf = StringBuffer();
+      final StreamSubscription<List<int>> stderrSub = ffmpeg.stderr.listen(
+        (List<int> chunk) => stderrBuf.write(utf8.decode(chunk, allowMalformed: true)),
+      );
+      // Drain stdout so a full pipe cannot stall ffmpeg.
+      final StreamSubscription<List<int>> stdoutSub =
+          ffmpeg.stdout.listen((_) {});
+
+      List<double>? lastFingerprint;
+      Uint8List? lastRaw;
+      int rasterizedFrames = 0;
+      int reusedFrames = 0;
+      int lastLoggedPct = -_logProgressEveryPct;
+
+      try {
+        for (int i = 0; i < frameCount; i++) {
+          if (_cancelled) {
+            await _killFfmpeg(ffmpeg);
+            return const OsgBakeResult(errorMessage: "Bake cancelled.");
+          }
+          final int tMs = (i * 1000 / fps).round();
+          final List<double> fingerprint =
+              renderer.visibilityFingerprintAt(tMs);
+          final Uint8List raw;
+          if (lastRaw != null &&
+              lastFingerprint != null &&
+              listEquals(fingerprint, lastFingerprint)) {
+            raw = lastRaw;
+            reusedFrames++;
+          } else {
+            raw = await renderer.renderFrameRawRgba(tMs);
+            if (raw.length != expectedRawBytes) {
+              await _killFfmpeg(ffmpeg);
+              return OsgBakeResult(
+                errorMessage:
+                    "OSG frame byte length mismatch: got ${raw.length}, "
+                    "expected $expectedRawBytes.",
+              );
+            }
+            lastRaw = raw;
+            lastFingerprint = fingerprint;
+            rasterizedFrames++;
+          }
+          ffmpeg.stdin.add(raw);
+          await ffmpeg.stdin.flush();
+
+          final int framesDone = i + 1;
+          onProgress?.call(framesDone, frameCount);
+          final int pct = ((framesDone * 100) / frameCount).floor();
+          if (pct >= lastLoggedPct + _logProgressEveryPct ||
+              framesDone == frameCount) {
+            lastLoggedPct = pct;
+            _logger.info(
+              "Bake progress: $pct% ($framesDone/$frameCount)",
+            );
+          }
+
+          if (i % _yieldEveryNFrames == 0) {
+            await Future<void>.delayed(Duration.zero);
+          }
+        }
+        await ffmpeg.stdin.close();
+      } catch (e) {
+        await _killFfmpeg(ffmpeg);
+        rethrow;
+      } finally {
+        await stderrSub.cancel();
+        await stdoutSub.cancel();
       }
-      final Duration compositeDuration = DateTime.now().difference(compositeStart);
-      _logger.info("Composite complete: $compositeDuration");
 
-      final Duration bakeDuration = DateTime.now().difference(trimStart);
-      _logger.info("Bake complete: $bakeDuration");
+      final int exitCode = await ffmpeg.exitCode;
+      final Duration streamDuration = DateTime.now().difference(bakeStart);
+      if (exitCode != 0) {
+        final String stderr = stderrBuf.toString();
+        final String tail = stderr.length > 600
+            ? stderr.substring(stderr.length - 600)
+            : stderr;
+        _logger.warning("ffmpeg bake failed ($exitCode): $tail");
+        return OsgBakeResult(errorMessage: "ffmpeg bake failed: $tail");
+      }
 
-      // 4) Copy into the export folder with a unique name.
+      _logger.info(
+        "Bake render+composite complete: $streamDuration "
+        "(rasterized $rasterizedFrames, reused $reusedFrames).",
+      );
+
+      // Copy into the export folder with a unique name.
       final String dest = await _copyToOutputDir(
         sourceAbsolute: bakedPath,
         outputDirAbsolute: request.outputDirAbsolute,
@@ -250,6 +289,11 @@ class OsgBakeService {
       _logger.warning("Bake failed: $e\n$st");
       return OsgBakeResult(errorMessage: "Bake failed: $e");
     } finally {
+      if (ffmpeg != null) {
+        try {
+          ffmpeg.kill();
+        } catch (_) {}
+      }
       renderer?.dispose();
       if (tempDir != null) {
         try {
@@ -261,21 +305,13 @@ class OsgBakeService {
     }
   }
 
-  Future<String?> _runFfmpeg(
-    List<String> args, {
-    required String phase,
-  }) async {
-    _logger.fine("ffmpeg ($phase): ${args.join(" ")}");
-    final ProcessResult result = await Process.run("ffmpeg", args);
-    if (result.exitCode != 0) {
-      final String stderr = "${result.stderr}";
-      final String tail = stderr.length > 600
-          ? stderr.substring(stderr.length - 600)
-          : stderr;
-      _logger.warning("ffmpeg $phase failed (${result.exitCode}): $tail");
-      return "ffmpeg $phase failed: $tail";
-    }
-    return null;
+  Future<void> _killFfmpeg(Process process) async {
+    try {
+      process.kill();
+    } catch (_) {}
+    try {
+      await process.exitCode;
+    } catch (_) {}
   }
 
   static String _sanitizeExportBaseName(String raw) {

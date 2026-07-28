@@ -130,7 +130,8 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
     }
     final String nextKey =
         "${obsConfig.serverAddress}:${obsConfig.port}:${obsConfig.password}:${obsConfig.videoScene}:${obsConfig.faceScene}:${obsConfig.osgOverlaySource}";
-    if (_obsConfigKey != nextKey) {
+    final bool configChanged = _obsConfigKey != nextKey;
+    if (configChanged) {
       _obsConfigKey = nextKey;
       if (mounted) {
         setState(() {
@@ -139,8 +140,14 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
         });
       }
     }
+    // Only connect/ping when OBS settings change or the 12s loop was not
+    // already running. DashboardViewModel notifies for many unrelated reasons
+    // (e.g. bake progress); pinging on every notify reconnects OBS in a tight loop.
+    final bool loopWasStopped = _obsPingTimer == null;
     _startObsPingLoop();
-    unawaited(_attemptObsPing());
+    if (configChanged || loopWasStopped) {
+      unawaited(_attemptObsPing());
+    }
   }
 
   Future<void> _attemptObsPing() async {

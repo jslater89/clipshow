@@ -679,16 +679,41 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                 final bool ourTaskRunning =
                     viewModel.bakeQueueRunningTask?.id == nowJob.taskId;
                 return AlertDialog(
-                  content: Row(
+                  content: Column(
                     mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      const CircularProgressIndicator(),
-                      SizedBox(width: scaleDimension(ctx, 16)),
-                      Text(
-                        ourTaskRunning
-                            ? "Rendering\u2026"
-                            : "Waiting for the current bake to finish\u2026",
+                      Row(
+                        children: <Widget>[
+                          SizedBox(
+                            width: scaleDimension(ctx, 28),
+                            height: scaleDimension(ctx, 28),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              value: ourTaskRunning
+                                  ? viewModel.bakeQueueProgress
+                                  : null,
+                            ),
+                          ),
+                          SizedBox(width: scaleDimension(ctx, 16)),
+                          Expanded(
+                            child: Text(
+                              !ourTaskRunning
+                                  ? "Waiting for the current bake to finish\u2026"
+                                  : viewModel.bakeQueueProgress == null
+                                  ? "Rendering\u2026"
+                                  : "Rendering "
+                                        "${(viewModel.bakeQueueProgress! * 100).floor()}%\u2026",
+                            ),
+                          ),
+                        ],
                       ),
+                      if (ourTaskRunning) ...<Widget>[
+                        SizedBox(height: scaleDimension(ctx, 16)),
+                        LinearProgressIndicator(
+                          value: viewModel.bakeQueueProgress,
+                        ),
+                      ],
                     ],
                   ),
                   actions: <Widget>[

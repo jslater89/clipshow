@@ -169,7 +169,7 @@ Choosing **Bake** opens a recipe picker. For each recipe you can **Queue** the j
 
 Recipes define timed **cues**—which OSG preset is visible from which anchor in clip time (clip start/end, offset from start, or offset from end). At queue time Clipshow checks that the selected item satisfies each cue preset’s required semantic tags; missing tags block the job with an error.
 
-When the workspace has bake recipes, the **Bake Queue** tab shows the runner (**Start** / **Pause**), the currently running task, and pending and finished tasks. Pausing stops dequeuing new work; a **Now** bake still runs immediately when you choose it from Manage. Completed rows can reveal the output file in your file manager.
+When the workspace has bake recipes, the **Bake Queue** tab shows the runner (**Start** / **Pause**), the currently running task with a progress bar (percent of overlay frames streamed), and pending and finished tasks. Pausing stops dequeuing new work; a **Now** bake still runs immediately when you choose it from Manage. Completed rows can reveal the output file in your file manager.
 
 ### 6.7 Export OSG Graphics (ZIP)
 

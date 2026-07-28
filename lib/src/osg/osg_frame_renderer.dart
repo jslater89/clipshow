@@ -18,7 +18,8 @@ import "package:obs_clipshow/src/osg/osg_models.dart";
 /// fixed output canvas size ([PlayoutOutputSize]).
 ///
 /// Must run on the root isolate (`dart:ui` restriction). Template images are
-/// decoded once in [loadAssets], then [renderFramePng] is called per frame.
+/// decoded once in [loadAssets], then [renderFrameRawRgba] / [renderFramePng]
+/// is called per frame.
 ///
 /// Known simplification vs playout: text shrink-to-fit approximates the live
 /// `FittedBox.scaleDown` with a uniform scale when the laid-out text overflows
@@ -135,21 +136,83 @@ class OsgFrameRenderer {
     return _encodePicturePng(recorder);
   }
 
-  Future<Uint8List> _encodePicturePng(ui.PictureRecorder recorder) async {
+  Future<Uint8List> _encodePicture(
+    ui.PictureRecorder recorder,
+    ui.ImageByteFormat format,
+  ) async {
     final ui.Picture picture = recorder.endRecording();
     final ui.Image image = await picture.toImage(outputWidthPx, outputHeightPx);
     picture.dispose();
     try {
-      final ByteData? bytes = await image.toByteData(
-        format: ui.ImageByteFormat.png,
-      );
+      final ByteData? bytes = await image.toByteData(format: format);
       if (bytes == null) {
-        throw StateError("PNG encode returned null byte data.");
+        throw StateError("Image encode returned null byte data ($format).");
       }
       return bytes.buffer.asUint8List();
     } finally {
       image.dispose();
     }
+  }
+
+  Future<Uint8List> _encodePicturePng(ui.PictureRecorder recorder) =>
+      _encodePicture(recorder, ui.ImageByteFormat.png);
+
+  void _drawFullFrame(ui.Canvas canvas, int tMs) {
+    final double w = outputWidthPx.toDouble();
+    final double h = outputHeightPx.toDouble();
+    for (final OsgPresetSlot slot in OsgPresetSlot.values) {
+      final int index = slot.presetIndex;
+      if (index < 0 || index >= presets.length) {
+        continue;
+      }
+      _drawPreset(canvas, slot, presets[index], tMs, w, h);
+    }
+  }
+
+  /// Samples every preset slot's bake visibility at [tMs] into a comparable
+  /// key (opacity, dx, dy per slot in [OsgPresetSlot] order). Hold and
+  /// fully-hidden spans share a stable fingerprint so bakers can reuse the
+  /// previous raw frame without re-rasterizing. Compare with list equality.
+  List<double> visibilityFingerprintAt(int tMs) {
+    final double w = outputWidthPx.toDouble();
+    final double h = outputHeightPx.toDouble();
+    final List<double> parts = <double>[];
+    for (final OsgPresetSlot slot in OsgPresetSlot.values) {
+      final int index = slot.presetIndex;
+      if (index < 0 || index >= presets.length) {
+        parts.addAll(const <double>[0, 0, 0]);
+        continue;
+      }
+      final OsgPreset preset = presets[index];
+      final OsgNormRect fr = preset.frame;
+      final double fw = fr.width * w;
+      final double fh = fr.height * h;
+      final ({double opacity, Offset offset}) vis = sampleSlotVisibilityAt(
+        slot: slot,
+        preset: preset,
+        cues: cues,
+        tMs: tMs,
+        clipDurationMs: clipDurationMs,
+        frameWidthPx: fw,
+        frameHeightPx: fh,
+      );
+      parts.add(vis.opacity);
+      parts.add(vis.offset.dx);
+      parts.add(vis.offset.dy);
+    }
+    return parts;
+  }
+
+  /// Renders the full OSG overlay at [tMs] as straight RGBA (`W*H*4` bytes).
+  ///
+  /// Prefer this for bake → ffmpeg `-pix_fmt rgba` overlays. Graphic export
+  /// continues to use PNG via [renderSlotHoldStatePng].
+  Future<Uint8List> renderFrameRawRgba(int tMs) async {
+    assert(_assetsLoaded, "Call loadAssets() before renderFrameRawRgba().");
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final ui.Canvas canvas = ui.Canvas(recorder);
+    _drawFullFrame(canvas, tMs);
+    return _encodePicture(recorder, ui.ImageByteFormat.rawStraightRgba);
   }
 
   /// Renders the full OSG overlay at [tMs] as a transparent PNG of
@@ -158,17 +221,7 @@ class OsgFrameRenderer {
     assert(_assetsLoaded, "Call loadAssets() before renderFramePng().");
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final ui.Canvas canvas = ui.Canvas(recorder);
-    final double w = outputWidthPx.toDouble();
-    final double h = outputHeightPx.toDouble();
-
-    for (final OsgPresetSlot slot in OsgPresetSlot.values) {
-      final int index = slot.presetIndex;
-      if (index < 0 || index >= presets.length) {
-        continue;
-      }
-      _drawPreset(canvas, slot, presets[index], tMs, w, h);
-    }
-
+    _drawFullFrame(canvas, tMs);
     return _encodePicturePng(recorder);
   }
 
