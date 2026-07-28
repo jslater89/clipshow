@@ -54,7 +54,7 @@ class DashboardWorkspaceHeader extends StatelessWidget {
         if (workspacePath != null) ...<Widget>[
           SizedBox(width: gap8),
           Tooltip(
-            message: "Reveal On Filesystem",
+            message: "Reveal on filesystem",
             child: Focus(
               canRequestFocus: false,
               skipTraversal: true,

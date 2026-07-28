@@ -155,8 +155,15 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton.icon(
-                      onPressed: () =>
-                          viewModel.selectMasterForClip(selectedItem),
+                      onPressed: () {
+                        final String? error =
+                            viewModel.selectMasterForClip(selectedItem);
+                        if (error != null && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(error)),
+                          );
+                        }
+                      },
                       icon: const Icon(Icons.link),
                       label: const Text("Go to Source Master"),
                     ),

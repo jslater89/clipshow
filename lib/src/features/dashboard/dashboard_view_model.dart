@@ -1748,6 +1748,7 @@ class DashboardViewModel extends ChangeNotifier {
     _bakeQueuePaused = false;
     _bakeQueueProgress = null;
     _lastBakeProgressNotify = null;
+    _pendingScrollToStableKey = null;
     _mediaRepository = session.mediaRepository;
     _workspacePath = session.workspace.rootPath;
     await _loadWorkspaceSettings();
@@ -1847,17 +1848,57 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void selectMasterForClip(MediaListItem clipItem) {
-    if (clipItem.type != MediaListItemType.clip) {
+  /// Stable key of a list row that should be scrolled into view once, or null.
+  String? get pendingScrollToStableKey => _pendingScrollToStableKey;
+
+  String? _pendingScrollToStableKey;
+
+  void clearPendingScrollToStableKey() {
+    if (_pendingScrollToStableKey == null) {
       return;
     }
+    _pendingScrollToStableKey = null;
+    notifyListeners();
+  }
+
+  /// Selects the source master for [clipItem]. Clears the **Show Clips**
+  /// filter when set so the master can appear in the list. Returns null on
+  /// success (and sets [pendingScrollToStableKey]), or an error message when
+  /// the master is missing or still hidden by other filters.
+  String? selectMasterForClip(MediaListItem clipItem) {
+    if (clipItem.type != MediaListItemType.clip) {
+      return "Not a clip.";
+    }
+    MediaListItem? master;
     final int masterId = clipItem.clip!.masterMediaId;
     for (final MediaListItem item in _allItems) {
       if (item.type == MediaListItemType.master && item.id == masterId) {
-        selectItem(item);
-        return;
+        master = item;
+        break;
       }
     }
+    if (master == null) {
+      return "Source master is no longer in the library.";
+    }
+    if (_clipsOfMasterFilterMediaId != null) {
+      _clipsOfMasterFilterMediaId = null;
+      _applyFilters();
+    }
+    final bool visible = _visibleItems.any(
+      (MediaListItem item) => item.stableKey == master!.stableKey,
+    );
+    _selectedItemKey = master.stableKey;
+    _markInMs = null;
+    _markOutMs = null;
+    _reconcilePreviewOsgPresetVisibilityForSelectedItem();
+    if (!visible) {
+      _pendingScrollToStableKey = null;
+      notifyListeners();
+      return "Source master is hidden by the current filters.";
+    }
+    _pendingScrollToStableKey = master.stableKey;
+    notifyListeners();
+    return null;
   }
 
   int clipCountForMaster(int masterMediaId) {

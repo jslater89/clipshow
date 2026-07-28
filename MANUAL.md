@@ -100,7 +100,7 @@ Below the search row, active filters appear as chips you can delete individually
 
 ### 5.2 Anatomy of a list row
 
-Each row corresponds to one media item (a master or a clip): thumbnail on the left, primary text and tags in the middle, and **Reveal On Filesystem** plus play on the right (tag-set rows show Enter OSG Mode instead). Click the row body to select it (highlighted background); the play button sends a healthy item to Playout. Right-click the row (outside a tag chip) for **Reveal On Filesystem**, which opens the master video in your file manager (same as the outlined-folder icon next to Play). Clips reveal their underlying master file.
+Each row corresponds to one media item (a master or a clip): thumbnail on the left, primary text and tags in the middle, and a type-specific action plus play on the right (tag-set rows show Enter OSG Mode instead). Click the row body to select it (highlighted background); the play button sends a healthy item to Playout. Masters get **Reveal On Filesystem** (outlined folder, or right-click the row outside a tag chip) to open the video in your file manager. Clips get **Go to Source Master** (link icon, or the same context menu) to select and scroll to the underlying master—same idea as the Tags panel control (see §6.2).
 
 The thumbnail shows a duration line when known (full length for a master, segment length for a clip with both marks set). The image comes from a sidecar file (`video.mp4.thumb.jpg`) when present, otherwise a placeholder until thumbnails finish. Masters can surface empty/unreadable-file states here and block play; clips reuse the source file for artwork and do not duplicate those warnings on this control.
 
@@ -153,7 +153,7 @@ Space toggles play/pause; **H** toggles the help overlay.
 
 The Tags card always reflects the current list selection. At the top it shows the item’s display name (and filename when they differ) with **Edit** to change the display override and **Clear** to drop it back to the filename.
 
-For a **clip**, **Go to Source Master** jumps selection to the underlying master file. For a **master** that already has clips, **Show Clips** / **Clear Clip Filter** toggles the file-list filter that limits the list to clips of that master (see §5).
+For a **clip**, **Go to Source Master** jumps selection to the underlying master file, clears the **Show Clips** filter if it was active, and scrolls that master into view in the file list. If other search/tag filters still hide the master, selection still moves but a SnackBar explains that the row is not visible. For a **master** that already has clips, **Show Clips** / **Clear Clip Filter** toggles the file-list filter that limits the list to clips of that master (see §5).
 
 Every tag on the item appears as a chip. Internal type tags cannot be deleted but behave like other chips for filtering the file list. Use **Add Tag** (with autocomplete from your library) and **Add** to attach user tags to the selection. The small **capture** control merges the selected item’s user tags into the Capture pane’s tag basket so new recordings inherit them.
 

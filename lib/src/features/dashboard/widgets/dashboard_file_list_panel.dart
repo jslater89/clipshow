@@ -260,7 +260,9 @@ class DashboardFileListPanel extends StatelessWidget {
                 );
 
                 final ThemeData theme = Theme.of(context);
-                return Material(
+                final bool scrollIntoView =
+                    viewModel.pendingScrollToStableKey == item.stableKey;
+                Widget row = Material(
                   color: isSelected
                       ? theme.colorScheme.surfaceContainerHighest
                       : Colors.transparent,
@@ -272,8 +274,9 @@ class DashboardFileListPanel extends StatelessWidget {
                         ? null
                         : (TapUpDetails details) {
                             unawaited(
-                              _showRevealContextMenu(
+                              _showMediaRowContextMenu(
                                 context: context,
+                                viewModel: viewModel,
                                 workspacePath: workspacePath,
                                 item: item,
                                 globalPosition: details.globalPosition,
@@ -430,19 +433,30 @@ class DashboardFileListPanel extends StatelessWidget {
                               icon: const Icon(Icons.layers_outlined),
                             )
                           else ...<Widget>[
-                            IconButton(
-                              tooltip: "Reveal On Filesystem",
-                              onPressed: () {
-                                unawaited(
-                                  _revealMediaItemOnFilesystem(
-                                    context,
-                                    workspacePath: workspacePath,
-                                    item: item,
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.folder_open_outlined),
-                            ),
+                            if (item.type == MediaListItemType.master)
+                              IconButton(
+                                tooltip: "Reveal on filesystem",
+                                onPressed: () {
+                                  unawaited(
+                                    _revealMediaItemOnFilesystem(
+                                      context,
+                                      workspacePath: workspacePath,
+                                      item: item,
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.folder_open_outlined),
+                              )
+                            else if (item.type == MediaListItemType.clip)
+                              IconButton(
+                                tooltip: "Go to source master",
+                                onPressed: () => _goToSourceMaster(
+                                  context,
+                                  viewModel,
+                                  item,
+                                ),
+                                icon: const Icon(Icons.link),
+                              ),
                             IconButton(
                               tooltip: mediaIssue == MediaIssue.none
                                   ? "Play"
@@ -477,6 +491,13 @@ class DashboardFileListPanel extends StatelessWidget {
                     ),
                   ),
                 );
+                if (scrollIntoView) {
+                  return _EnsureVisibleOnce(
+                    onDone: viewModel.clearPendingScrollToStableKey,
+                    child: row,
+                  );
+                }
+                return row;
               },
             ),
           ),
@@ -501,8 +522,9 @@ class DashboardFileListPanel extends StatelessWidget {
   }
 }
 
-Future<void> _showRevealContextMenu({
+Future<void> _showMediaRowContextMenu({
   required BuildContext context,
+  required DashboardViewModel viewModel,
   required String workspacePath,
   required MediaListItem item,
   required Offset globalPosition,
@@ -516,21 +538,46 @@ Future<void> _showRevealContextMenu({
   final String? selected = await showMenu<String>(
     context: context,
     position: position,
-    items: const <PopupMenuEntry<String>>[
-      PopupMenuItem<String>(
-        value: "reveal",
-        child: Text("Reveal On Filesystem"),
-      ),
+    items: <PopupMenuEntry<String>>[
+      if (item.type == MediaListItemType.master)
+        const PopupMenuItem<String>(
+          value: "reveal",
+          child: Text("Reveal On Filesystem"),
+        ),
+      if (item.type == MediaListItemType.clip)
+        const PopupMenuItem<String>(
+          value: "go_master",
+          child: Text("Go to Source Master"),
+        ),
     ],
   );
-  if (selected != "reveal" || !context.mounted) {
+  if (selected == null || !context.mounted) {
     return;
   }
-  await _revealMediaItemOnFilesystem(
-    context,
-    workspacePath: workspacePath,
-    item: item,
-  );
+  if (selected == "reveal") {
+    await _revealMediaItemOnFilesystem(
+      context,
+      workspacePath: workspacePath,
+      item: item,
+    );
+    return;
+  }
+  if (selected == "go_master") {
+    _goToSourceMaster(context, viewModel, item);
+  }
+}
+
+void _goToSourceMaster(
+  BuildContext context,
+  DashboardViewModel viewModel,
+  MediaListItem item,
+) {
+  final String? error = viewModel.selectMasterForClip(item);
+  if (error != null && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error)),
+    );
+  }
 }
 
 Future<void> _revealMediaItemOnFilesystem(
@@ -538,6 +585,9 @@ Future<void> _revealMediaItemOnFilesystem(
   required String workspacePath,
   required MediaListItem item,
 }) async {
+  if (item.type != MediaListItemType.master) {
+    return;
+  }
   final String absolute = WorkspaceMediaPaths.absoluteMasterPath(
     workspacePath,
     item.filePath,
@@ -551,6 +601,47 @@ Future<void> _revealMediaItemOnFilesystem(
       );
     }
   }
+}
+
+/// Scrolls [child] into view once after the first frame, then calls [onDone].
+class _EnsureVisibleOnce extends StatefulWidget {
+  const _EnsureVisibleOnce({
+    required this.onDone,
+    required this.child,
+  });
+
+  final VoidCallback onDone;
+  final Widget child;
+
+  @override
+  State<_EnsureVisibleOnce> createState() => _EnsureVisibleOnceState();
+}
+
+class _EnsureVisibleOnceState extends State<_EnsureVisibleOnce> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0.15,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        ).whenComplete(() {
+          if (mounted) {
+            widget.onDone();
+          }
+        }),
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// Master: probed file duration when present. Clip: marked segment length
