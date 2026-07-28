@@ -74,7 +74,7 @@ The built-in supported extensions are `.mp4`, `.mov`, `.mkv`, `.avi`, and `.webm
 
 With a workspace open, the dashboard is a wide horizontal layout: the file list occupies roughly the left two-fifths of the window and the right column fills the rest.
 
-Across the top, the header shows the folder control for Open workspace, a single line with the current workspace path (ellipsized when long), and a gear button that opens Workspace settings. When an OBS scene-switch profile is enabled in Workspace settings, an antenna icon appears between the path and the gear: green means the last periodic check reached OBS over WebSocket, red means it did not (the app keeps retrying). Hover the icon for a short status line, including the last successful contact time when known. If OBS integration is turned off or unset, that indicator is hidden altogether.
+Across the top, the header shows the folder control for Open workspace, a single line with the current workspace path (ellipsized when long), a **Reveal On Filesystem** control (outlined folder) that opens the workspace directory in your file manager when a workspace is selected, and a gear button that opens Workspace settings. When an OBS scene-switch profile is enabled in Workspace settings, an antenna icon appears between the path and the gear: green means the last periodic check reached OBS over WebSocket, red means it did not (the app keeps retrying). Hover the icon for a short status line, including the last successful contact time when known. If OBS integration is turned off or unset, that indicator is hidden altogether.
 
 The right column starts with a segmented control for **Manage**, **Capture**, **Tag Sets**, and—when the workspace defines at least one **bake recipe**—**Bake Queue**. On Manage, the upper area is the video player; a horizontal drag handle separates it from the tag and metadata tools below. Dragging adjusts how much vertical space goes to the player versus the Tags card, within fixed limits. On Capture, the whole column is dedicated to the capture workflow—there is no player/tag split. Tag Sets and Bake Queue each fill the column with their own panels (§7 and §6.6).
 
@@ -100,7 +100,7 @@ Below the search row, active filters appear as chips you can delete individually
 
 ### 5.2 Anatomy of a list row
 
-Each row corresponds to one media item (a master or a clip): thumbnail on the left, primary text and tags in the middle, and play on the right. Click the row body to select it (highlighted background); the play button sends a healthy item to Playout.
+Each row corresponds to one media item (a master or a clip): thumbnail on the left, primary text and tags in the middle, and **Reveal On Filesystem** plus play on the right (tag-set rows show Enter OSG Mode instead). Click the row body to select it (highlighted background); the play button sends a healthy item to Playout. Right-click the row (outside a tag chip) for **Reveal On Filesystem**, which opens the master video in your file manager (same as the outlined-folder icon next to Play). Clips reveal their underlying master file.
 
 The thumbnail shows a duration line when known (full length for a master, segment length for a clip with both marks set). The image comes from a sidecar file (`video.mp4.thumb.jpg`) when present, otherwise a placeholder until thumbnails finish. Masters can surface empty/unreadable-file states here and block play; clips reuse the source file for artwork and do not duplicate those warnings on this control.
 

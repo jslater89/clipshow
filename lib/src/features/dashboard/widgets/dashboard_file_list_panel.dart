@@ -15,6 +15,7 @@ import "package:obs_clipshow/src/media/media_clip.dart";
 import "package:obs_clipshow/src/media/master_media_file.dart";
 import "package:obs_clipshow/src/media/media_list_item.dart";
 import "package:obs_clipshow/src/workspace/workspace_media_paths.dart";
+import "package:obs_clipshow/src/util/reveal_file_in_folder.dart";
 
 class DashboardFileListPanel extends StatelessWidget {
   const DashboardFileListPanel({
@@ -267,6 +268,18 @@ class DashboardFileListPanel extends StatelessWidget {
                     onTap: () {
                       onMediaItemSelected(item);
                     },
+                    onSecondaryTapUp: isTagSet
+                        ? null
+                        : (TapUpDetails details) {
+                            unawaited(
+                              _showRevealContextMenu(
+                                context: context,
+                                workspacePath: workspacePath,
+                                item: item,
+                                globalPosition: details.globalPosition,
+                              ),
+                            );
+                          },
                     child: Padding(
                       padding: EdgeInsets.symmetric(
                         horizontal: rowHPad,
@@ -416,7 +429,20 @@ class DashboardFileListPanel extends StatelessWidget {
                                     ),
                               icon: const Icon(Icons.layers_outlined),
                             )
-                          else
+                          else ...<Widget>[
+                            IconButton(
+                              tooltip: "Reveal On Filesystem",
+                              onPressed: () {
+                                unawaited(
+                                  _revealMediaItemOnFilesystem(
+                                    context,
+                                    workspacePath: workspacePath,
+                                    item: item,
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.folder_open_outlined),
+                            ),
                             IconButton(
                               tooltip: mediaIssue == MediaIssue.none
                                   ? "Play"
@@ -445,6 +471,7 @@ class DashboardFileListPanel extends StatelessWidget {
                                     : Icons.close,
                               ),
                             ),
+                          ],
                         ],
                       ),
                     ),
@@ -471,6 +498,58 @@ class DashboardFileListPanel extends StatelessWidget {
       return;
     }
     await viewModel.createTagSet(name.trim());
+  }
+}
+
+Future<void> _showRevealContextMenu({
+  required BuildContext context,
+  required String workspacePath,
+  required MediaListItem item,
+  required Offset globalPosition,
+}) async {
+  final RelativeRect position = RelativeRect.fromLTRB(
+    globalPosition.dx,
+    globalPosition.dy,
+    globalPosition.dx,
+    globalPosition.dy,
+  );
+  final String? selected = await showMenu<String>(
+    context: context,
+    position: position,
+    items: const <PopupMenuEntry<String>>[
+      PopupMenuItem<String>(
+        value: "reveal",
+        child: Text("Reveal On Filesystem"),
+      ),
+    ],
+  );
+  if (selected != "reveal" || !context.mounted) {
+    return;
+  }
+  await _revealMediaItemOnFilesystem(
+    context,
+    workspacePath: workspacePath,
+    item: item,
+  );
+}
+
+Future<void> _revealMediaItemOnFilesystem(
+  BuildContext context, {
+  required String workspacePath,
+  required MediaListItem item,
+}) async {
+  final String absolute = WorkspaceMediaPaths.absoluteMasterPath(
+    workspacePath,
+    item.filePath,
+  );
+  try {
+    await revealFileInFolder(absolute);
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Could not reveal on filesystem: $e")),
+      );
+    }
   }
 }
 

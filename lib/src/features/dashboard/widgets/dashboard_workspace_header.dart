@@ -1,8 +1,11 @@
+import "dart:async";
+
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/util/reveal_file_in_folder.dart";
 
 class DashboardWorkspaceHeader extends StatelessWidget {
   const DashboardWorkspaceHeader({
@@ -22,6 +25,7 @@ class DashboardWorkspaceHeader extends StatelessWidget {
     final double gap8 = scaleDimension(context, 8);
     final double gap12 = scaleDimension(context, 12);
     final double antennaIconSize = scaleDimension(context, 20);
+    final String? workspacePath = viewModel.workspacePath;
     return Row(
       children: <Widget>[
         Tooltip(
@@ -40,13 +44,33 @@ class DashboardWorkspaceHeader extends StatelessWidget {
         SizedBox(width: gap8),
         Expanded(
           child: Text(
-            viewModel.workspacePath == null
+            workspacePath == null
                 ? "No workspace selected."
-                : "Workspace: ${viewModel.workspacePath}",
+                : "Workspace: $workspacePath",
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        if (workspacePath != null) ...<Widget>[
+          SizedBox(width: gap8),
+          Tooltip(
+            message: "Reveal On Filesystem",
+            child: Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              child: IconButton(
+                onPressed: viewModel.isLoading
+                    ? null
+                    : () {
+                        unawaited(
+                          _revealWorkspaceOnFilesystem(context, workspacePath),
+                        );
+                      },
+                icon: const Icon(Icons.folder_open_outlined),
+              ),
+            ),
+          ),
+        ],
         SizedBox(width: gap12),
         if (obsConnectionHealthy != null)
           Tooltip(
@@ -73,5 +97,20 @@ class DashboardWorkspaceHeader extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+Future<void> _revealWorkspaceOnFilesystem(
+  BuildContext context,
+  String workspacePath,
+) async {
+  try {
+    await revealFileInFolder(workspacePath);
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Could not reveal on filesystem: $e")),
+      );
+    }
   }
 }

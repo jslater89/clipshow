@@ -2,44 +2,50 @@ import "dart:io";
 
 import "package:path/path.dart" as p;
 
-/// Opens the file manager for [absoluteFilePath] (selected on macOS/Windows;
-/// containing folder via `xdg-open` on Linux).
-Future<void> revealFileInFolder(String absoluteFilePath) async {
-  final String path = p.normalize(p.absolute(absoluteFilePath));
+/// Opens the system file manager for [absolutePath].
+///
+/// When [absolutePath] is a file, selects/highlights it where the platform
+/// supports that (macOS Finder `-R`, Windows Explorer `/select`); on Linux
+/// opens the containing folder. When it is a directory, opens that folder.
+Future<void> revealFileInFolder(String absolutePath) async {
+  final String path = p.normalize(p.absolute(absolutePath));
   final File file = File(path);
-  if (!await file.exists()) {
-    throw FileSystemException("File not found", path);
+  final Directory directory = Directory(path);
+  final bool isFile = await file.exists();
+  final bool isDirectory = await directory.exists();
+  if (!isFile && !isDirectory) {
+    throw FileSystemException("Path not found", path);
   }
 
   if (Platform.isMacOS) {
-    final ProcessResult r = await Process.run("/usr/bin/open", <String>[
-      "-R",
-      path,
-    ]);
+    final List<String> args = isFile
+        ? <String>["-R", path]
+        : <String>[path];
+    final ProcessResult r = await Process.run("/usr/bin/open", args);
     if (r.exitCode != 0) {
-      throw StateError("Could not reveal file in Finder.");
+      throw StateError("Could not reveal path in Finder.");
     }
     return;
   }
 
   if (Platform.isWindows) {
-    final ProcessResult r = await Process.run("explorer.exe", <String>[
-      "/select,",
-      path,
-    ]);
+    final List<String> args = isFile
+        ? <String>["/select,", path]
+        : <String>[path];
+    final ProcessResult r = await Process.run("explorer.exe", args);
     if (r.exitCode != 0) {
-      throw StateError("Could not reveal file in Explorer.");
+      throw StateError("Could not reveal path in Explorer.");
     }
     return;
   }
 
   if (Platform.isLinux) {
-    final String directory = p.dirname(path);
-    final ProcessResult r = await Process.run("xdg-open", <String>[directory]);
+    final String toOpen = isFile ? p.dirname(path) : path;
+    final ProcessResult r = await Process.run("xdg-open", <String>[toOpen]);
     if (r.exitCode == 0) {
       return;
     }
-    throw StateError("Could not open export folder with xdg-open.");
+    throw StateError("Could not open folder with xdg-open.");
   }
 
   throw UnsupportedError(
