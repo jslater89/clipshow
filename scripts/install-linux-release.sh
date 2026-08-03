@@ -4,8 +4,6 @@
 #
 # Runtime notes:
 #   - FFmpeg/ffprobe must be on PATH (thumbnails/ingest).
-#   - If using the Media Kit player backend, install system libmpv
-#     (e.g. apt install libmpv-dev / mpv).
 #
 # Usage:
 #   ./scripts/install-linux-release.sh [options]

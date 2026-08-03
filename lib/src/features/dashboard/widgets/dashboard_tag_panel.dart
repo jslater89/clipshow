@@ -154,7 +154,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                 if (selectedItem.type == MediaListItemType.clip)
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
+                    child: TextButton(
                       onPressed: () {
                         final String? error =
                             viewModel.selectMasterForClip(selectedItem);
@@ -164,25 +164,18 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                           );
                         }
                       },
-                      icon: const Icon(Icons.link),
-                      label: const Text("Go to Source Master"),
+                      child: const Text("Go to Source Master"),
                     ),
                   ),
                 if (selectedItem.type == MediaListItemType.master &&
                     viewModel.clipCountForMaster(selectedItem.master!.id) > 0)
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
+                    child: TextButton(
                       onPressed: () => viewModel.toggleClipsOfMasterFilter(
                         selectedItem.master!.id,
                       ),
-                      icon: Icon(
-                        viewModel.clipsOfMasterFilterMediaId ==
-                                selectedItem.master!.id
-                            ? Icons.filter_alt
-                            : Icons.filter_list_outlined,
-                      ),
-                      label: Text(
+                      child: Text(
                         viewModel.clipsOfMasterFilterMediaId ==
                                 selectedItem.master!.id
                             ? "Clear Clip Filter"

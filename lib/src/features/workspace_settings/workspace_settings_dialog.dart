@@ -353,34 +353,6 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
                 ],
               ),
               Divider(height: _sectionDivider(context)),
-              _SectionTitle("Playback Engine", theme),
-              SizedBox(height: _gap(context)),
-              DropdownButtonFormField<PlayerBackend>(
-                initialValue: viewModel.playerBackend,
-                decoration: const InputDecoration(
-                  labelText: "Player Backend",
-                  border: OutlineInputBorder(),
-                  helperText:
-                      "Applies at next app start. Fvp uses libmdk; Media Kit uses libmpv.",
-                ),
-                items: const <DropdownMenuItem<PlayerBackend>>[
-                  DropdownMenuItem<PlayerBackend>(
-                    value: PlayerBackend.fvp,
-                    child: Text("Fvp (Default)"),
-                  ),
-                  DropdownMenuItem<PlayerBackend>(
-                    value: PlayerBackend.mediaKit,
-                    child: Text("Media Kit"),
-                  ),
-                ],
-                onChanged: (PlayerBackend? value) {
-                  if (value == null) {
-                    return;
-                  }
-                  unawaited(viewModel.savePlayerBackend(value));
-                },
-              ),
-              Divider(height: _sectionDivider(context)),
               _SectionTitle("Decoder config", theme),
               SizedBox(height: _gap(context)),
               Row(

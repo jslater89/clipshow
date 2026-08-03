@@ -3,7 +3,6 @@ import "dart:io";
 import "package:flutter/material.dart";
 import "package:fvp/fvp.dart" as fvp;
 import "package:logging/logging.dart";
-import "package:media_kit/media_kit.dart";
 import "package:window_manager/window_manager.dart";
 
 import "package:obs_clipshow/src/app/app.dart";
@@ -21,33 +20,31 @@ Future<void> main() async {
   await windowManager.ensureInitialized();
   final _StartupVideoSettings startupSettings =
       await _loadStartupVideoSettings();
+  // Playback-engine selector is parked; always use FVP for now. Media Kit
+  // adapter remains in-tree for later compositor A/B.
   ClipMediaPlayerFactory.configure(
-    startupSettings.playerBackend,
+    PlayerBackend.fvp,
     textureCap: startupSettings.playoutOutputSize,
   );
-  if (startupSettings.playerBackend == PlayerBackend.mediaKit) {
-    MediaKit.ensureInitialized();
-  } else {
-    final PlayoutOutputSize textureCap = startupSettings.playoutOutputSize;
-    fvp.registerWith(
-      options: <String, Object>{
-        "platforms": <String>["windows", "linux", "macos"],
-        "video.decoders": startupSettings.decoderOptions,
-        // Cap native GL textures to the playout canvas so 4K+ sources do not
-        // allocate full-frame surfaces for Manage preview / playout (fvp scales
-        // with aspect preserved when fitMaxSize is true).
-        "maxWidth": textureCap.width,
-        "maxHeight": textureCap.height,
-        "fitMaxSize": true,
-        // MDK player buffer: min ms when low + max ms cap (reduces PulseAudio underruns).
-        "player": <String, String>{"buffer": "2000+60000"},
-        // Applied after fvp's internal "log":"all"; overrides MDK global log level.
-        "global": <String, Object>{
-          "log": _mdkGlobalLogOption(startupSettings.logVerbosity),
-        },
+  final PlayoutOutputSize textureCap = startupSettings.playoutOutputSize;
+  fvp.registerWith(
+    options: <String, Object>{
+      "platforms": <String>["windows", "linux", "macos"],
+      "video.decoders": startupSettings.decoderOptions,
+      // Cap native GL textures to the playout canvas so 4K+ sources do not
+      // allocate full-frame surfaces for Manage preview / playout (fvp scales
+      // with aspect preserved when fitMaxSize is true).
+      "maxWidth": textureCap.width,
+      "maxHeight": textureCap.height,
+      "fitMaxSize": true,
+      // MDK player buffer: min ms when low + max ms cap (reduces PulseAudio underruns).
+      "player": <String, String>{"buffer": "2000+60000"},
+      // Applied after fvp's internal "log":"all"; overrides MDK global log level.
+      "global": <String, Object>{
+        "log": _mdkGlobalLogOption(startupSettings.logVerbosity),
       },
-    );
-  }
+    },
+  );
   _configureLogging(startupSettings.fvpLogVerbosity);
   runApp(const ObsClipshowApp());
 }
