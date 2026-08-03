@@ -218,6 +218,8 @@ class DashboardViewModel extends ChangeNotifier {
 
   FvpLogVerbosity get fvpLogVerbosity =>
       _workspaceSettings?.fvpLogVerbosity ?? FvpLogVerbosity.warning;
+  PlayerBackend get playerBackend =>
+      _workspaceSettings?.playerBackend ?? PlayerBackend.fvp;
   ObsSceneSwitchConfig? get obsSceneSwitchConfig =>
       _workspaceSettings?.obsSceneSwitchConfig;
   List<WebhookSceneSwitchConfig> get webhookSceneSwitchConfigs =>
@@ -2618,6 +2620,16 @@ class DashboardViewModel extends ChangeNotifier {
       return;
     }
     await repository.saveFvpLogVerbosity(value);
+    await _loadWorkspaceSettings();
+    notifyListeners();
+  }
+
+  Future<void> savePlayerBackend(PlayerBackend value) async {
+    final MediaRepository? repository = _mediaRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.savePlayerBackend(value);
     await _loadWorkspaceSettings();
     notifyListeners();
   }

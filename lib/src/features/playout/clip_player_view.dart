@@ -1,18 +1,28 @@
 import "dart:async";
-import "dart:io";
 import "dart:math" as math;
 
+import "package:flutter/foundation.dart";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
-import "package:video_player/video_player.dart";
 
 import "package:obs_clipshow/src/app/ui_scale.dart";
+import "package:obs_clipshow/src/media_player/clip_media_player.dart";
+import "package:obs_clipshow/src/media_player/clip_media_player_factory.dart";
+import "package:obs_clipshow/src/media_player/clip_playback_state.dart";
 
 class ClipPlayerController {
   _ClipPlayerViewState? _state;
 
   Future<void> togglePlayPause() async {
     await _state?._togglePlayPause();
+  }
+
+  Future<void> pause() async {
+    await _state?._pauseOnly();
+  }
+
+  Future<void> play() async {
+    await _state?._playOnly();
   }
 
   Future<void> seekBy(Duration offset) async {
@@ -31,8 +41,9 @@ class ClipPlayerController {
     await _state?._seekToClamped(position);
   }
 
-  /// The underlying [VideoPlayerController] when a player is attached.
-  VideoPlayerController? get videoController => _state?._controller;
+  /// Playback snapshot for external transport UI (Manage preview bar).
+  ValueNotifier<ClipPlaybackState>? get playbackListenable =>
+      _state?._playbackNotifier;
 
   void _attach(_ClipPlayerViewState state) {
     _state = state;
@@ -98,7 +109,7 @@ class ClipPlayerView extends StatefulWidget {
   final VoidCallback? onFirstFrameReady;
 
   /// Audio volume in the range 0.0–1.0. Applied on init and whenever it changes
-  /// (without reinitializing the underlying [VideoPlayerController]).
+  /// (without reinitializing the underlying player).
   final double volume;
 
   @override
@@ -107,7 +118,10 @@ class ClipPlayerView extends StatefulWidget {
 
 class _ClipPlayerViewState extends State<ClipPlayerView> {
   final Logger _logger = Logger("ClipPlayerView");
-  VideoPlayerController? _controller;
+  ClipMediaPlayer? _player;
+  StreamSubscription<ClipPlaybackState>? _stateSub;
+  final ValueNotifier<ClipPlaybackState> _playbackNotifier =
+      ValueNotifier<ClipPlaybackState>(ClipPlaybackState.uninitialized);
   String? _errorMessage;
   bool _lastIsPlaying = false;
 
@@ -125,22 +139,33 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   /// Whether the video reached end-of-file since the last play.
   ///
   /// On Linux (and some other platforms) the media engine enters a hard
-  /// EOS/stopped state on completion. In that state, [VideoPlayerController.seekTo]
-  /// updates the Dart-side position but the platform ignores the seek. When
-  /// [VideoPlayerController.play] is subsequently called the engine restarts
-  /// from position 0 regardless of any pre-play seek.
+  /// EOS/stopped state on completion. In that state, seeks may update the
+  /// Dart-side position but the platform ignores them. When play is subsequently
+  /// called the engine may restart from position 0 regardless of any pre-play
+  /// seek.
   ///
-  /// The fix is to call [play] first (which exits EOS), then issue a seek while
-  /// the engine is actively playing — a flushing seek that is always honoured.
-  /// We track this flag so we still know to do that even after [_seekBy] has
-  /// already cleared [VideoPlayerValue.isCompleted] by moving the position.
+  /// The fix is to reopen a fresh player at the desired position (see
+  /// [_restartPlaybackFrom]).
   bool _reachedEnd = false;
 
   /// Paused on the last frame of the file (no clip end mark) so we avoid the
-  /// platform EOS/stopped state where seeks are ignored until the controller is
+  /// platform EOS/stopped state where seeks are ignored until the player is
   /// recreated ([_restartPlaybackFrom]).
   bool _naturalEndPauseApplied = false;
   bool _firstFrameReadyNotified = false;
+  bool _playbackDisposed = false;
+
+  /// Stable video surface widget — rebuilt only when the player instance or fit changes.
+  Widget? _videoView;
+
+  /// Last video size used for letterboxing; drives rare [setState] for layout.
+  Size _layoutSize = Size.zero;
+  bool _layoutInitialized = false;
+
+  DateTime? _lastTransportNotify;
+  static const Duration _transportNotifyMinInterval = Duration(
+    milliseconds: 50,
+  );
 
   static const Duration _naturalEndPauseLead = Duration(milliseconds: 100);
 
@@ -164,13 +189,27 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         oldWidget.initialPositionMs != widget.initialPositionMs ||
         oldWidget.autoPlay != widget.autoPlay ||
         oldWidget.showControls != widget.showControls) {
-      _reinitializeController(reason: "didUpdateWidget");
+      unawaited(_reinitializeController(reason: "didUpdateWidget"));
     } else if (oldWidget.volume != widget.volume) {
-      final VideoPlayerController? controller = _controller;
-      if (controller != null && controller.value.isInitialized) {
-        unawaited(controller.setVolume(widget.volume.clamp(0.0, 1.0)));
+      final ClipMediaPlayer? player = _player;
+      if (player != null && player.state.isInitialized) {
+        unawaited(player.setVolume(widget.volume.clamp(0.0, 1.0)));
+      }
+    } else if (oldWidget.videoBoxFit != widget.videoBoxFit) {
+      _rebuildVideoView();
+      if (mounted) {
+        setState(() {});
       }
     }
+  }
+
+  void _rebuildVideoView() {
+    final ClipMediaPlayer? player = _player;
+    if (player == null || !player.state.isInitialized) {
+      _videoView = null;
+      return;
+    }
+    _videoView = player.buildView(fit: widget.videoBoxFit);
   }
 
   Future<void> _reinitializeController({required String reason}) async {
@@ -179,8 +218,11 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     _reachedEnd = false;
     _naturalEndPauseApplied = false;
     _firstFrameReadyNotified = false;
-    await _disposeController();
-    await _initializeController();
+    _videoView = null;
+    _layoutSize = Size.zero;
+    _layoutInitialized = false;
+    await _disposePlayer();
+    await _initializePlayer();
   }
 
   void _notifyFirstFrameReady() {
@@ -208,7 +250,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     });
   }
 
-  Future<void> _initializeController() async {
+  Future<void> _initializePlayer() async {
     setState(() {
       _errorMessage = null;
     });
@@ -230,13 +272,12 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     }
 
     try {
-      final VideoPlayerController controller = VideoPlayerController.file(
-        File(widget.filePath),
-      );
-      _controller = controller;
-      await controller.initialize();
+      final ClipMediaPlayer player = ClipMediaPlayerFactory.create();
+      _player = player;
+      _stateSub = player.states.listen(_handlePlaybackProgress);
+      await player.openFile(widget.filePath);
       if (!mounted) {
-        await controller.dispose();
+        await _disposePlayer();
         return;
       }
       Duration initialPosition = Duration(
@@ -253,23 +294,27 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
           initialPosition = clipEnd;
         }
       }
-      await controller.seekTo(initialPosition);
+      await player.seek(initialPosition);
       if (!mounted) {
-        await controller.dispose();
+        await _disposePlayer();
         return;
       }
-      await controller.setVolume(widget.volume.clamp(0.0, 1.0));
-      controller.addListener(_handlePlaybackProgress);
+      await player.setVolume(widget.volume.clamp(0.0, 1.0));
       if (widget.autoPlay) {
-        await controller.play();
+        await player.play();
       }
       if (mounted) {
+        _layoutInitialized = player.state.isInitialized;
+        _layoutSize = player.state.size;
+        _rebuildVideoView();
         setState(() {});
         _scheduleFirstFrameReadyAfterPaint();
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
       _logger.severe(
         "Failed to initialize player for ${widget.filePath}: $error",
+        error,
+        stackTrace,
       );
       if (mounted) {
         setState(() {
@@ -280,70 +325,98 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     }
   }
 
-  void _handlePlaybackProgress() {
-    final VideoPlayerController? controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
+  void _handlePlaybackProgress(ClipPlaybackState state) {
+    // Transport bar listens via [_playbackNotifier]; do not setState on every
+    // position tick — that rebuilds the video surface and causes stutter.
+    // Also throttle notifier updates (~20 Hz) so 60fps sources don't rebuild
+    // the scrubber every decoder tick.
+    if (!_playbackDisposed) {
+      final bool playingChanged = state.isPlaying != _lastIsPlaying;
+      final DateTime now = DateTime.now();
+      final bool due =
+          _lastTransportNotify == null ||
+          now.difference(_lastTransportNotify!) >= _transportNotifyMinInterval;
+      if (playingChanged ||
+          state.isCompleted ||
+          !state.isInitialized ||
+          due) {
+        _playbackNotifier.value = state;
+        _lastTransportNotify = now;
+      }
+    }
+    if (!state.isInitialized) {
       return;
     }
 
-    if (controller.value.isCompleted) {
+    if (state.isCompleted) {
       _reachedEnd = true;
     }
 
-    final int currentMs = controller.value.position.inMilliseconds;
+    final int currentMs = state.position.inMilliseconds;
+    final ClipMediaPlayer? player = _player;
+    if (player == null) {
+      return;
+    }
     if (currentMs < widget.startTimeMs) {
-      controller.seekTo(Duration(milliseconds: widget.startTimeMs));
+      unawaited(player.seek(Duration(milliseconds: widget.startTimeMs)));
     }
 
     final int? endMs = widget.endTimeMs;
     if (endMs != null) {
       if (currentMs > endMs) {
-        if (controller.value.isPlaying) {
-          controller.pause();
+        if (state.isPlaying) {
+          unawaited(player.pause());
         }
-        controller.seekTo(Duration(milliseconds: endMs));
+        unawaited(player.seek(Duration(milliseconds: endMs)));
       }
     } else {
       // Full file or open-ended clip: pause on the last frame *before* the
       // decoder latches to EOS, same idea as marking out on a bounded clip.
-      final Duration duration = controller.value.duration;
+      final Duration duration = state.duration;
       if (duration > Duration.zero && !_naturalEndPauseApplied) {
-        final Duration position = controller.value.position;
+        final Duration position = state.position;
         Duration lead = _naturalEndPauseLead;
         if (duration <= lead) {
           lead = Duration.zero;
         }
         final Duration threshold = duration - lead;
         final bool shouldFreeze =
-            controller.value.isCompleted ||
-            (controller.value.isPlaying && position >= threshold);
+            state.isCompleted || (state.isPlaying && position >= threshold);
         if (shouldFreeze) {
           _naturalEndPauseApplied = true;
           unawaited(_freezeOnNaturalEnd(duration));
         }
       }
     }
-    widget.onPositionChanged?.call(controller.value.position.inMilliseconds);
-    final bool isPlaying = controller.value.isPlaying;
+    widget.onPositionChanged?.call(state.position.inMilliseconds);
+    final bool isPlaying = state.isPlaying;
     if (isPlaying != _lastIsPlaying) {
       _lastIsPlaying = isPlaying;
       widget.onPlayingChanged?.call(isPlaying);
     }
-    if (mounted) {
+
+    final bool layoutChanged =
+        !_layoutInitialized ||
+        state.size.width != _layoutSize.width ||
+        state.size.height != _layoutSize.height;
+    if (layoutChanged && mounted) {
+      _layoutInitialized = true;
+      _layoutSize = state.size;
+      _rebuildVideoView();
       setState(() {});
     }
   }
 
   Future<void> _freezeOnNaturalEnd(Duration duration) async {
-    final VideoPlayerController? controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
+    final ClipMediaPlayer? player = _player;
+    if (player == null || !player.state.isInitialized) {
       return;
     }
     try {
-      if (controller.value.isPlaying) {
-        await controller.pause();
+      if (player.state.isPlaying) {
+        await player.pause();
       }
-      await controller.seekTo(duration);
+      await player.seek(duration);
       _reachedEnd = true;
     } catch (error, stackTrace) {
       _logger.warning(
@@ -358,12 +431,12 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   }
 
   Future<void> _togglePlayPause() async {
-    final VideoPlayerController? controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
+    final ClipMediaPlayer? player = _player;
+    if (player == null || !player.state.isInitialized) {
       return;
     }
-    if (controller.value.isPlaying) {
-      await controller.pause();
+    if (player.state.isPlaying) {
+      await player.pause();
       return;
     }
 
@@ -375,52 +448,70 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     _targetSeekPosition = null;
 
     if (hadReachedEnd) {
-      // After EOS the underlying engine (fvp/mpv) is in a stopped state where
-      // seeks are unreliable and play() restarts from the beginning regardless
-      // of the Dart-side position. The only reliable fix is to create a fresh
-      // controller at the desired position. We initialise it while the old one
-      // is still active so there is no black-screen gap.
+      // After EOS the underlying engine may be in a stopped state where seeks
+      // are unreliable and play() restarts from the beginning. Reopen a fresh
+      // player at the desired position while the old one still displays.
       final Duration playFrom =
           target ?? Duration(milliseconds: widget.startTimeMs);
       await _restartPlaybackFrom(playFrom);
     } else {
-      await controller.play();
+      await player.play();
     }
   }
 
-  /// Initialises a new [VideoPlayerController] for the same file at [position],
-  /// swaps it in while the old controller is still displaying (no black flash),
-  /// then starts playback.
+  Future<void> _pauseOnly() async {
+    final ClipMediaPlayer? player = _player;
+    if (player == null || !player.state.isInitialized || !player.state.isPlaying) {
+      return;
+    }
+    await player.pause();
+  }
+
+  Future<void> _playOnly() async {
+    await _togglePlayPause();
+  }
+
+  /// Opens a new [ClipMediaPlayer] for the same file at [position], swaps it in
+  /// while the old player is still displaying (no black flash), then plays.
   Future<void> _restartPlaybackFrom(Duration position) async {
-    final VideoPlayerController newController = VideoPlayerController.file(
-      File(widget.filePath),
-    );
+    final ClipMediaPlayer newPlayer = ClipMediaPlayerFactory.create();
     try {
-      await newController.initialize();
+      await newPlayer.openFile(widget.filePath);
       if (!mounted) {
-        await newController.dispose();
+        await newPlayer.dispose();
         return;
       }
-      await newController.seekTo(position);
+      await newPlayer.seek(position);
       if (!mounted) {
-        await newController.dispose();
+        await newPlayer.dispose();
         return;
       }
-      await newController.setVolume(widget.volume.clamp(0.0, 1.0));
+      await newPlayer.setVolume(widget.volume.clamp(0.0, 1.0));
       _naturalEndPauseApplied = false;
       _reachedEnd = false;
-      // Swap: detach the old listener before reassigning _controller so that
-      // _handlePlaybackProgress never sees a mismatched controller.
-      final VideoPlayerController? old = _controller;
-      old?.removeListener(_handlePlaybackProgress);
-      _controller = newController;
-      newController.addListener(_handlePlaybackProgress);
-      await newController.play();
-      if (mounted) setState(() {});
-      if (old != null) await old.dispose();
-    } catch (error) {
-      _logger.severe("Failed to restart playback from $position: $error");
-      await newController.dispose();
+      final ClipMediaPlayer? old = _player;
+      final StreamSubscription<ClipPlaybackState>? oldSub = _stateSub;
+      await oldSub?.cancel();
+      _player = newPlayer;
+      _stateSub = newPlayer.states.listen(_handlePlaybackProgress);
+      _handlePlaybackProgress(newPlayer.state);
+      await newPlayer.play();
+      if (mounted) {
+        _layoutInitialized = newPlayer.state.isInitialized;
+        _layoutSize = newPlayer.state.size;
+        _rebuildVideoView();
+        setState(() {});
+      }
+      if (old != null) {
+        await old.dispose();
+      }
+    } catch (error, stackTrace) {
+      _logger.severe(
+        "Failed to restart playback from $position: $error",
+        error,
+        stackTrace,
+      );
+      await newPlayer.dispose();
     }
   }
 
@@ -430,10 +521,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     return done;
   }
 
-  Duration _clampSeekPosition(
-    Duration position,
-    VideoPlayerController controller,
-  ) {
+  Duration _clampSeekPosition(Duration position, ClipPlaybackState state) {
     final Duration clipStart = Duration(milliseconds: widget.startTimeMs);
     Duration next = position;
     if (next < clipStart) {
@@ -447,7 +535,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         next = clipEnd;
       }
     } else {
-      final Duration duration = controller.value.duration;
+      final Duration duration = state.duration;
       if (duration > Duration.zero && next > duration) {
         next = duration;
       }
@@ -456,58 +544,58 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   }
 
   Future<void> _seekToClamped(Duration position) => _enqueueSeek(() async {
-    final VideoPlayerController? controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
+    final ClipMediaPlayer? player = _player;
+    if (player == null || !player.state.isInitialized) {
       return;
     }
     _naturalEndPauseApplied = false;
     _reachedEnd = false;
-    final Duration next = _clampSeekPosition(position, controller);
-    await controller.seekTo(next);
+    final Duration next = _clampSeekPosition(position, player.state);
+    await player.seek(next);
     _targetSeekPosition = next;
   });
 
   Future<void> _seekBy(Duration offset) => _enqueueSeek(() async {
-    final VideoPlayerController? controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
+    final ClipMediaPlayer? player = _player;
+    if (player == null || !player.state.isInitialized) {
       return;
     }
     _naturalEndPauseApplied = false;
     _reachedEnd = false;
 
     final Duration next = _clampSeekPosition(
-      controller.value.position + offset,
-      controller,
+      player.state.position + offset,
+      player.state,
     );
 
-    await controller.seekTo(next);
+    await player.seek(next);
     _targetSeekPosition = next;
   });
 
   Future<void> _seekToStart() => _enqueueSeek(() async {
-    final VideoPlayerController? controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
+    final ClipMediaPlayer? player = _player;
+    if (player == null || !player.state.isInitialized) {
       return;
     }
     _naturalEndPauseApplied = false;
     _reachedEnd = false;
     final Duration target = Duration(milliseconds: widget.startTimeMs);
-    await controller.seekTo(target);
+    await player.seek(target);
     _targetSeekPosition = target;
   });
 
   Future<void> _seekToEnd() => _enqueueSeek(() async {
-    final VideoPlayerController? controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
+    final ClipMediaPlayer? player = _player;
+    if (player == null || !player.state.isInitialized) {
       return;
     }
     _naturalEndPauseApplied = false;
     _reachedEnd = false;
     final int? clipEndMs = widget.endTimeMs;
     if (clipEndMs != null) {
-      await controller.seekTo(Duration(milliseconds: clipEndMs));
+      await player.seek(Duration(milliseconds: clipEndMs));
     } else {
-      await controller.seekTo(controller.value.duration);
+      await player.seek(player.state.duration);
     }
     // At the clip/file end — play() should restart from clip start, not replay
     // from end, so clear the target rather than setting it to the end position.
@@ -516,22 +604,27 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
 
   @override
   void dispose() {
+    _playbackDisposed = true;
     widget.controller?._detach(this);
-    unawaited(_disposeController());
+    unawaited(_disposePlayer());
+    _playbackNotifier.dispose();
     super.dispose();
   }
 
-  Future<void> _disposeController() async {
-    final VideoPlayerController? controller = _controller;
-    controller?.removeListener(_handlePlaybackProgress);
+  Future<void> _disposePlayer() async {
+    final StreamSubscription<ClipPlaybackState>? sub = _stateSub;
+    _stateSub = null;
+    await sub?.cancel();
     if (_lastIsPlaying) {
       _lastIsPlaying = false;
       widget.onPlayingChanged?.call(false);
     }
-    if (controller != null) {
-      await controller.dispose();
+    final ClipMediaPlayer? player = _player;
+    _player = null;
+    _videoView = null;
+    if (player != null) {
+      await player.dispose();
     }
-    _controller = null;
   }
 
   @override
@@ -540,7 +633,9 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   }
 
   Widget _buildBody() {
-    final VideoPlayerController? controller = _controller;
+    final ClipMediaPlayer? player = _player;
+    final ClipPlaybackState state =
+        player?.state ?? ClipPlaybackState.uninitialized;
     if (_errorMessage != null) {
       return Center(
         child: Text(
@@ -549,9 +644,10 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
         ),
       );
     }
-    if (controller == null || !controller.value.isInitialized) {
+    if (player == null || !state.isInitialized || _videoView == null) {
       return const Center(child: CircularProgressIndicator());
     }
+    final Size intrinsic = _layoutSize.width > 0 ? _layoutSize : state.size;
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
@@ -561,7 +657,6 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
               child: LayoutBuilder(
                 builder: (BuildContext context, BoxConstraints bc) {
                   final Size container = Size(bc.maxWidth, bc.maxHeight);
-                  final Size intrinsic = controller.value.size;
                   final Rect videoRect = _videoDestinationRect(
                     container: container,
                     intrinsic: intrinsic,
@@ -583,14 +678,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
                           onTap: widget.clickTogglesPlayback
                               ? _togglePlayPause
                               : null,
-                          child: FittedBox(
-                            fit: widget.videoBoxFit,
-                            child: SizedBox(
-                              width: intrinsic.width,
-                              height: intrinsic.height,
-                              child: VideoPlayer(controller),
-                            ),
-                          ),
+                          child: _videoView,
                         ),
                       ),
                       if (widget.canvasAreaOverlay != null)
@@ -600,7 +688,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
                 },
               ),
             ),
-            if (widget.showControls) _buildControls(controller),
+            if (widget.showControls) _buildControls(),
           ],
         ),
         if (widget.overlay != null) widget.overlay!,
@@ -608,16 +696,24 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     );
   }
 
-  Widget _buildControls(VideoPlayerController controller) {
+  Widget _buildControls() {
     return ClipPlayerTransportBar(
-      playerController: widget.controller,
-      videoController: controller,
+      playbackListenable: _playbackNotifier,
       startTimeMs: widget.startTimeMs,
       endTimeMs: widget.endTimeMs,
       seekStep: widget.seekStep,
       onTogglePlayPause: _togglePlayPause,
       onSeekBy: _seekBy,
       onScrub: _seekToClamped,
+      onPauseForScrub: () async {
+        final ClipMediaPlayer? player = _player;
+        if (player != null && player.state.isPlaying) {
+          await player.pause();
+        }
+      },
+      onResumeAfterScrub: () async {
+        await _playOnly();
+      },
     );
   }
 
@@ -644,23 +740,25 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
 class ClipPlayerTransportBar extends StatelessWidget {
   const ClipPlayerTransportBar({
     super.key,
-    this.playerController,
-    required this.videoController,
+    required this.playbackListenable,
     required this.startTimeMs,
     required this.endTimeMs,
     required this.onTogglePlayPause,
     required this.onSeekBy,
     required this.onScrub,
+    required this.onPauseForScrub,
+    required this.onResumeAfterScrub,
     this.seekStep = const Duration(seconds: 5),
   });
 
-  final ClipPlayerController? playerController;
-  final VideoPlayerController videoController;
+  final ValueListenable<ClipPlaybackState> playbackListenable;
   final int startTimeMs;
   final int? endTimeMs;
   final Future<void> Function() onTogglePlayPause;
   final Future<void> Function(Duration offset) onSeekBy;
   final Future<void> Function(Duration position) onScrub;
+  final Future<void> Function() onPauseForScrub;
+  final Future<void> Function() onResumeAfterScrub;
   final Duration seekStep;
 
   @override
@@ -677,19 +775,21 @@ class ClipPlayerTransportBar extends StatelessWidget {
         horizontalPad,
         verticalPad,
       ),
-      child: AnimatedBuilder(
-        animation: videoController,
-        builder: (BuildContext context, Widget? child) {
+      child: ValueListenableBuilder<ClipPlaybackState>(
+        valueListenable: playbackListenable,
+        builder: (BuildContext context, ClipPlaybackState state, Widget? child) {
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               _ClipBoundedProgressIndicator(
-                controller: videoController,
+                playbackListenable: playbackListenable,
                 startTimeMs: startTimeMs,
                 endTimeMs: endTimeMs,
                 allowScrubbing: true,
                 padding: EdgeInsets.symmetric(vertical: progressVerticalPad),
                 onScrub: onScrub,
+                onPauseForScrub: onPauseForScrub,
+                onResumeAfterScrub: onResumeAfterScrub,
               ),
               Row(
                 children: <Widget>[
@@ -700,12 +800,10 @@ class ClipPlayerTransportBar extends StatelessWidget {
                     color: Colors.white,
                   ),
                   IconButton(
-                    tooltip: videoController.value.isPlaying ? "Pause" : "Play",
+                    tooltip: state.isPlaying ? "Pause" : "Play",
                     onPressed: onTogglePlayPause,
                     icon: Icon(
-                      videoController.value.isPlaying
-                          ? Icons.pause
-                          : Icons.play_arrow,
+                      state.isPlaying ? Icons.pause : Icons.play_arrow,
                     ),
                     color: Colors.white,
                   ),
@@ -718,8 +816,8 @@ class ClipPlayerTransportBar extends StatelessWidget {
                   SizedBox(width: controlsGap),
                   Expanded(
                     child: Text(
-                      "${formatClipPlayerDuration(videoController.value.position)} / "
-                      "${formatClipPlayerDuration(videoController.value.duration)}",
+                      "${formatClipPlayerDuration(state.position)} / "
+                      "${formatClipPlayerDuration(state.duration)}",
                       style: const TextStyle(color: Colors.white),
                       textAlign: TextAlign.right,
                     ),
@@ -745,24 +843,27 @@ String formatClipPlayerDuration(Duration duration) {
   return "${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
 }
 
-/// Progress bar scoped to clip in/out when bounds are set; otherwise matches
-/// [VideoProgressIndicator] over the full file.
+/// Progress bar scoped to clip in/out when bounds are set; otherwise full file.
 class _ClipBoundedProgressIndicator extends StatefulWidget {
   const _ClipBoundedProgressIndicator({
-    required this.controller,
+    required this.playbackListenable,
     required this.startTimeMs,
     required this.endTimeMs,
     required this.allowScrubbing,
     required this.padding,
     required this.onScrub,
+    required this.onPauseForScrub,
+    required this.onResumeAfterScrub,
   });
 
-  final VideoPlayerController controller;
+  final ValueListenable<ClipPlaybackState> playbackListenable;
   final int startTimeMs;
   final int? endTimeMs;
   final bool allowScrubbing;
   final EdgeInsets padding;
   final Future<void> Function(Duration position) onScrub;
+  final Future<void> Function() onPauseForScrub;
+  final Future<void> Function() onResumeAfterScrub;
 
   bool get _hasClipBounds => startTimeMs > 0 || endTimeMs != null;
 
@@ -775,21 +876,30 @@ class _ClipBoundedProgressIndicatorState
     extends State<_ClipBoundedProgressIndicator> {
   bool _controllerWasPlaying = false;
 
-  VideoPlayerController get _controller => widget.controller;
+  ClipPlaybackState get _state => widget.playbackListenable.value;
 
-  void _handleControllerUpdate() {
+  void _handleUpdate() {
     setState(() {});
   }
 
   @override
   void initState() {
     super.initState();
-    _controller.addListener(_handleControllerUpdate);
+    widget.playbackListenable.addListener(_handleUpdate);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ClipBoundedProgressIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.playbackListenable != widget.playbackListenable) {
+      oldWidget.playbackListenable.removeListener(_handleUpdate);
+      widget.playbackListenable.addListener(_handleUpdate);
+    }
   }
 
   @override
   void dispose() {
-    _controller.removeListener(_handleControllerUpdate);
+    widget.playbackListenable.removeListener(_handleUpdate);
     super.dispose();
   }
 
@@ -798,7 +908,7 @@ class _ClipBoundedProgressIndicatorState
     if (endMs != null) {
       return endMs;
     }
-    return _controller.value.duration.inMilliseconds;
+    return _state.duration.inMilliseconds;
   }
 
   int _clipSpanMs() {
@@ -806,35 +916,34 @@ class _ClipBoundedProgressIndicatorState
   }
 
   double _playedFraction() {
-    if (!_controller.value.isInitialized) {
+    if (!_state.isInitialized) {
       return 0;
     }
     if (!widget._hasClipBounds) {
-      final int durationMs = _controller.value.duration.inMilliseconds;
+      final int durationMs = _state.duration.inMilliseconds;
       if (durationMs <= 0) {
         return 0;
       }
-      return _controller.value.position.inMilliseconds / durationMs;
+      return _state.position.inMilliseconds / durationMs;
     }
     final int spanMs = _clipSpanMs();
     if (spanMs <= 0) {
       return 0;
     }
-    final int relativeMs =
-        _controller.value.position.inMilliseconds - widget.startTimeMs;
+    final int relativeMs = _state.position.inMilliseconds - widget.startTimeMs;
     return (relativeMs / spanMs).clamp(0.0, 1.0);
   }
 
   double _bufferedFraction() {
-    if (!_controller.value.isInitialized) {
+    if (!_state.isInitialized) {
       return 0;
     }
-    final int durationMs = _controller.value.duration.inMilliseconds;
+    final int durationMs = _state.duration.inMilliseconds;
     if (durationMs <= 0) {
       return 0;
     }
-    final int maxBufferedMs = _controller.value.buffered
-        .map((DurationRange range) => range.end.inMilliseconds)
+    final int maxBufferedMs = _state.buffered
+        .map((ClipBufferedRange range) => range.end.inMilliseconds)
         .fold(0, math.max);
     if (!widget._hasClipBounds) {
       return maxBufferedMs / durationMs;
@@ -848,12 +957,12 @@ class _ClipBoundedProgressIndicatorState
   }
 
   Future<void> _seekToRelative(double relative) async {
-    if (!_controller.value.isInitialized) {
+    if (!_state.isInitialized) {
       return;
     }
     final Duration target;
     if (!widget._hasClipBounds) {
-      target = _controller.value.duration * relative.clamp(0.0, 1.0);
+      target = _state.duration * relative.clamp(0.0, 1.0);
     } else {
       final int spanMs = _clipSpanMs();
       final int targetMs =
@@ -865,28 +974,30 @@ class _ClipBoundedProgressIndicatorState
 
   @override
   Widget build(BuildContext context) {
-    const VideoProgressColors colors = VideoProgressColors();
+    const Color playedColor = Color.fromRGBO(255, 0, 0, 0.7);
+    const Color bufferedColor = Color.fromRGBO(50, 50, 200, 0.2);
+    const Color backgroundColor = Color.fromRGBO(200, 200, 200, 0.5);
     final Widget progressIndicator;
-    if (_controller.value.isInitialized) {
+    if (_state.isInitialized) {
       progressIndicator = Stack(
         fit: StackFit.passthrough,
         children: <Widget>[
           LinearProgressIndicator(
             value: _bufferedFraction(),
-            valueColor: AlwaysStoppedAnimation<Color>(colors.bufferedColor),
-            backgroundColor: colors.backgroundColor,
+            valueColor: const AlwaysStoppedAnimation<Color>(bufferedColor),
+            backgroundColor: backgroundColor,
           ),
           LinearProgressIndicator(
             value: _playedFraction(),
-            valueColor: AlwaysStoppedAnimation<Color>(colors.playedColor),
+            valueColor: const AlwaysStoppedAnimation<Color>(playedColor),
             backgroundColor: Colors.transparent,
           ),
         ],
       );
     } else {
-      progressIndicator = LinearProgressIndicator(
-        valueColor: AlwaysStoppedAnimation<Color>(colors.playedColor),
-        backgroundColor: colors.backgroundColor,
+      progressIndicator = const LinearProgressIndicator(
+        valueColor: AlwaysStoppedAnimation<Color>(playedColor),
+        backgroundColor: backgroundColor,
       );
     }
 
@@ -903,16 +1014,16 @@ class _ClipBoundedProgressIndicatorState
       behavior: HitTestBehavior.opaque,
       child: paddedProgressIndicator,
       onHorizontalDragStart: (DragStartDetails details) {
-        if (!_controller.value.isInitialized) {
+        if (!_state.isInitialized) {
           return;
         }
-        _controllerWasPlaying = _controller.value.isPlaying;
+        _controllerWasPlaying = _state.isPlaying;
         if (_controllerWasPlaying) {
-          _controller.pause();
+          unawaited(widget.onPauseForScrub());
         }
       },
       onHorizontalDragUpdate: (DragUpdateDetails details) {
-        if (!_controller.value.isInitialized) {
+        if (!_state.isInitialized) {
           return;
         }
         final RenderBox box = context.findRenderObject()! as RenderBox;
@@ -922,12 +1033,12 @@ class _ClipBoundedProgressIndicatorState
       },
       onHorizontalDragEnd: (DragEndDetails details) {
         if (_controllerWasPlaying &&
-            _controller.value.position != _controller.value.duration) {
-          unawaited(_controller.play());
+            _state.position != _state.duration) {
+          unawaited(widget.onResumeAfterScrub());
         }
       },
       onTapDown: (TapDownDetails details) {
-        if (!_controller.value.isInitialized) {
+        if (!_state.isInitialized) {
           return;
         }
         final RenderBox box = context.findRenderObject()! as RenderBox;

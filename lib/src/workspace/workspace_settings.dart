@@ -179,6 +179,15 @@ enum MdkLogVerbosity { off, error, warning, info, debug, all }
 /// Minimum level for `package:logging` [Logger] `"fvp"` (Dart-side plugin traces).
 enum FvpLogVerbosity { off, error, warning, info, debug, all }
 
+/// Local-file playback engine selected at process start ([ClipMediaPlayerFactory]).
+enum PlayerBackend {
+  /// [video_player] + fvp / libmdk (default).
+  fvp,
+
+  /// media_kit / libmpv.
+  mediaKit,
+}
+
 class TelestratorDefaults {
   const TelestratorDefaults({
     required this.colorOneArgb,
@@ -388,12 +397,14 @@ class WorkspaceSettingsBundle {
     required this.osgBakeRecipes,
     required this.defaultClipVolume,
     required this.osgModeEnabled,
+    required this.playerBackend,
   });
 
   final TelestratorDefaults telestratorDefaults;
   final DecoderConfig decoderConfig;
   final MdkLogVerbosity mdkLogVerbosity;
   final FvpLogVerbosity fvpLogVerbosity;
+  final PlayerBackend playerBackend;
   final ObsSceneSwitchConfig? obsSceneSwitchConfig;
   final List<WebhookSceneSwitchConfig> webhookSceneSwitchConfigs;
   final List<String> ignoredFolders;

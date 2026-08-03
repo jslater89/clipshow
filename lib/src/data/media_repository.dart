@@ -938,11 +938,13 @@ class MediaRepository {
     final List<OsgBakeRecipe> osgBakeRecipes = await _loadOsgBakeRecipes();
     final double defaultClipVolume = await _loadDefaultClipVolume();
     final bool osgModeEnabled = await _loadOsgModeEnabled();
+    final PlayerBackend playerBackend = await _loadPlayerBackend();
     return WorkspaceSettingsBundle(
       telestratorDefaults: telestratorDefaults,
       decoderConfig: decoderConfig,
       mdkLogVerbosity: mdkLogVerbosity,
       fvpLogVerbosity: fvpLogVerbosity,
+      playerBackend: playerBackend,
       obsSceneSwitchConfig: obsConfig,
       webhookSceneSwitchConfigs: webhooks,
       ignoredFolders: ignoredFolders,
@@ -1534,6 +1536,19 @@ class MediaRepository {
 
   Future<void> saveFvpLogVerbosity(FvpLogVerbosity value) async {
     await _putWorkspaceSetting("fvp.logVerbosity", value.name);
+  }
+
+  Future<PlayerBackend> _loadPlayerBackend() async {
+    final String stored =
+        await _getWorkspaceSetting("player.backend") ?? PlayerBackend.fvp.name;
+    return PlayerBackend.values.firstWhere(
+      (PlayerBackend item) => item.name == stored,
+      orElse: () => PlayerBackend.fvp,
+    );
+  }
+
+  Future<void> savePlayerBackend(PlayerBackend value) async {
+    await _putWorkspaceSetting("player.backend", value.name);
   }
 
   Future<ObsSceneSwitchConfig?> _loadObsSceneSwitchConfig() async {

@@ -3,11 +3,13 @@ import "dart:io";
 import "package:flutter/material.dart";
 import "package:fvp/fvp.dart" as fvp;
 import "package:logging/logging.dart";
+import "package:media_kit/media_kit.dart";
 import "package:window_manager/window_manager.dart";
 
 import "package:obs_clipshow/src/app/app.dart";
 import "package:obs_clipshow/src/data/app_database.dart";
 import "package:obs_clipshow/src/media/workspace.dart";
+import "package:obs_clipshow/src/media_player/clip_media_player_factory.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/workspace/workspace_preferences.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
@@ -19,25 +21,33 @@ Future<void> main() async {
   await windowManager.ensureInitialized();
   final _StartupVideoSettings startupSettings =
       await _loadStartupVideoSettings();
-  final PlayoutOutputSize textureCap = startupSettings.playoutOutputSize;
-  fvp.registerWith(
-    options: <String, Object>{
-      "platforms": <String>["windows", "linux", "macos"],
-      "video.decoders": startupSettings.decoderOptions,
-      // Cap native GL textures to the playout canvas so 4K+ sources do not
-      // allocate full-frame surfaces for Manage preview / playout (fvp scales
-      // with aspect preserved when fitMaxSize is true).
-      "maxWidth": textureCap.width,
-      "maxHeight": textureCap.height,
-      "fitMaxSize": true,
-      // MDK player buffer: min ms when low + max ms cap (reduces PulseAudio underruns).
-      "player": <String, String>{"buffer": "2000+60000"},
-      // Applied after fvp's internal "log":"all"; overrides MDK global log level.
-      "global": <String, Object>{
-        "log": _mdkGlobalLogOption(startupSettings.logVerbosity),
-      },
-    },
+  ClipMediaPlayerFactory.configure(
+    startupSettings.playerBackend,
+    textureCap: startupSettings.playoutOutputSize,
   );
+  if (startupSettings.playerBackend == PlayerBackend.mediaKit) {
+    MediaKit.ensureInitialized();
+  } else {
+    final PlayoutOutputSize textureCap = startupSettings.playoutOutputSize;
+    fvp.registerWith(
+      options: <String, Object>{
+        "platforms": <String>["windows", "linux", "macos"],
+        "video.decoders": startupSettings.decoderOptions,
+        // Cap native GL textures to the playout canvas so 4K+ sources do not
+        // allocate full-frame surfaces for Manage preview / playout (fvp scales
+        // with aspect preserved when fitMaxSize is true).
+        "maxWidth": textureCap.width,
+        "maxHeight": textureCap.height,
+        "fitMaxSize": true,
+        // MDK player buffer: min ms when low + max ms cap (reduces PulseAudio underruns).
+        "player": <String, String>{"buffer": "2000+60000"},
+        // Applied after fvp's internal "log":"all"; overrides MDK global log level.
+        "global": <String, Object>{
+          "log": _mdkGlobalLogOption(startupSettings.logVerbosity),
+        },
+      },
+    );
+  }
   _configureLogging(startupSettings.fvpLogVerbosity);
   runApp(const ObsClipshowApp());
 }
@@ -65,6 +75,7 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
       logVerbosity: MdkLogVerbosity.warning,
       fvpLogVerbosity: FvpLogVerbosity.warning,
       playoutOutputSize: PlayoutOutputSize.fallback,
+      playerBackend: PlayerBackend.fvp,
     );
   }
   final Workspace workspace = Workspace(rootPath: workspacePath);
@@ -162,11 +173,26 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
         width != null && height != null && width > 0 && height > 0
         ? PlayoutOutputSize(width: width, height: height)
         : PlayoutOutputSize.fallback;
+    final List<Map<String, Object?>> backendRows = await database.query(
+      "workspace_settings",
+      columns: <String>["value"],
+      where: "key = ?",
+      whereArgs: <Object?>["player.backend"],
+      limit: 1,
+    );
+    final String backendName = backendRows.isEmpty
+        ? PlayerBackend.fvp.name
+        : backendRows.single["value"]! as String;
+    final PlayerBackend playerBackend = PlayerBackend.values.firstWhere(
+      (PlayerBackend item) => item.name == backendName,
+      orElse: () => PlayerBackend.fvp,
+    );
     return _StartupVideoSettings(
       decoderOptions: decoderProfiles.map((DecoderProfile profile) => profile.fvpArgument).toList(),
       logVerbosity: verbosity,
       fvpLogVerbosity: fvpVerbosity,
       playoutOutputSize: playoutOutputSize,
+      playerBackend: playerBackend,
     );
   } finally {
     await database.close();
@@ -215,10 +241,12 @@ class _StartupVideoSettings {
     required this.logVerbosity,
     required this.fvpLogVerbosity,
     required this.playoutOutputSize,
+    required this.playerBackend,
   });
 
   final List<String> decoderOptions;
   final MdkLogVerbosity logVerbosity;
   final FvpLogVerbosity fvpLogVerbosity;
   final PlayoutOutputSize playoutOutputSize;
+  final PlayerBackend playerBackend;
 }

@@ -22,7 +22,7 @@ import "package:obs_clipshow/src/osg/osg_bake_models.dart";
 import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/widgets/transient_hud_banner.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
-import "package:video_player/video_player.dart";
+import "package:obs_clipshow/src/media_player/clip_playback_state.dart";
 
 class DashboardPreviewPanel extends StatefulWidget {
   const DashboardPreviewPanel({
@@ -116,8 +116,8 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
             selectedItem.type == MediaListItemType.clip
         ? selectedItem.clip!.outMs
         : null;
-    final VideoPlayerController? previewTransportController =
-        _previewPlayerController.videoController;
+    final ValueNotifier<ClipPlaybackState>? previewPlayback =
+        _previewPlayerController.playbackListenable;
     return Card(
       child: Padding(
         padding: EdgeInsets.all(pad12),
@@ -295,20 +295,35 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                     ),
                                   ),
                                 ),
-                                if (previewTransportController != null &&
-                                    previewTransportController
-                                        .value.isInitialized)
-                                  ClipPlayerTransportBar(
-                                    playerController: _previewPlayerController,
-                                    videoController:
-                                        previewTransportController,
-                                    startTimeMs: previewStartMs,
-                                    endTimeMs: previewEndMs,
-                                    onTogglePlayPause: () =>
-                                        _previewPlayerController
-                                            .togglePlayPause(),
-                                    onSeekBy: _previewPlayerController.seekBy,
-                                    onScrub: _previewPlayerController.seekTo,
+                                if (previewPlayback != null)
+                                  ValueListenableBuilder<ClipPlaybackState>(
+                                    valueListenable: previewPlayback,
+                                    builder:
+                                        (
+                                          BuildContext context,
+                                          ClipPlaybackState state,
+                                          Widget? child,
+                                        ) {
+                                      if (!state.isInitialized) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return ClipPlayerTransportBar(
+                                        playbackListenable: previewPlayback,
+                                        startTimeMs: previewStartMs,
+                                        endTimeMs: previewEndMs,
+                                        onTogglePlayPause: () =>
+                                            _previewPlayerController
+                                                .togglePlayPause(),
+                                        onSeekBy:
+                                            _previewPlayerController.seekBy,
+                                        onScrub:
+                                            _previewPlayerController.seekTo,
+                                        onPauseForScrub:
+                                            _previewPlayerController.pause,
+                                        onResumeAfterScrub:
+                                            _previewPlayerController.play,
+                                      );
+                                    },
                                   ),
                               ],
                             ),

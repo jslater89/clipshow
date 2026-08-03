@@ -766,6 +766,7 @@ void main() {
         );
         await repository.saveMdkLogVerbosity(MdkLogVerbosity.error);
         await repository.saveFvpLogVerbosity(FvpLogVerbosity.info);
+        await repository.savePlayerBackend(PlayerBackend.mediaKit);
         await repository.saveObsSceneSwitchConfig(
           const ObsSceneSwitchConfig(
             enabled: true,
@@ -835,6 +836,7 @@ void main() {
         );
         expect(settings.mdkLogVerbosity, MdkLogVerbosity.error);
         expect(settings.fvpLogVerbosity, FvpLogVerbosity.info);
+        expect(settings.playerBackend, PlayerBackend.mediaKit);
         expect(settings.obsSceneSwitchConfig, isNotNull);
         expect(settings.obsSceneSwitchConfig!.serverAddress, "10.0.0.30");
         expect(settings.obsSceneSwitchConfig!.enabled, isFalse);

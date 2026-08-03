@@ -20,7 +20,7 @@ Optionally, from the dashboard Capture flow you can start and stop OBS recording
 
 ### 2.1 Machine and OS
 
-Clipshow targets desktop Windows and Linux as built for this project. Smooth playback depends on your GPU and drivers; in practice the player stack favors hardware-backed decoding where it is available. Adjust decoder-related options under Workspace settings if you need to tune behavior on your machine.
+Clipshow targets desktop Windows and Linux as built for this project. Smooth playback depends on your GPU and drivers; in practice the player stack favors hardware-backed decoding where it is available. Under **Workspace Settings → Playback Engine**, choose **Fvp** (default, libmdk) or **Media Kit** (libmpv). The choice applies on the **next app start**. Adjust FVP decoder-related options under the same settings dialog when using Fvp. On Linux, Media Kit needs system **libmpv** (often from the `mpv` package—e.g. `sudo apt install libmpv-dev` or `mpv` on Debian/Ubuntu). Windows bundles media_kit’s libmpv with the app.
 
 > **TODO (Windows):** Revisit this section after Windows builds are validated—confirm playback, paths, capture, and any OS-specific notes.
 
@@ -341,11 +341,13 @@ The dialog has three tabs. Each section has its own **Save** (or **Apply**) cont
 
 ### 11.1 Workspace and Canvas
 
-**Playout canvas size** sets the logical broadcast resolution (width and height in pixels; default 1920×1080). It drives playout and OSG Mode window sizing, OSG layout, bake output framing, and the **fvp** video texture cap (`maxWidth` / `maxHeight` at app start, aspect preserved)—so 4K camera files are scaled down to the canvas instead of allocating a full-resolution GL surface in Manage preview and Playout. There is no fixed aspect ratio. Restart the app after changing canvas size so new players pick up the texture cap.
+**Playout canvas size** sets the logical broadcast resolution (width and height in pixels; default 1920×1080). It drives playout and OSG Mode window sizing, OSG layout, bake output framing, and—when using the **Fvp** player backend—the **fvp** video texture cap (`maxWidth` / `maxHeight` at app start, aspect preserved)—so 4K camera files are scaled down to the canvas instead of allocating a full-resolution GL surface in Manage preview and Playout. There is no fixed aspect ratio. Restart the app after changing canvas size so new Fvp players pick up the texture cap.
+
+**Playback Engine** — **Fvp** (default) or **Media Kit**. Restart the app after changing this. Media Kit on Linux needs system libmpv (§2.1).
 
 **Playback** — **Default clip volume** (0–100%) applies when the workspace loads. During preview and playout, **↑** / **↓** nudge volume by 10% and **M** toggles mute; those session adjustments are not saved.
 
-**Decoder config** — Choose which decode **profiles** are active and in what **priority order**, plus separate dropdowns for **MDK** and **fvp** log verbosity when you need diagnostics. **Apply Decoder Settings** commits the list; restart the app after changing decoder configuration.
+**Decoder config** — Applies to the **Fvp** backend. Choose which decode **profiles** are active and in what **priority order**, plus separate dropdowns for **MDK** and **fvp** log verbosity when you need diagnostics. **Apply Decoder Settings** commits the list; restart the app after changing decoder configuration.
 
 **Ingestion and preview** — **Pause background ingest during Manage playback** reduces concurrent disk access while the dashboard preview player is running (useful on slow USB disks). Full-window **Playout** always pauses background ingest regardless of this toggle. **Ffprobe batch size** and **thumbnail concurrency** tune how aggressively the workspace scanner probes durations and generates sidecar thumbnails.
 
@@ -405,7 +407,7 @@ Follow the Capture flow end-to-end (§8): recording must finish cleanly with **S
 
 ### 13.4 Playback stutters, errors, or wrong decoder behavior
 
-Try adjusting **Decoder config** on the **Workspace and Canvas** tab (§11.1)—profile order and availability depend on your operating system, GPU, and drivers. For diagnostics, raise **MDK** or **fvp** log verbosity temporarily; remember to lower it afterward.
+Confirm **Playback Engine** (§11.1) matches what you intend (Fvp vs Media Kit) and that you restarted after changing it. For Media Kit on Linux, ensure libmpv is installed (§2.1). For Fvp, try adjusting **Decoder config**—profile order and availability depend on your operating system, GPU, and drivers. For diagnostics, raise **MDK** or **fvp** log verbosity temporarily; remember to lower it afterward.
 
 ### 13.5 Manage shortcuts ignored
 

@@ -151,6 +151,45 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                     ],
                   ),
                 SizedBox(height: gap10),
+                if (selectedItem.type == MediaListItemType.clip)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () {
+                        final String? error =
+                            viewModel.selectMasterForClip(selectedItem);
+                        if (error != null && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(error)),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.link),
+                      label: const Text("Go to Source Master"),
+                    ),
+                  ),
+                if (selectedItem.type == MediaListItemType.master &&
+                    viewModel.clipCountForMaster(selectedItem.master!.id) > 0)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => viewModel.toggleClipsOfMasterFilter(
+                        selectedItem.master!.id,
+                      ),
+                      icon: Icon(
+                        viewModel.clipsOfMasterFilterMediaId ==
+                                selectedItem.master!.id
+                            ? Icons.filter_alt
+                            : Icons.filter_list_outlined,
+                      ),
+                      label: Text(
+                        viewModel.clipsOfMasterFilterMediaId ==
+                                selectedItem.master!.id
+                            ? "Clear Clip Filter"
+                            : "Show Clips",
+                      ),
+                    ),
+                  ),
                 if (selectedItem.type == MediaListItemType.clip ||
                     (selectedItem.type == MediaListItemType.master &&
                         viewModel.clipCountForMaster(selectedItem.master!.id) >
