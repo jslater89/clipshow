@@ -564,7 +564,7 @@ class DashboardViewModel extends ChangeNotifier {
         annotationsText: item.annotations ?? "",
         workspaceRoot: workspaceRoot,
         outputDirAbsolute: outputDirAbs,
-        exportBaseName: p.basenameWithoutExtension(item.displayName),
+        exportBaseName: _bakeExportBaseNameForItem(item),
       );
       return await OsgBakeService(
         shouldCancel: () => _bakeCancelRequested,
@@ -976,22 +976,39 @@ class DashboardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Items that would receive at least one saved tag via [applyAllSavedTagsToItems].
-  List<MediaListItem> _itemsNeedingSavedTagApply({
+  /// User tags on the current selection as shelf entries (for bulk apply / saved).
+  List<ShelfTagEntry> _selectedItemUserShelfTags() {
+    final MediaListItem? item = selectedItem;
+    if (item == null) {
+      return <ShelfTagEntry>[];
+    }
+    final List<ShelfTagEntry> out = <ShelfTagEntry>[];
+    for (final MediaTagAttachment att in tagAttachmentsForItem(item)) {
+      if (!_isUserTag(att.tagName)) {
+        continue;
+      }
+      out.add(
+        ShelfTagEntry(name: att.tagName, semanticTypeId: att.semanticTypeId),
+      );
+    }
+    return out;
+  }
+
+  /// Items that would receive at least one of [tags] via bulk apply.
+  List<MediaListItem> _itemsNeedingTagApply({
     required bool filteredOnly,
+    required List<ShelfTagEntry> tags,
   }) {
-    final MediaRepository? repository = _mediaRepository;
-    if (repository == null || _savedTagEntries.isEmpty) {
+    if (tags.isEmpty) {
       return <MediaListItem>[];
     }
     final List<MediaListItem> targetItems = List<MediaListItem>.from(
       filteredOnly ? _visibleItems : _allItems,
     );
-    final List<ShelfTagEntry> saved = List<ShelfTagEntry>.from(_savedTagEntries);
     if (targetItems.isEmpty) {
       return <MediaListItem>[];
     }
-    final List<String> savedNamesLower = saved
+    final List<String> tagNamesLower = tags
         .map((ShelfTagEntry e) => e.name.toLowerCase())
         .toList();
     final List<MediaListItem> itemsNeedingUpdate = <MediaListItem>[];
@@ -1000,7 +1017,7 @@ class DashboardViewModel extends ChangeNotifier {
           (_tagsByItemKey[item.stableKey] ?? <String>{})
               .map((String tag) => tag.toLowerCase())
               .toSet();
-      final bool needsUpdate = savedNamesLower.any(
+      final bool needsUpdate = tagNamesLower.any(
         (String nameLower) => !existingTagsLower.contains(nameLower),
       );
       if (needsUpdate) {
@@ -1011,7 +1028,20 @@ class DashboardViewModel extends ChangeNotifier {
   }
 
   int countItemsNeedingSavedTagsApply({required bool filteredOnly}) =>
-      _itemsNeedingSavedTagApply(filteredOnly: filteredOnly).length;
+      _itemsNeedingTagApply(
+        filteredOnly: filteredOnly,
+        tags: _savedTagEntries,
+      ).length;
+
+  int countItemsNeedingSelectedTagsApply({required bool filteredOnly}) =>
+      _itemsNeedingTagApply(
+        filteredOnly: filteredOnly,
+        tags: _selectedItemUserShelfTags(),
+      ).length;
+
+  /// User tags on the current selection (for bulk-apply confirm UI).
+  List<ShelfTagEntry> get selectedItemUserShelfTags =>
+      _selectedItemUserShelfTags();
 
   void mergeSavedTagsIntoCapture() {
     for (final ShelfTagEntry e in _savedTagEntries) {
@@ -1032,6 +1062,29 @@ class DashboardViewModel extends ChangeNotifier {
       addCaptureTag(att.tagName, semanticTypeId: att.semanticTypeId);
     }
     setMediaPaneTab(DashboardMediaPaneTab.capture);
+  }
+
+  /// Copies the selected item's user tags onto the Saved Tags shelf.
+  Future<void> mergeSelectedItemTagsIntoSaved() async {
+    final MediaListItem? item = selectedItem;
+    final MediaRepository? repository = _mediaRepository;
+    if (item == null || repository == null) {
+      return;
+    }
+    bool any = false;
+    for (final MediaTagAttachment att in tagAttachmentsForItem(item)) {
+      if (!_isUserTag(att.tagName)) {
+        continue;
+      }
+      await repository.addSavedTag(
+        att.tagName,
+        semanticTypeId: att.semanticTypeId,
+      );
+      any = true;
+    }
+    if (any) {
+      await _reloadFromRepository();
+    }
   }
 
   Future<void> saveCapturePathsSettings(CapturePathsSettings value) async {
@@ -2199,15 +2252,33 @@ class DashboardViewModel extends ChangeNotifier {
   }
 
   Future<int> applyAllSavedTagsToItems({required bool filteredOnly}) async {
+    return _applyTagsToItems(
+      filteredOnly: filteredOnly,
+      tags: List<ShelfTagEntry>.from(_savedTagEntries),
+    );
+  }
+
+  /// Applies the selected item's user tags to filtered or all library items.
+  Future<int> applySelectedItemTagsToItems({
+    required bool filteredOnly,
+  }) async {
+    return _applyTagsToItems(
+      filteredOnly: filteredOnly,
+      tags: _selectedItemUserShelfTags(),
+    );
+  }
+
+  Future<int> _applyTagsToItems({
+    required bool filteredOnly,
+    required List<ShelfTagEntry> tags,
+  }) async {
     final MediaRepository? repository = _mediaRepository;
-    if (repository == null || _savedTagEntries.isEmpty) {
+    if (repository == null || tags.isEmpty) {
       return 0;
     }
-    final List<ShelfTagEntry> savedTags = List<ShelfTagEntry>.from(
-      _savedTagEntries,
-    );
-    final List<MediaListItem> itemsNeedingUpdate = _itemsNeedingSavedTagApply(
+    final List<MediaListItem> itemsNeedingUpdate = _itemsNeedingTagApply(
       filteredOnly: filteredOnly,
+      tags: tags,
     );
     if (itemsNeedingUpdate.isEmpty) {
       return 0;
@@ -2221,7 +2292,7 @@ class DashboardViewModel extends ChangeNotifier {
           ? i + _savedTagApplyBatchSize
           : itemsNeedingUpdate.length;
       final List<MediaListItem> batch = itemsNeedingUpdate.sublist(i, end);
-      await repository.addTagsToItems(items: batch, tags: savedTags);
+      await repository.addTagsToItems(items: batch, tags: tags);
       await _refreshTagsForItems(batch, refreshAllTags: false);
     }
     _allTags
@@ -2844,6 +2915,46 @@ class DashboardViewModel extends ChangeNotifier {
       tag != MediaRepository.masterTag &&
       tag != MediaRepository.clipTag &&
       tag != MediaRepository.tagSetTag;
+
+  /// Bake MP4 stem: display name, then sanitized sorted user tags.
+  ///
+  /// Keeps a date-prefixed capture name first; tags are appended for findability.
+  String _bakeExportBaseNameForItem(MediaListItem item) {
+    final String displayStem = p.basenameWithoutExtension(item.displayName);
+    final List<String> tagSegments = <String>[];
+    final Set<String> seenLower = <String>{};
+    for (final String tag in tagsForItem(item)) {
+      if (!_isUserTag(tag)) {
+        continue;
+      }
+      final String segment = _sanitizeBakeFilenameSegment(tag);
+      if (segment.isEmpty) {
+        continue;
+      }
+      final String lower = segment.toLowerCase();
+      if (seenLower.contains(lower)) {
+        continue;
+      }
+      seenLower.add(lower);
+      tagSegments.add(segment);
+    }
+    tagSegments.sort(
+      (String a, String b) => a.toLowerCase().compareTo(b.toLowerCase()),
+    );
+    if (tagSegments.isEmpty) {
+      return displayStem;
+    }
+    return "${displayStem}_${tagSegments.join("_")}";
+  }
+
+  static String _sanitizeBakeFilenameSegment(String raw) {
+    String name = raw.trim();
+    name = name.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), "_");
+    name = name.replaceAll(RegExp(r"\s+"), "_");
+    name = name.replaceAll(RegExp(r"_+"), "_");
+    name = name.replaceAll(RegExp(r"^_|_$"), "");
+    return name;
+  }
 
   void setPlayoutActive(bool active) {
     _ingestionService.setPlayoutActive(active);

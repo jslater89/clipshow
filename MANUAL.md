@@ -155,7 +155,7 @@ The Tags card always reflects the current list selection. At the top it shows th
 
 For a **clip**, **Go to Source Master** jumps selection to the underlying master file, clears the **Show Clips** filter if it was active, and scrolls that master into view in the file list. If other search/tag filters still hide the master, selection still moves but a SnackBar explains that the row is not visible. For a **master** that already has clips, **Show Clips** / **Clear Clip Filter** toggles the file-list filter that limits the list to clips of that master (see §5).
 
-Every tag on the item appears as a chip. Internal type tags cannot be deleted but behave like other chips for filtering the file list. Use **Add Tag** (with autocomplete from your library) and **Add** to attach user tags to the selection. The small **capture** control merges the selected item’s user tags into the Capture pane’s tag basket so new recordings inherit them.
+Every tag on the item appears as a chip. Internal type tags cannot be deleted but behave like other chips for filtering the file list. Use **Add Tag** (with autocomplete from your library) and **Add** to attach user tags to the selection. Three bulk actions push the selection’s user tags elsewhere, indicated by the arrows: **saved** copies them onto the Saved Tags shelf; **filtered** or **all** applies them to every visible list row or the entire library (same filter-aware confirm dialog as Saved Tags); **capture** merges them into the Capture pane’s tag basket so new recordings inherit them.
 
 Below the divider, **Saved Tags** is a reusable palette stored in the workspace: chips can be removed individually. **Add Saved Tag** maintains that list. Three bulk actions use the saved set to push tags to other parts of the application, indicated by the arrows: **filtered** or **all** applies those tags to every visible list row or the entire library (depending on whether file-list filters are active—confirmed by dialog); **current** applies them only to the selected item; **capture** merges the saved set into the Capture tag basket. Both **capture** buttons feed Capture mode (§8).
 
@@ -165,7 +165,7 @@ Below the divider, **Saved Tags** is a reusable palette stored in the workspace:
 
 **Bake** renders the selected clip or master to an MP4 with on-screen graphics composited in according to a **bake recipe**—an offline ffmpeg pipeline, not a live playout session. You need at least one bake recipe on the **On-Screen Graphics** tab in Workspace settings (§11.2) before the **Bake** button appears on the preview action bar.
 
-Choosing **Bake** opens a recipe picker. For each recipe you can **Queue** the job for the **Bake Queue** tab or run **Now** and wait while rendering finishes (you can cancel once the job is actually running). Finished files land in the workspace **playout output** folder (default `export`, same as Record playout—§9.7) as `{displayName}_baked.mp4`, with a numeric suffix if that name already exists. A bottom banner offers **Reveal** when a bake completes.
+Choosing **Bake** opens a recipe picker. For each recipe you can **Queue** the job for the **Bake Queue** tab or run **Now** and wait while rendering finishes (you can cancel once the job is actually running). Finished files land in the workspace **playout output** folder (default `export`, same as Record playout—§9.7) as `{displayName}_{tags}_baked.mp4` when the item has user tags (each tag sanitized for the filesystem and sorted), or `{displayName}_baked.mp4` when it has none, with a numeric suffix if that name already exists. The display name stays first so date-prefixed capture names remain easy to sort. A bottom banner offers **Reveal** when a bake completes.
 
 Recipes define timed **cues**—which OSG preset is visible from which anchor in clip time (clip start/end, offset from start, or offset from end). At queue time Clipshow checks that the selected item satisfies each cue preset’s required semantic tags; missing tags block the job with an error.
 
@@ -206,7 +206,7 @@ You need a **workspace** open and an **enabled** OBS profile on the **Scene Swit
 
 While **Start Recording** is active, Clipshow tells OBS to use a **recording** directory **inside your workspace**—the path configured under **OBS Paths** (§11.3), often a folder such as `recordings/`. OBS’s global “recording path” is temporarily pointed there so the growing file lands under your project. That folder is normally **ignored** by the library scanner so half-written takes do not show up as masters. When you **Stop And Save**, Clipshow stops the encoder, waits for the file on disk to settle, then **copies** the result into your **output** folder (§11.3—commonly the workspace root or another non-ignored location) and **deletes** the staging copy so you do not keep duplicates. Ingestion only indexes the output copy; partial files still in the recording tree while a take is in progress stay quarantined there until stop completes. Afterward Clipshow **restores OBS’s recording directory** to whatever it was before this session and closes the capture WebSocket client, so your everyday OBS layout is not permanently changed.
 
-Capture also supports keyboard triggers: press **R** to start recording and **S** to stop and save.
+Capture also supports keyboard triggers: press **R** to start recording and **S** to stop and save (ignored while the Add Tag field is focused so those letters can be typed).
 
 If you set an optional **capture** program scene name in settings, Clipshow switches OBS to that scene before starting the encoder so your sources and layout match how you want to record.
 
@@ -341,7 +341,7 @@ The dialog has three tabs. Each section has its own **Save** (or **Apply**) cont
 
 ### 11.1 Workspace and Canvas
 
-**Playout canvas size** sets the logical broadcast resolution (width and height in pixels; default 1920×1080). It drives playout and OSG Mode window sizing, OSG layout, and bake output framing—there is no fixed aspect ratio.
+**Playout canvas size** sets the logical broadcast resolution (width and height in pixels; default 1920×1080). It drives playout and OSG Mode window sizing, OSG layout, bake output framing, and the **fvp** video texture cap (`maxWidth` / `maxHeight` at app start, aspect preserved)—so 4K camera files are scaled down to the canvas instead of allocating a full-resolution GL surface in Manage preview and Playout. There is no fixed aspect ratio. Restart the app after changing canvas size so new players pick up the texture cap.
 
 **Playback** — **Default clip volume** (0–100%) applies when the workspace loads. During preview and playout, **↑** / **↓** nudge volume by 10% and **M** toggles mute; those session adjustments are not saved.
 

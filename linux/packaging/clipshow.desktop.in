@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Clipshow
+Comment=Clip library, playout, and on-screen graphics for live broadcast
+Exec=@EXEC@
+Icon=@ICON@
+Terminal=false
+Categories=AudioVideo;Video;TV;
+Keywords=OBS;broadcast;clips;playout;graphics;
+StartupNotify=true
+# Matches linux/CMakeLists.txt APPLICATION_ID
+StartupWMClass=com.shootingsportsanalyst.clipshow

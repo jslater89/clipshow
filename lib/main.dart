@@ -8,6 +8,7 @@ import "package:window_manager/window_manager.dart";
 import "package:obs_clipshow/src/app/app.dart";
 import "package:obs_clipshow/src/data/app_database.dart";
 import "package:obs_clipshow/src/media/workspace.dart";
+import "package:obs_clipshow/src/osg/osg_models.dart";
 import "package:obs_clipshow/src/workspace/workspace_preferences.dart";
 import "package:obs_clipshow/src/workspace/workspace_settings.dart";
 
@@ -18,10 +19,17 @@ Future<void> main() async {
   await windowManager.ensureInitialized();
   final _StartupVideoSettings startupSettings =
       await _loadStartupVideoSettings();
+  final PlayoutOutputSize textureCap = startupSettings.playoutOutputSize;
   fvp.registerWith(
     options: <String, Object>{
       "platforms": <String>["windows", "linux", "macos"],
       "video.decoders": startupSettings.decoderOptions,
+      // Cap native GL textures to the playout canvas so 4K+ sources do not
+      // allocate full-frame surfaces for Manage preview / playout (fvp scales
+      // with aspect preserved when fitMaxSize is true).
+      "maxWidth": textureCap.width,
+      "maxHeight": textureCap.height,
+      "fitMaxSize": true,
       // MDK player buffer: min ms when low + max ms cap (reduces PulseAudio underruns).
       "player": <String, String>{"buffer": "2000+60000"},
       // Applied after fvp's internal "log":"all"; overrides MDK global log level.
@@ -56,6 +64,7 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
       decoderOptions: fallbackSettings.enabledProfiles.map((DecoderProfile profile) => profile.fvpArgument).toList(),
       logVerbosity: MdkLogVerbosity.warning,
       fvpLogVerbosity: FvpLogVerbosity.warning,
+      playoutOutputSize: PlayoutOutputSize.fallback,
     );
   }
   final Workspace workspace = Workspace(rootPath: workspacePath);
@@ -129,10 +138,35 @@ Future<_StartupVideoSettings> _loadStartupVideoSettings() async {
       (FvpLogVerbosity item) => item.name == fvpLogName,
       orElse: () => FvpLogVerbosity.warning,
     );
+    final List<Map<String, Object?>> widthRows = await database.query(
+      "workspace_settings",
+      columns: <String>["value"],
+      where: "key = ?",
+      whereArgs: <Object?>["playout.outputWidth"],
+      limit: 1,
+    );
+    final List<Map<String, Object?>> heightRows = await database.query(
+      "workspace_settings",
+      columns: <String>["value"],
+      where: "key = ?",
+      whereArgs: <Object?>["playout.outputHeight"],
+      limit: 1,
+    );
+    final int? width = widthRows.isEmpty
+        ? null
+        : int.tryParse(widthRows.single["value"]! as String);
+    final int? height = heightRows.isEmpty
+        ? null
+        : int.tryParse(heightRows.single["value"]! as String);
+    final PlayoutOutputSize playoutOutputSize =
+        width != null && height != null && width > 0 && height > 0
+        ? PlayoutOutputSize(width: width, height: height)
+        : PlayoutOutputSize.fallback;
     return _StartupVideoSettings(
       decoderOptions: decoderProfiles.map((DecoderProfile profile) => profile.fvpArgument).toList(),
       logVerbosity: verbosity,
       fvpLogVerbosity: fvpVerbosity,
+      playoutOutputSize: playoutOutputSize,
     );
   } finally {
     await database.close();
@@ -180,9 +214,11 @@ class _StartupVideoSettings {
     required this.decoderOptions,
     required this.logVerbosity,
     required this.fvpLogVerbosity,
+    required this.playoutOutputSize,
   });
 
   final List<String> decoderOptions;
   final MdkLogVerbosity logVerbosity;
   final FvpLogVerbosity fvpLogVerbosity;
+  final PlayoutOutputSize playoutOutputSize;
 }

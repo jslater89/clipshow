@@ -25,9 +25,69 @@ class _StopCaptureIntent extends Intent {
   const _StopCaptureIntent();
 }
 
+/// Capture letter hotkeys; disabled while [tagFieldHasFocus] so Add Tag can
+/// type "r" / "s". [Shortcuts] resolves [Actions] from [primaryFocus], so the
+/// panel [FocusNode] must hold focus whenever the tag field does not.
+class _CaptureHotkeyAction<T extends Intent> extends Action<T> {
+  _CaptureHotkeyAction({
+    required this.tagFieldHasFocus,
+    required this.onInvoke,
+  });
+
+  final bool Function() tagFieldHasFocus;
+  final VoidCallback onInvoke;
+
+  @override
+  bool isEnabled(T intent) => !tagFieldHasFocus();
+
+  @override
+  bool consumesKey(T intent) => isEnabled(intent);
+
+  @override
+  Object? invoke(T intent) {
+    onInvoke();
+    return null;
+  }
+}
+
 class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
+  final FocusNode _panelFocus = FocusNode(debugLabel: "CapturePanel");
   TextEditingController? _activeCaptureTagInputController;
+  FocusNode? _tagFieldFocus;
   bool _handledAutocompleteSelection = false;
+
+  bool _tagFieldHasFocus() => _tagFieldFocus?.hasFocus ?? false;
+
+  void _bindTagFieldFocus(FocusNode focusNode) {
+    if (identical(_tagFieldFocus, focusNode)) {
+      return;
+    }
+    _tagFieldFocus?.removeListener(_onTagFieldFocusChange);
+    _tagFieldFocus = focusNode;
+    _tagFieldFocus!.addListener(_onTagFieldFocusChange);
+  }
+
+  void _onTagFieldFocusChange() {
+    if (!mounted) {
+      return;
+    }
+    // Shortcuts looks up Actions from primaryFocus; keep the panel node
+    // focused whenever the tag field is not editing.
+    if (!_tagFieldHasFocus() && !_panelFocus.hasFocus) {
+      _panelFocus.requestFocus();
+    }
+  }
+
+  void _focusPanel() {
+    _panelFocus.requestFocus();
+  }
+
+  @override
+  void dispose() {
+    _tagFieldFocus?.removeListener(_onTagFieldFocusChange);
+    _panelFocus.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,24 +116,25 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
-          _StartCaptureIntent: CallbackAction<_StartCaptureIntent>(
-            onInvoke: (_) {
+          _StartCaptureIntent: _CaptureHotkeyAction<_StartCaptureIntent>(
+            tagFieldHasFocus: _tagFieldHasFocus,
+            onInvoke: () {
               if (canStart) {
                 viewModel.startObsCapture();
               }
-              return null;
             },
           ),
-          _StopCaptureIntent: CallbackAction<_StopCaptureIntent>(
-            onInvoke: (_) {
+          _StopCaptureIntent: _CaptureHotkeyAction<_StopCaptureIntent>(
+            tagFieldHasFocus: _tagFieldHasFocus,
+            onInvoke: () {
               if (canStop) {
                 viewModel.stopObsCaptureAndIngestTags();
               }
-              return null;
             },
           ),
         },
         child: Focus(
+          focusNode: _panelFocus,
           autofocus: true,
           child: Card(
             child: Padding(
@@ -140,6 +201,7 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                               _handledAutocompleteSelection = true;
                               viewModel.addCaptureTag(value);
                               _activeCaptureTagInputController?.clear();
+                              _focusPanel();
                             },
                             fieldViewBuilder: (
                               BuildContext context,
@@ -149,6 +211,7 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                             ) {
                               _activeCaptureTagInputController =
                                   textEditingController;
+                              _bindTagFieldFocus(focusNode);
                               return TextField(
                                 controller: textEditingController,
                                 focusNode: focusNode,
@@ -156,10 +219,15 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
                                   labelText: "Add Tag",
                                   border: OutlineInputBorder(),
                                 ),
+                                onTapOutside: (_) {
+                                  focusNode.unfocus();
+                                  _focusPanel();
+                                },
                                 onSubmitted: (_) {
                                   onFieldSubmitted();
                                   if (_handledAutocompleteSelection) {
                                     _handledAutocompleteSelection = false;
+                                    _focusPanel();
                                     return;
                                   }
                                   _submitCaptureTag(
@@ -227,9 +295,11 @@ class _DashboardCapturePanelState extends State<DashboardCapturePanel> {
   ) {
     final String tag = controller.text.trim();
     if (tag.isEmpty) {
+      _focusPanel();
       return;
     }
     viewModel.addCaptureTag(tag);
     controller.clear();
+    _focusPanel();
   }
 }
