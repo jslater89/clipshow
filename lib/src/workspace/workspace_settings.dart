@@ -272,6 +272,7 @@ class ObsSceneSwitchConfig {
     required this.videoScene,
     required this.faceScene,
     required this.captureScene,
+    required this.osgOverlayScene,
     required this.osgOverlaySource,
   });
 
@@ -284,6 +285,7 @@ class ObsSceneSwitchConfig {
       videoScene: "Video Scene",
       faceScene: "Face Scene",
       captureScene: "",
+      osgOverlayScene: "",
       osgOverlaySource: "",
     );
   }
@@ -298,9 +300,15 @@ class ObsSceneSwitchConfig {
   /// Empty string disables switching before capture.
   final String captureScene;
 
-  /// OBS scene-item source name enabled on the current program scene when
-  /// entering OSG Mode (disabled on exit). Empty string disables OSG overlay
-  /// automation.
+  /// Optional home scene for OSG overlay automation. When non-empty with
+  /// [osgOverlaySource], Clipshow enables/disables that source inside this
+  /// scene (so nested use reflects everywhere). When empty, the source is
+  /// enabled on the current program scene instead.
+  final String osgOverlayScene;
+
+  /// OBS scene-item source name enabled when entering OSG Mode (disabled on
+  /// exit). Empty string disables OSG overlay automation. Target scene is
+  /// [osgOverlayScene] when set, otherwise the current program scene.
   final String osgOverlaySource;
 }
 

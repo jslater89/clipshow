@@ -1,7 +1,7 @@
 import "package:logging/logging.dart";
 import "package:obs_websocket/obs_websocket.dart";
 
-/// Scene item resolved for OSG overlay automation on the current program scene.
+/// Scene item resolved for OSG overlay automation.
 class OsgOverlayTarget {
   const OsgOverlayTarget({
     required this.sceneName,
@@ -14,24 +14,28 @@ class OsgOverlayTarget {
   final String sourceName;
 }
 
-/// Thrown when the configured OSG overlay source is missing from the current
-/// program scene (or OBS refuses the lookup).
+/// Thrown when the configured OSG overlay source is missing from the target
+/// scene (or OBS refuses the lookup).
 class OsgOverlaySourceNotFoundException implements Exception {
   OsgOverlaySourceNotFoundException({
     required this.sourceName,
-    required this.programSceneName,
+    required this.sceneName,
+    this.searchedCurrentProgram = false,
     this.cause,
   });
 
   final String sourceName;
-  final String programSceneName;
+  final String sceneName;
+  final bool searchedCurrentProgram;
   final Object? cause;
 
   @override
   String toString() {
+    final String sceneClause = searchedCurrentProgram
+        ? "the current OBS program scene \"$sceneName\""
+        : "OBS scene \"$sceneName\"";
     final String base =
-        "OSG overlay source \"$sourceName\" was not found in the current "
-        "OBS program scene \"$programSceneName\".";
+        "OSG overlay source \"$sourceName\" was not found in $sceneClause.";
     if (cause == null) {
       return base;
     }
@@ -77,39 +81,76 @@ class ObsService {
     await client.scenes.setCurrentProgramScene(faceSceneName);
   }
 
+  /// Resolves [sourceName] as a scene item on [sceneName].
+  ///
+  /// Throws [OsgOverlaySourceNotFoundException] when the item is missing.
+  Future<OsgOverlayTarget> resolveOsgOverlay({
+    required String sceneName,
+    required String sourceName,
+    bool searchedCurrentProgram = false,
+  }) async {
+    final String trimmedSource = sourceName.trim();
+    final String trimmedScene = sceneName.trim();
+    if (trimmedSource.isEmpty) {
+      throw ArgumentError("OSG overlay source name must not be empty.");
+    }
+    if (trimmedScene.isEmpty) {
+      throw ArgumentError("OSG overlay scene name must not be empty.");
+    }
+    final ObsWebSocket client = await _requireClient();
+    try {
+      final int sceneItemId = await client.sceneItems.getSceneItemId(
+        sceneName: trimmedScene,
+        sourceName: trimmedSource,
+      );
+      _logger.info(
+        "Resolved OSG overlay \"$trimmedSource\" in scene "
+        "\"$trimmedScene\" (item $sceneItemId).",
+      );
+      return OsgOverlayTarget(
+        sceneName: trimmedScene,
+        sceneItemId: sceneItemId,
+        sourceName: trimmedSource,
+      );
+    } catch (error) {
+      throw OsgOverlaySourceNotFoundException(
+        sourceName: trimmedSource,
+        sceneName: trimmedScene,
+        searchedCurrentProgram: searchedCurrentProgram,
+        cause: error,
+      );
+    }
+  }
+
   /// Resolves [sourceName] as a scene item on the current program scene.
   ///
   /// Throws [OsgOverlaySourceNotFoundException] when the item is missing.
   Future<OsgOverlayTarget> resolveOsgOverlayInCurrentProgram(
     String sourceName,
   ) async {
-    final String trimmed = sourceName.trim();
-    if (trimmed.isEmpty) {
-      throw ArgumentError("OSG overlay source name must not be empty.");
-    }
     final ObsWebSocket client = await _requireClient();
     final String programScene = await client.scenes.getCurrentProgramScene();
-    try {
-      final int sceneItemId = await client.sceneItems.getSceneItemId(
-        sceneName: programScene,
-        sourceName: trimmed,
-      );
-      _logger.info(
-        "Resolved OSG overlay \"$trimmed\" in program scene "
-        "\"$programScene\" (item $sceneItemId).",
-      );
-      return OsgOverlayTarget(
-        sceneName: programScene,
-        sceneItemId: sceneItemId,
-        sourceName: trimmed,
-      );
-    } catch (error) {
-      throw OsgOverlaySourceNotFoundException(
-        sourceName: trimmed,
-        programSceneName: programScene,
-        cause: error,
+    return resolveOsgOverlay(
+      sceneName: programScene,
+      sourceName: sourceName,
+      searchedCurrentProgram: true,
+    );
+  }
+
+  /// Resolves the OSG overlay using [osgOverlayScene] when set, otherwise the
+  /// current program scene.
+  Future<OsgOverlayTarget> resolveOsgOverlayForConfig({
+    required String osgOverlayScene,
+    required String osgOverlaySource,
+  }) async {
+    final String homeScene = osgOverlayScene.trim();
+    if (homeScene.isNotEmpty) {
+      return resolveOsgOverlay(
+        sceneName: homeScene,
+        sourceName: osgOverlaySource,
       );
     }
+    return resolveOsgOverlayInCurrentProgram(osgOverlaySource);
   }
 
   Future<void> setSceneItemEnabled({

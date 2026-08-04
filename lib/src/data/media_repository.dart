@@ -1571,6 +1571,7 @@ class MediaRepository {
       videoScene: (row["obs_video_scene"] as String?) ?? "Video Scene",
       faceScene: (row["obs_face_scene"] as String?) ?? "Face Scene",
       captureScene: (row["obs_capture_scene"] as String?) ?? "",
+      osgOverlayScene: (row["obs_osg_scene"] as String?) ?? "",
       osgOverlaySource: (row["obs_osg_source"] as String?) ?? "",
     );
   }
@@ -1602,8 +1603,7 @@ class MediaRepository {
         "obs_video_scene": value.videoScene,
         "obs_face_scene": value.faceScene,
         "obs_capture_scene": value.captureScene,
-        // Legacy program-scene field; no longer used for OSG Mode automation.
-        "obs_osg_scene": "",
+        "obs_osg_scene": value.osgOverlayScene,
         "obs_osg_source": value.osgOverlaySource,
       };
       if (existing.isEmpty) {

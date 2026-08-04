@@ -2770,6 +2770,8 @@ class DashboardViewModel extends ChangeNotifier {
                   "videoScene": settings.obsSceneSwitchConfig!.videoScene,
                   "faceScene": settings.obsSceneSwitchConfig!.faceScene,
                   "captureScene": settings.obsSceneSwitchConfig!.captureScene,
+                  "osgOverlayScene":
+                      settings.obsSceneSwitchConfig!.osgOverlayScene,
                   "osgOverlaySource":
                       settings.obsSceneSwitchConfig!.osgOverlaySource,
                 },

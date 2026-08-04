@@ -129,7 +129,7 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       return;
     }
     final String nextKey =
-        "${obsConfig.serverAddress}:${obsConfig.port}:${obsConfig.password}:${obsConfig.videoScene}:${obsConfig.faceScene}:${obsConfig.osgOverlaySource}";
+        "${obsConfig.serverAddress}:${obsConfig.port}:${obsConfig.password}:${obsConfig.videoScene}:${obsConfig.faceScene}:${obsConfig.osgOverlayScene}:${obsConfig.osgOverlaySource}";
     final bool configChanged = _obsConfigKey != nextKey;
     if (configChanged) {
       _obsConfigKey = nextKey;
@@ -232,8 +232,9 @@ class _ObsClipshowAppState extends State<ObsClipshowApp> {
       final ObsService service = _buildObsService(obsConfig);
       try {
         await service.ensureConnected();
-        resolvedTarget = await service.resolveOsgOverlayInCurrentProgram(
-          obsConfig.osgOverlaySource,
+        resolvedTarget = await service.resolveOsgOverlayForConfig(
+          osgOverlayScene: obsConfig.osgOverlayScene,
+          osgOverlaySource: obsConfig.osgOverlaySource,
         );
         _markObsRequestSuccess();
       } catch (error, stackTrace) {

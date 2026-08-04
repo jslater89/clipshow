@@ -30,6 +30,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
   final TextEditingController _obsFaceSceneController = TextEditingController();
   final TextEditingController _obsCaptureSceneController =
       TextEditingController();
+  final TextEditingController _obsOsgOverlaySceneController =
+      TextEditingController();
   final TextEditingController _obsOsgOverlaySourceController =
       TextEditingController();
   final TextEditingController _captureRecordingDirController =
@@ -80,6 +82,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
     _obsVideoSceneController.dispose();
     _obsFaceSceneController.dispose();
     _obsCaptureSceneController.dispose();
+    _obsOsgOverlaySceneController.dispose();
     _obsOsgOverlaySourceController.dispose();
     _captureRecordingDirController.dispose();
     _captureOutputDirController.dispose();
@@ -179,6 +182,7 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
       _obsVideoSceneController.text = obsConfig.videoScene;
       _obsFaceSceneController.text = obsConfig.faceScene;
       _obsCaptureSceneController.text = obsConfig.captureScene;
+      _obsOsgOverlaySceneController.text = obsConfig.osgOverlayScene;
       _obsOsgOverlaySourceController.text = obsConfig.osgOverlaySource;
       final CapturePathsSettings capturePaths = viewModel.capturePathsSettings;
       _captureRecordingDirController.text = capturePaths.recordingRelativeDir;
@@ -999,14 +1003,27 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
               ),
               SizedBox(height: _gap(context)),
               TextField(
+                controller: _obsOsgOverlaySceneController,
+                decoration: const InputDecoration(
+                  labelText: "OSG Overlay Scene (optional)",
+                  helperText:
+                      "Home scene that contains the overlay source. When set, "
+                      "Clipshow enables/disables the source inside this scene "
+                      "(nest it on every live look). Leave blank to toggle the "
+                      "source on the current program scene instead.",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              SizedBox(height: _gap(context)),
+              TextField(
                 controller: _obsOsgOverlaySourceController,
                 decoration: const InputDecoration(
                   labelText: "OSG Overlay Source (optional)",
                   helperText:
-                      "Source name enabled on the current OBS program scene "
-                      "when entering OSG Mode; disabled on Escape. Program "
-                      "scene is unchanged. The source must exist on every "
-                      "scene you enter from, or enter fails. Leave blank to "
+                      "Source name enabled when entering OSG Mode; disabled on "
+                      "Escape. With an overlay scene, the source is toggled "
+                      "inside that scene. Without one, it must exist on the "
+                      "current program scene or enter fails. Leave blank to "
                       "disable overlay automation.",
                   border: OutlineInputBorder(),
                 ),
@@ -1026,6 +1043,8 @@ class _WorkspaceSettingsDialogState extends State<WorkspaceSettingsDialog>
                       videoScene: _obsVideoSceneController.text.trim(),
                       faceScene: _obsFaceSceneController.text.trim(),
                       captureScene: _obsCaptureSceneController.text.trim(),
+                      osgOverlayScene:
+                          _obsOsgOverlaySceneController.text.trim(),
                       osgOverlaySource:
                           _obsOsgOverlaySourceController.text.trim(),
                     ),

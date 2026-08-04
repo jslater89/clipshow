@@ -776,15 +776,20 @@ void main() {
             videoScene: "video",
             faceScene: "face",
             captureScene: "Cap",
-            osgOverlaySource: "Clipshow OSG",
+            osgOverlayScene: "Clipshow OSG",
+            osgOverlaySource: "Clipshow",
           ),
         );
         final WorkspaceSettingsBundle midSettings = await repository
             .loadWorkspaceSettings();
         expect(midSettings.obsSceneSwitchConfig, isNotNull);
         expect(
-          midSettings.obsSceneSwitchConfig!.osgOverlaySource,
+          midSettings.obsSceneSwitchConfig!.osgOverlayScene,
           "Clipshow OSG",
+        );
+        expect(
+          midSettings.obsSceneSwitchConfig!.osgOverlaySource,
+          "Clipshow",
         );
         await repository.saveObsSceneSwitchConfig(
           const ObsSceneSwitchConfig(
@@ -795,6 +800,7 @@ void main() {
             videoScene: "video2",
             faceScene: "face2",
             captureScene: "",
+            osgOverlayScene: "",
             osgOverlaySource: "",
           ),
         );
@@ -841,6 +847,7 @@ void main() {
         expect(settings.obsSceneSwitchConfig!.serverAddress, "10.0.0.30");
         expect(settings.obsSceneSwitchConfig!.enabled, isFalse);
         expect(settings.obsSceneSwitchConfig!.captureScene, "");
+        expect(settings.obsSceneSwitchConfig!.osgOverlayScene, "");
         expect(settings.obsSceneSwitchConfig!.osgOverlaySource, "");
         expect(
           settings.capturePathsSettings.recordingRelativeDir,
