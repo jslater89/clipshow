@@ -122,7 +122,7 @@ When the workspace defines **on-screen graphics**, the preview can draw those ov
 
 ### 6.2 With a master selected
 
-Scrub with the timeline and transport controls; clicking the video toggles play/pause. **Mark In** and **Mark Out** stamp the current playhead into working marks (shown on the buttons). Setting Mark In after Mark Out clears Mark Out if the pair would be invalid. **Save clip** persists a new **clip** row from those marks on the selected master; if both marks exist, Mark Out must be later than Mark In. Mark Out may stay unset for an open-ended clip. Keyboard shortcuts **I**, **O**, and **S** mirror Mark In, Mark Out, and Save clip when focus is on the player—click the video surface if shortcuts stop responding.
+Scrub with the timeline and transport controls; clicking the video toggles play/pause. **Mark In** and **Mark Out** stamp the current playhead into working marks (shown on the buttons). Setting Mark In after Mark Out clears Mark Out if the pair would be invalid. **Save clip** persists a new **clip** row from those marks on the selected master; if both marks exist, Mark Out must be later than Mark In. Mark Out may stay unset for an open-ended clip. Keyboard shortcuts **I**, **O**, and **S** mirror Mark In, Mark Out, and Save clip when focus is on the player—leaving a tag or notes field (or clicking the preview surface) returns focus so shortcuts keep working.
 
 **Trash file** confirms, then moves the underlying video to the system trash when possible (otherwise a fallback folder under the workspace), removes the master from the database, and drops clips that depended on that file. If the video is already missing from disk, a second confirm offers to remove the orphaned master (and its clips) from the library without touching the filesystem.
 
@@ -169,7 +169,7 @@ Choosing **Bake** opens a recipe picker. For each recipe you can **Queue** the j
 
 Recipes define timed **cues**—which OSG preset is visible from which anchor in clip time (clip start/end, offset from start, or offset from end). At queue time Clipshow checks that the selected item satisfies each cue preset’s required semantic tags; missing tags block the job with an error.
 
-When the workspace has bake recipes, the **Bake Queue** tab shows the runner (**Start** / **Pause**), the currently running task with a progress bar (percent of overlay frames streamed), and pending and finished tasks. Pausing stops dequeuing new work; a **Now** bake still runs immediately when you choose it from Manage. Completed rows can reveal the output file in your file manager.
+When the workspace has bake recipes, the **Bake Queue** tab shows the runner (**Start** / **Pause**), an **Export Folder** control that opens the workspace playout output directory (default `export`), the currently running task with a progress bar (percent of overlay frames streamed), and pending and finished tasks. Pausing stops dequeuing new work; a **Now** bake still runs immediately when you choose it from Manage. Completed rows can reveal the output file in your file manager.
 
 ### 6.7 Export OSG Graphics (ZIP)
 
@@ -409,7 +409,7 @@ Try adjusting **Decoder config** on the **Workspace and Canvas** tab (§11.1)—
 
 ### 13.5 Manage shortcuts ignored
 
-Keyboard shortcuts in the Manage player (§6) apply when that region has focus—click the video surface if keys stop responding after interacting elsewhere.
+Keyboard shortcuts in the Manage player (§6) apply when the preview has focus. Leaving tag or annotation fields restores that focus; clicking the preview surface also re-arms shortcuts if they stopped responding after other UI.
 
 ### 13.6 Moving or cloning a workspace
 

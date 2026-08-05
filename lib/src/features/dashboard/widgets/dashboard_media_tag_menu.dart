@@ -279,6 +279,11 @@ Future<void> _showBulkSemanticDialog({
   }
   final List<TagSemanticType> types = viewModel.tagSemanticTypes;
   int selectedId = types.first.id;
+  final int? rememberedId = viewModel.lastBulkSemanticTypeId;
+  if (rememberedId != null &&
+      types.any((TagSemanticType t) => t.id == rememberedId)) {
+    selectedId = rememberedId;
+  }
   if (initialSemanticTypeId != null &&
       types.any((TagSemanticType t) => t.id == initialSemanticTypeId)) {
     selectedId = initialSemanticTypeId;

@@ -1,4 +1,5 @@
 import "dart:async";
+import "dart:io";
 
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
@@ -6,6 +7,7 @@ import "package:provider/provider.dart";
 import "package:obs_clipshow/src/app/ui_scale.dart";
 import "package:obs_clipshow/src/bake/osg_bake_queue_models.dart";
 import "package:obs_clipshow/src/features/dashboard/dashboard_view_model.dart";
+import "package:obs_clipshow/src/obs/playout_record_path_utils.dart";
 import "package:obs_clipshow/src/util/reveal_file_in_folder.dart";
 
 /// Bake Queue tab: start/pause the runner, the currently running task, and
@@ -16,6 +18,30 @@ class DashboardBakeQueuePanel extends StatelessWidget {
   String _timeLabel(DateTime dt) {
     String two(int n) => n.toString().padLeft(2, "0");
     return "${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}";
+  }
+
+  Future<void> _openExportFolder(
+    BuildContext context,
+    DashboardViewModel viewModel,
+  ) async {
+    final String? workspacePath = viewModel.workspacePath;
+    if (workspacePath == null) {
+      return;
+    }
+    final String exportDir = PlayoutRecordPathUtils.normalizedOutputDir(
+      workspaceAbsolute: workspacePath,
+      settings: viewModel.playoutRecordPathsSettings,
+    );
+    try {
+      await Directory(exportDir).create(recursive: true);
+      await revealFileInFolder(exportDir);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Could not open export folder: $e")),
+        );
+      }
+    }
   }
 
   @override
@@ -42,6 +68,14 @@ class DashboardBakeQueuePanel extends StatelessWidget {
                 children: <Widget>[
                   Text("Bake Queue", style: theme.textTheme.titleMedium),
                   const Spacer(),
+                  OutlinedButton.icon(
+                    onPressed: () => unawaited(
+                      _openExportFolder(context, viewModel),
+                    ),
+                    icon: const Icon(Icons.folder_open_outlined),
+                    label: const Text("Export Folder"),
+                  ),
+                  SizedBox(width: gap8),
                   FilledButton.tonalIcon(
                     onPressed: paused
                         ? viewModel.startBakeQueue

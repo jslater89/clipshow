@@ -132,6 +132,8 @@ class DashboardViewModel extends ChangeNotifier {
   DateTime? _previewPlayerInitNotBefore;
   DashboardMediaPaneTab _mediaPaneTab = DashboardMediaPaneTab.manage;
   final List<ShelfTagEntry> _captureTags = <ShelfTagEntry>[];
+  /// Last semantic type chosen in Bulk Assign (session-only; not persisted).
+  int? _lastBulkSemanticTypeId;
   bool _obsCaptureRecording = false;
   ObsCaptureService? _obsCaptureSession;
   String? _captureStatusMessage;
@@ -256,6 +258,9 @@ class DashboardViewModel extends ChangeNotifier {
 
   List<TagSemanticType> get tagSemanticTypes =>
       _workspaceSettings?.tagSemanticTypes ?? <TagSemanticType>[];
+
+  /// Last Bulk Assign semantic type id for this dashboard session, if any.
+  int? get lastBulkSemanticTypeId => _lastBulkSemanticTypeId;
 
   List<OsgBakeRecipe> get osgBakeRecipes =>
       _workspaceSettings?.osgBakeRecipes ?? <OsgBakeRecipe>[];
@@ -1719,6 +1724,9 @@ class DashboardViewModel extends ChangeNotifier {
     final MediaRepository? repository = _mediaRepository;
     if (repository == null) {
       return;
+    }
+    if (semanticTypeId != null) {
+      _lastBulkSemanticTypeId = semanticTypeId;
     }
     await repository.bulkSetSemanticTypeForTagId(
       tagId: tagId,

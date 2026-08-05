@@ -145,12 +145,12 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   /// seek.
   ///
   /// The fix is to reopen a fresh player at the desired position (see
-  /// [_restartPlaybackFrom]).
+  /// [_reopenPlayerAt]).
   bool _reachedEnd = false;
 
   /// Paused on the last frame of the file (no clip end mark) so we avoid the
   /// platform EOS/stopped state where seeks are ignored until the player is
-  /// recreated ([_restartPlaybackFrom]).
+  /// recreated ([_reopenPlayerAt]).
   bool _naturalEndPauseApplied = false;
   bool _firstFrameReadyNotified = false;
   bool _playbackDisposed = false;
@@ -329,21 +329,9 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     // Transport bar listens via [_playbackNotifier]; do not setState on every
     // position tick — that rebuilds the video surface and causes stutter.
     // Also throttle notifier updates (~20 Hz) so 60fps sources don't rebuild
-    // the scrubber every decoder tick.
-    if (!_playbackDisposed) {
-      final bool playingChanged = state.isPlaying != _lastIsPlaying;
-      final DateTime now = DateTime.now();
-      final bool due =
-          _lastTransportNotify == null ||
-          now.difference(_lastTransportNotify!) >= _transportNotifyMinInterval;
-      if (playingChanged ||
-          state.isCompleted ||
-          !state.isInitialized ||
-          due) {
-        _playbackNotifier.value = state;
-        _lastTransportNotify = now;
-      }
-    }
+    // the scrubber every decoder tick — but always publish position/play/EOS
+    // changes so Home/seek after completion cannot leave a stale scrub bar.
+    _publishTransport(state);
     if (!state.isInitialized) {
       return;
     }
@@ -407,6 +395,30 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     }
   }
 
+  void _publishTransport(ClipPlaybackState state, {bool force = false}) {
+    if (_playbackDisposed) {
+      return;
+    }
+    final ClipPlaybackState previous = _playbackNotifier.value;
+    final bool playingChanged = state.isPlaying != previous.isPlaying;
+    final bool positionChanged = state.position != previous.position;
+    final bool completedChanged = state.isCompleted != previous.isCompleted;
+    final DateTime now = DateTime.now();
+    final bool due =
+        _lastTransportNotify == null ||
+        now.difference(_lastTransportNotify!) >= _transportNotifyMinInterval;
+    if (force ||
+        playingChanged ||
+        positionChanged ||
+        completedChanged ||
+        state.isCompleted ||
+        !state.isInitialized ||
+        due) {
+      _playbackNotifier.value = state;
+      _lastTransportNotify = now;
+    }
+  }
+
   Future<void> _freezeOnNaturalEnd(Duration duration) async {
     final ClipMediaPlayer? player = _player;
     if (player == null || !player.state.isInitialized) {
@@ -453,7 +465,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       // player at the desired position while the old one still displays.
       final Duration playFrom =
           target ?? Duration(milliseconds: widget.startTimeMs);
-      await _restartPlaybackFrom(playFrom);
+      await _reopenPlayerAt(playFrom, play: true);
     } else {
       await player.play();
     }
@@ -472,8 +484,12 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
   }
 
   /// Opens a new [ClipMediaPlayer] for the same file at [position], swaps it in
-  /// while the old player is still displaying (no black flash), then plays.
-  Future<void> _restartPlaybackFrom(Duration position) async {
+  /// while the old player is still displaying (no black flash), then optionally
+  /// plays. Used after EOS where platform seeks are ignored.
+  Future<void> _reopenPlayerAt(
+    Duration position, {
+    required bool play,
+  }) async {
     final ClipMediaPlayer newPlayer = ClipMediaPlayerFactory.create();
     try {
       await newPlayer.openFile(widget.filePath);
@@ -495,7 +511,19 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       _player = newPlayer;
       _stateSub = newPlayer.states.listen(_handlePlaybackProgress);
       _handlePlaybackProgress(newPlayer.state);
-      await newPlayer.play();
+      // Force transport to the reopen target even if the backend briefly
+      // reports the previous completed position.
+      _publishTransport(
+        newPlayer.state.copyWith(
+          position: position,
+          isCompleted: false,
+          isPlaying: false,
+        ),
+        force: true,
+      );
+      if (play) {
+        await newPlayer.play();
+      }
       if (mounted) {
         _layoutInitialized = newPlayer.state.isInitialized;
         _layoutSize = newPlayer.state.size;
@@ -507,7 +535,7 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
       }
     } catch (error, stackTrace) {
       _logger.severe(
-        "Failed to restart playback from $position: $error",
+        "Failed to reopen playback at $position: $error",
         error,
         stackTrace,
       );
@@ -543,16 +571,41 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     return next;
   }
 
+  /// After hard EOS, seeks are ignored by FVP; reopen at [target] instead.
+  Future<void> _seekOrReopenAfterEos(Duration target) async {
+    final ClipMediaPlayer? player = _player;
+    if (player == null || !player.state.isInitialized) {
+      return;
+    }
+    final bool needsReopen = _reachedEnd || player.state.isCompleted;
+    _naturalEndPauseApplied = false;
+    _reachedEnd = false;
+    if (needsReopen) {
+      await _reopenPlayerAt(target, play: false);
+    } else {
+      await player.seek(target);
+      final ClipPlaybackState after = player.state;
+      // Optimistic scrubber update when the backend is slow to emit the new
+      // position (or still reports the prior frame).
+      if (after.position != target || after.isCompleted) {
+        _publishTransport(
+          after.copyWith(position: target, isCompleted: false),
+          force: true,
+        );
+      } else {
+        _publishTransport(after, force: true);
+      }
+    }
+    _targetSeekPosition = target;
+  }
+
   Future<void> _seekToClamped(Duration position) => _enqueueSeek(() async {
     final ClipMediaPlayer? player = _player;
     if (player == null || !player.state.isInitialized) {
       return;
     }
-    _naturalEndPauseApplied = false;
-    _reachedEnd = false;
     final Duration next = _clampSeekPosition(position, player.state);
-    await player.seek(next);
-    _targetSeekPosition = next;
+    await _seekOrReopenAfterEos(next);
   });
 
   Future<void> _seekBy(Duration offset) => _enqueueSeek(() async {
@@ -560,16 +613,11 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     if (player == null || !player.state.isInitialized) {
       return;
     }
-    _naturalEndPauseApplied = false;
-    _reachedEnd = false;
-
     final Duration next = _clampSeekPosition(
       player.state.position + offset,
       player.state,
     );
-
-    await player.seek(next);
-    _targetSeekPosition = next;
+    await _seekOrReopenAfterEos(next);
   });
 
   Future<void> _seekToStart() => _enqueueSeek(() async {
@@ -577,11 +625,8 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     if (player == null || !player.state.isInitialized) {
       return;
     }
-    _naturalEndPauseApplied = false;
-    _reachedEnd = false;
     final Duration target = Duration(milliseconds: widget.startTimeMs);
-    await player.seek(target);
-    _targetSeekPosition = target;
+    await _seekOrReopenAfterEos(target);
   });
 
   Future<void> _seekToEnd() => _enqueueSeek(() async {
@@ -589,14 +634,14 @@ class _ClipPlayerViewState extends State<ClipPlayerView> {
     if (player == null || !player.state.isInitialized) {
       return;
     }
-    _naturalEndPauseApplied = false;
-    _reachedEnd = false;
     final int? clipEndMs = widget.endTimeMs;
-    if (clipEndMs != null) {
-      await player.seek(Duration(milliseconds: clipEndMs));
-    } else {
-      await player.seek(player.state.duration);
+    final Duration target = clipEndMs != null
+        ? Duration(milliseconds: clipEndMs)
+        : player.state.duration;
+    if (target <= Duration.zero && clipEndMs == null) {
+      return;
     }
+    await _seekOrReopenAfterEos(target);
     // At the clip/file end — play() should restart from clip start, not replay
     // from end, so clear the target rather than setting it to the end position.
     _targetSeekPosition = null;

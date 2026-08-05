@@ -27,10 +27,58 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
   bool _handledSavedAutocompleteSelection = false;
   final TextEditingController _annotationsController = TextEditingController();
   final FocusNode _annotationsFocus = FocusNode();
+  FocusNode? _tagInputFocus;
+  FocusNode? _savedTagInputFocus;
   String? _lastAnnotationsItemKey;
+
+  bool _anyEditableHasFocus() =>
+      (_tagInputFocus?.hasFocus ?? false) ||
+      (_savedTagInputFocus?.hasFocus ?? false) ||
+      _annotationsFocus.hasFocus;
+
+  void _bindTagInputFocus(FocusNode focusNode) {
+    if (identical(_tagInputFocus, focusNode)) {
+      return;
+    }
+    _tagInputFocus?.removeListener(_onEditableFocusChange);
+    _tagInputFocus = focusNode;
+    _tagInputFocus!.addListener(_onEditableFocusChange);
+  }
+
+  void _bindSavedTagInputFocus(FocusNode focusNode) {
+    if (identical(_savedTagInputFocus, focusNode)) {
+      return;
+    }
+    _savedTagInputFocus?.removeListener(_onEditableFocusChange);
+    _savedTagInputFocus = focusNode;
+    _savedTagInputFocus!.addListener(_onEditableFocusChange);
+  }
+
+  void _onEditableFocusChange() {
+    if (!mounted || _anyEditableHasFocus()) {
+      return;
+    }
+    // Buttons and other chrome can take focus on the same pointer event that
+    // left the field; reclaim preview focus after that settles.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _anyEditableHasFocus()) {
+        return;
+      }
+      widget.onPreviewFocusRequested();
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _annotationsFocus.addListener(_onEditableFocusChange);
+  }
 
   @override
   void dispose() {
+    _tagInputFocus?.removeListener(_onEditableFocusChange);
+    _savedTagInputFocus?.removeListener(_onEditableFocusChange);
+    _annotationsFocus.removeListener(_onEditableFocusChange);
     _annotationsController.dispose();
     _annotationsFocus.dispose();
     super.dispose();
@@ -254,6 +302,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                               VoidCallback onFieldSubmitted,
                             ) {
                               _activeTagInputController = textEditingController;
+                              _bindTagInputFocus(focusNode);
                               return TextField(
                                 controller: textEditingController,
                                 focusNode: focusNode,
@@ -261,10 +310,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                                   labelText: "Add Tag",
                                   border: OutlineInputBorder(),
                                 ),
-                                onTapOutside: (_) {
-                                  focusNode.unfocus();
-                                  widget.onPreviewFocusRequested();
-                                },
+                                onTapOutside: (_) => focusNode.unfocus(),
                                 onSubmitted: (_) {
                                   onFieldSubmitted();
                                   if (_handledAutocompleteSelection) {
@@ -288,16 +334,6 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                         _submitTag(viewModel, controller);
                       },
                       child: const Text("Add"),
-                    ),
-                    SizedBox(width: gap8),
-                    OutlinedButton.icon(
-                      onPressed: !selectedHasUserTags
-                          ? null
-                          : () => unawaited(
-                              viewModel.mergeSelectedItemTagsIntoSaved(),
-                            ),
-                      icon: const Icon(Icons.arrow_downward),
-                      label: const Text("saved"),
                     ),
                     SizedBox(width: gap8),
                     OutlinedButton.icon(
@@ -359,6 +395,16 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                       label: Text(
                         viewModel.hasActiveItemFilters ? "filtered" : "all",
                       ),
+                    ),
+                    SizedBox(width: gap8),
+                    OutlinedButton.icon(
+                      onPressed: !selectedHasUserTags
+                          ? null
+                          : () => unawaited(
+                              viewModel.mergeSelectedItemTagsIntoSaved(),
+                            ),
+                      icon: const Icon(Icons.arrow_downward),
+                      label: const Text("saved"),
                     ),
                     SizedBox(width: gap8),
                     OutlinedButton.icon(
@@ -435,6 +481,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                             ) {
                               _activeSavedTagInputController =
                                   textEditingController;
+                              _bindSavedTagInputFocus(focusNode);
                               return TextField(
                                 controller: textEditingController,
                                 focusNode: focusNode,
@@ -442,10 +489,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                                   labelText: "Add Saved Tag",
                                   border: OutlineInputBorder(),
                                 ),
-                                onTapOutside: (_) {
-                                  focusNode.unfocus();
-                                  widget.onPreviewFocusRequested();
-                                },
+                                onTapOutside: (_) => focusNode.unfocus(),
                                 onSubmitted: (_) {
                                   onFieldSubmitted();
                                   if (_handledSavedAutocompleteSelection) {
@@ -573,10 +617,7 @@ class _DashboardTagPanelState extends State<DashboardTagPanel> {
                       border: OutlineInputBorder(),
                     ),
                     onChanged: (_) => setState(() {}),
-                    onTapOutside: (_) {
-                      widget.onPreviewFocusRequested();
-                      _annotationsFocus.unfocus();
-                    },
+                    onTapOutside: (_) => _annotationsFocus.unfocus(),
                   ),
                 ),
                 SizedBox(height: scaleDimension(context, 8)),

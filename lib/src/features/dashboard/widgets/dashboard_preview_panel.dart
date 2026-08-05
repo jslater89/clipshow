@@ -127,7 +127,10 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
             const Text("Preview"),
             SizedBox(height: gap12),
             Expanded(
-              child: GestureDetector(
+              child: Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: (_) => widget.focusNode.requestFocus(),
+                child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onTap: () => widget.focusNode.requestFocus(),
                 child: ClipRRect(
@@ -307,7 +310,10 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                       if (!state.isInitialized) {
                                         return const SizedBox.shrink();
                                       }
-                                      return ClipPlayerTransportBar(
+                                      return Focus(
+                                        canRequestFocus: false,
+                                        descendantsAreFocusable: false,
+                                        child: ClipPlayerTransportBar(
                                         playbackListenable: previewPlayback,
                                         startTimeMs: previewStartMs,
                                         endTimeMs: previewEndMs,
@@ -322,6 +328,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                                             _previewPlayerController.pause,
                                         onResumeAfterScrub:
                                             _previewPlayerController.play,
+                                      ),
                                       );
                                     },
                                   ),
@@ -331,9 +338,13 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   ),
                 ),
               ),
+              ),
             ),
             SizedBox(height: gap12),
-            Wrap(
+            Focus(
+              canRequestFocus: false,
+              descendantsAreFocusable: false,
+              child: Wrap(
               spacing: gap8,
               runSpacing: gap8,
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -624,6 +635,7 @@ class _DashboardPreviewPanelState extends State<DashboardPreviewPanel> {
                   label: const Text("Playout"),
                 ),
               ],
+            ),
             ),
           ],
         ),
