@@ -150,6 +150,9 @@ static void my_application_activate(GApplication* application) {
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
 
+  // TODO: remove once Impeller is working with fvp.
+  fl_dart_project_set_enable_impeller(project, FALSE);
+
   FlView* view = fl_view_new(project);
   apply_transparent_view_settings(view);
   gtk_widget_show(GTK_WIDGET(view));
